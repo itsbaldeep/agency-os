@@ -12,3 +12,5 @@
 0 */12 * * * /home/agency/agency-os/scripts/run-job.sh 6 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
 # Daily Discord digest — 09:00 IST (03:30 UTC)
 30 3 * * * /home/agency/agency-os/scripts/run-job.sh 7 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
+# Self-deploy agency-os — every 2 minutes
+*/2 * * * * /home/agency/agency-os/scripts/run-job.sh 8 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1

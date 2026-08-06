@@ -4,12 +4,11 @@ After=network.target docker.service
 Wants=docker.service
 
 [Service]
+EnvironmentFile=/etc/agency/opencode.env
 Type=simple
 User=agency
 Group=agency
 WorkingDirectory=/home/agency/projects
-Environment="OPENCODE_SERVER_PASSWORD=baldeep@7322"
-Environment="OPENCODE_SERVER_USERNAME=agency"
 ExecStart=/home/agency/.opencode/bin/opencode web --hostname 100.64.0.1 --port 4096
 Restart=on-failure
 RestartSec=10
