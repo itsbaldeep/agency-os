@@ -212,6 +212,8 @@ def handle_propose_fix(task):
     repo = params.get("repo", "")
     description = params.get("description", "")
     base_branch = params.get("base", "main")
+    model = params.get("model") or "opencode/deepseek-v4-flash"
+    timeout_s = int(params.get("timeout") or 180)
 
     if repo not in ALLOWED_REPOS:
         return {"ok": False, "error": f"Repo '{repo}' is not on the allowed list: {sorted(ALLOWED_REPOS)}"}
@@ -250,8 +252,8 @@ def handle_propose_fix(task):
         oc_proc = subprocess.run(
             [opencode_bin, "run", "--dir", repo_path, ponytail_description,
              "--dangerously-skip-permissions", "--format", "json",
-             "--model", "opencode/deepseek-v4-flash"],
-            capture_output=True, text=True, timeout=180, env=oc_env,
+             "--model", model],
+            capture_output=True, text=True, timeout=timeout_s, env=oc_env,
         )
         if oc_proc.returncode != 0:
             out_snip = oc_proc.stdout[:500]
@@ -352,6 +354,8 @@ def handle_agent_task(task):
     params = task["params"] or {}
     repo = params.get("repo", "")
     prompt = (params.get("prompt") or "").strip()
+    model = params.get("model") or "opencode/deepseek-v4-flash"
+    timeout_s = int(params.get("timeout") or 300)
 
     if repo not in ALLOWED_REPOS:
         return {"ok": False, "error": f"Repo '{repo}' is not on the allowed list: {sorted(ALLOWED_REPOS)}"}
@@ -369,7 +373,7 @@ def handle_agent_task(task):
     proc = subprocess.Popen(
         ["/home/agency/.opencode/bin/opencode", "run", prompt,
          "--auto",
-         "--model", "opencode/deepseek-v4-flash"],
+         "--model", model],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         cwd=repo_path, env=oc_env,
     )
@@ -380,11 +384,11 @@ def handle_agent_task(task):
                 f.write(line)
                 f.flush()
                 lines.append(line)
-            proc.wait(timeout=300)
+            proc.wait(timeout=timeout_s)
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait()
-        return {"ok": False, "error": "agent task timed out after 300s"}
+        return {"ok": False, "error": f"agent task timed out after {timeout_s}s"}
     out = "".join(lines).strip()
     if not out:
         out = f"(opencode exited {proc.returncode}, no output)"
