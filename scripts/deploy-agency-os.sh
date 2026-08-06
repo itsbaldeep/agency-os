@@ -43,9 +43,22 @@ sudo /usr/bin/systemctl restart agency-worker agency-bot
 sleep 3
 if ! systemctl is-active --quiet agency-worker || ! systemctl is-active --quiet agency-bot; then
   git reset --hard "$LOCAL" --quiet
-  sudo /usr/bin/systemctl restart agency-worker agency-bot
+# drain: give in-flight tasks up to 3 min to finish before restarting
+DRAIN_NOTE=""
+if [ -n "$(grep POSTGRES_PASSWORD "$REPO/.env" 2>/dev/null)" ]; then
+  export PGPASSWORD=$(grep POSTGRES_PASSWORD "$REPO/.env" | cut -d= -f2)
+  for _ in $(seq 1 18); do
+    N=$(psql -h 100.64.0.1 -U agency -d agencyos -t -A -c \
+        "SELECT count(*) FROM tasks WHERE status='running'" 2>/dev/null)
+    [ -z "$N" ] || [ "$N" = "0" ] && { N=""; break; }  # DB down or idle: don't hold the restart
+    sleep 10
+  done
+  [ -n "$N" ] && DRAIN_NOTE=" ⚠ $N task(s) still running after 180s — restarted anyway"
+fi
+
+sudo /usr/bin/systemctl restart agency-worker agency-bot
   notify "🔥 deploy ROLLED BACK ($SUBJECT): service failed to start"
   exit 1
 fi
 
-notify "🚀 deployed agency-os: $SUBJECT"
+notify "🚀 deployed agency-os: $SUBJECT$DRAIN_NOTE"
