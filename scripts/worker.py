@@ -358,27 +358,39 @@ def handle_agent_task(task):
     if not prompt:
         return {"ok": False, "error": "prompt is required"}
 
-    import subprocess
+    import subprocess, os as _os
     repo_path = f"/home/agency/projects/{repo}"
+    log_path = f"/home/agency/agency-os/logs/task-{task['id']}.log"
     oc_env = {**os.environ, "HOME": "/home/agency",
               "OPENAI_BASE_URL": ZEN_URL.rsplit("/chat", 1)[0],
               "OPENAI_API_KEY": ZEN_KEY, "NO_COLOR": "1"}
     oc_env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
+    _os.makedirs("/home/agency/agency-os/logs", exist_ok=True)
+    proc = subprocess.Popen(
+        ["/home/agency/.opencode/bin/opencode", "run", prompt,
+         "--auto",
+         "--model", "opencode/deepseek-v4-flash"],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        cwd=repo_path, env=oc_env,
+    )
+    lines = []
     try:
-        oc = subprocess.run(
-            ["/home/agency/.opencode/bin/opencode", "run", prompt,
-             "--auto",
-             "--model", "opencode/deepseek-v4-flash"],
-            capture_output=True, text=True, timeout=300, cwd=repo_path, env=oc_env,
-        )
-        out = (oc.stdout or "").strip() or (oc.stderr or "").strip()
-        if not out:
-            out = f"(opencode exited {oc.returncode}, no output)"
-        if oc.returncode != 0:
-            return {"ok": False, "error": out[-500:]}
-        return {"ok": True, "content": out[-1500:]}
+        with open(log_path, "w") as f:
+            for line in proc.stdout:
+                f.write(line)
+                f.flush()
+                lines.append(line)
+            proc.wait(timeout=300)
     except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
         return {"ok": False, "error": "agent task timed out after 300s"}
+    out = "".join(lines).strip()
+    if not out:
+        out = f"(opencode exited {proc.returncode}, no output)"
+    if proc.returncode != 0:
+        return {"ok": False, "error": out[-500:]}
+    return {"ok": True, "content": out[-1500:]}
 
 
 def slug(text):
