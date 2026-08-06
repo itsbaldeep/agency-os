@@ -362,19 +362,21 @@ def handle_agent_task(task):
     repo_path = f"/home/agency/projects/{repo}"
     oc_env = {**os.environ, "HOME": "/home/agency",
               "OPENAI_BASE_URL": ZEN_URL.rsplit("/chat", 1)[0],
-              "OPENAI_API_KEY": ZEN_KEY}
+              "OPENAI_API_KEY": ZEN_KEY, "NO_COLOR": "1"}
     oc_env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
     try:
         oc = subprocess.run(
             ["/home/agency/.opencode/bin/opencode", "run", prompt,
-             "--dangerously-skip-permissions", "--format", "text",
+             "--auto",
              "--model", "opencode/deepseek-v4-flash"],
             capture_output=True, text=True, timeout=300, cwd=repo_path, env=oc_env,
         )
         out = (oc.stdout or "").strip() or (oc.stderr or "").strip()
         if not out:
             out = f"(opencode exited {oc.returncode}, no output)"
-        return {"ok": oc.returncode == 0, "content": out[-1500:]}
+        if oc.returncode != 0:
+            return {"ok": False, "error": out[-500:]}
+        return {"ok": True, "content": out[-1500:]}
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": "agent task timed out after 300s"}
 
