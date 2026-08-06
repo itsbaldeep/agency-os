@@ -197,11 +197,26 @@ async def fix_cmd(ctx, repo: str, *, description: str):
     base = "main"
     if "@" in repo:
         repo, base = repo.split("@", 1)
+    model = timeout = None
+    words = description.split(" ")
+    for front in ("model=", "timeout="):
+        if words and words[0].startswith(front):
+            val, words = words[0][len(front):], words[1:]
+            if front == "model=":
+                model = val
+            else:
+                timeout = int(val)
+    description = " ".join(words)
+    params = {"repo": repo, "base": base, "description": description,
+              "source": "discord", "requested_by": str(ctx.author)}
+    if model:
+        params["model"] = model
+    if timeout:
+        params["timeout"] = timeout
     rows = q(
         """INSERT INTO tasks (type, status, params, triggered_by)
            VALUES ('propose_fix', 'queued', %s, 'discord') RETURNING id""",
-        (Json({"repo": repo, "base": base, "description": description,
-               "source": "discord", "requested_by": str(ctx.author)}),),
+        (Json(params),),
     )
     await ctx.reply(f"🔧 queued **fix task {rows[0]['id']}** on `{repo}` "
                     f"(base `{base}`)\n> {description[:180]}\n"
@@ -214,11 +229,26 @@ async def run_cmd(ctx, repo: str, *, prompt: str):
     No git ops: worker runs opencode headlessly and returns the raw output."""
     if not guard(ctx):
         return
+    words = prompt.split(" ")
+    model = timeout = None
+    for front in ("model=", "timeout="):
+        if words and words[0].startswith(front):
+            val, words = words[0][len(front):], words[1:]
+            if front == "model=":
+                model = val
+            else:
+                timeout = int(val)
+    prompt = " ".join(words)
+    params = {"repo": repo, "prompt": prompt, "source": "discord",
+              "requested_by": str(ctx.author)}
+    if model:
+        params["model"] = model
+    if timeout:
+        params["timeout"] = timeout
     rows = q(
         """INSERT INTO tasks (type, status, params, triggered_by)
            VALUES ('agent_task', 'queued', %s, 'discord') RETURNING id""",
-        (Json({"repo": repo, "prompt": prompt, "source": "discord",
-               "requested_by": str(ctx.author)}),),
+        (Json(params),),
     )
     await ctx.reply(f"🤖 queued **agent task {rows[0]['id']}** on `{repo}`\n> {prompt[:180]}")
 
@@ -228,8 +258,8 @@ async def help_cmd(ctx):
     if not guard(ctx):
         return
     await ctx.reply(
-        "`!fix <repo>[@base] <description>` — dev task → PR\n"
-        "`!run <repo> <prompt>` — run opencode in a repo (no git ops)\n"
+        "`!fix <repo>[@base] <description>` — dev task → PR (prefixes: model= timeout=)\n"
+        "`!run <repo> <prompt>` — run opencode in a repo (no git ops; prefixes: model= timeout=)\n"
         "`!task <spec>` · `!task <type>: <spec>` · `!queue` · `!status`\n"
         "`!approvals` · `!approve <id>` · `!reject <id> [reason]` · `!fail <id>`"
     )
