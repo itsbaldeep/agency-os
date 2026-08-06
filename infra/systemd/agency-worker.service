@@ -1,0 +1,17 @@
+[Unit]
+Description=Agency OS Task Worker
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agency
+WorkingDirectory=/home/agency/agency-os
+ExecStart=/usr/bin/python3 /home/agency/agency-os/scripts/worker.py
+Restart=always
+RestartSec=3
+OOMScoreAdjust=-500
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

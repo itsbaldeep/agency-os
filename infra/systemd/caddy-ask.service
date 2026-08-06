@@ -1,0 +1,15 @@
+[Unit]
+Description=Caddy on-demand TLS allow-list
+After=network.target
+
+[Service]
+Type=simple
+User=agency
+WorkingDirectory=/home/agency/agency-os
+Environment="POSTGRES_PASSWORD=n73tTMZ1"
+ExecStart=/usr/bin/python3 /home/agency/agency-os/caddy-ask.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

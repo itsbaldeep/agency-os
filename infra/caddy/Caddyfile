@@ -1,0 +1,8 @@
+{
+    email admin@deployden.tech
+    on_demand_tls {
+        ask http://127.0.0.1:9999/check
+    }
+}
+
+import /home/agency/agency-os/caddy-apps/*.caddy

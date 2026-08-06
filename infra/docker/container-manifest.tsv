@@ -1,0 +1,14 @@
+hearth-web-admin	hearth-web-dev:latest
+hearth-web-b2b	hearth-web-dev:latest
+hearth-web-customer	hearth-web-dev:latest
+hearth-api	hearth-api:latest
+hearth-public-api	hearth-public-api:latest
+hearth-db	postgres:16-alpine
+hearth-redis	redis:7-alpine
+hearth-clickhouse	clickhouse/clickhouse-server:24.3-alpine
+hearth-storage	minio/minio:latest
+agency-dashboard	dashboard-dashboard
+agency-adminer	adminer:latest
+deployden-site	deployden-site
+agency-clickhouse	clickhouse/clickhouse-server:24-alpine
+agency-postgres	postgres:16-alpine
