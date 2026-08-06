@@ -362,7 +362,7 @@ def handle_agent_task(task):
     if not prompt:
         return {"ok": False, "error": "prompt is required"}
 
-    import subprocess, os as _os
+    import subprocess, os as _os, re
     repo_path = f"/home/agency/projects/{repo}"
     log_path = f"/home/agency/agency-os/logs/task-{task['id']}.log"
     oc_env = {**os.environ, "HOME": "/home/agency",
@@ -389,7 +389,7 @@ def handle_agent_task(task):
         proc.kill()
         proc.wait()
         return {"ok": False, "error": f"agent task timed out after {timeout_s}s"}
-    out = "".join(lines).strip()
+    out = re.sub(r'\x1b\[[0-9;]*m', '', "".join(lines)).strip()
     if not out:
         out = f"(opencode exited {proc.returncode}, no output)"
     if proc.returncode != 0:
@@ -1822,7 +1822,7 @@ def poll():
             content = result.get("content", "")
             cur.execute(
                 "UPDATE tasks SET status='done', prompt_tokens=%s, completion_tokens=%s, cost=%s, result_ref=%s, finished_at=now() WHERE id=%s",
-                (result["prompt_tokens"], result["completion_tokens"], result["cost"], content[:2000], tid)
+                (result["prompt_tokens"], result["completion_tokens"], result["cost"], content[:20000], tid)
             )
             # Link task_id to content_items row (created by handler, body already stored)
             _ci_id = result.get("content_item_id")
