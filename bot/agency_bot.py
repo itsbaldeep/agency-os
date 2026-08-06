@@ -256,14 +256,9 @@ async def push_loop():
             for r in rows:
                 _last_task_seen = max(_last_task_seen, r["finished_at"])
                 if r["status"] in DONE_STATES:
-                    pr = ""
-                    try:
-                        import json as _json
-                        ref = _json.loads(r.get("result_ref") or "{}")
-                        if ref.get("pr_url"):
-                            pr = f"\n🔗 {ref['pr_url']}"
-                    except Exception:
-                        pass
+                    import re as _re
+                    m = _re.search(r"https://github\.com/\S+/pull/\d+", r.get("result_ref") or "")
+                    pr = f"\n🔗 {m.group(0)}" if m else ""
                     await channel.send(
                         f"✅ **task {r['id']}** done (${float(r['cost'] or 0):.4f}) "
                         f"— {r['spec'][:120]}{pr}")
