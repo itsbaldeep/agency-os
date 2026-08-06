@@ -18,31 +18,55 @@ notify() {  # best-effort Discord webhook, never fatal
 git fetch origin --quiet || { echo "fetch failed"; exit 1; }
 LOCAL=$(git rev-parse HEAD)
 REMOTE=$(git rev-parse origin/main)
-[ "$LOCAL" = "$REMOTE" ] && { echo "up to date"; exit 0; }
-
-# refuse to deploy over local edits — they'd be silently clobbered
-if [ -n "$(git status --porcelain)" ]; then
-  notify "🚫 deploy skipped: uncommitted local changes in agency-os (commit or stash them)"
-  exit 1
-fi
-
 SUBJECT=$(git log -1 --format='%h %s' "$REMOTE")
-git merge --ff-only origin/main --quiet || { notify "🚫 deploy failed: non-fast-forward"; exit 1; }
 
-# compile gate: never restart into broken python
-if ! python3 -m py_compile scripts/worker.py scripts/*.py 2>/tmp/deploy-err.txt || \
-   ! bot/.venv/bin/python -m py_compile bot/agency_bot.py 2>>/tmp/deploy-err.txt; then
-  git reset --hard "$LOCAL" --quiet
-  notify "🔥 deploy ROLLED BACK ($SUBJECT): compile error — $(head -c 300 /tmp/deploy-err.txt)"
-  exit 1
+# uncommitted local edits: auto-commit pure mode changes / infra/ drift,
+# but refuse to deploy over any other edits — they'd be silently clobbered
+if [ -n "$(git status --porcelain)" ]; then
+  AUTO=1
+  while IFS= read -r line; do
+    code="${line:0:2}"
+    path="${line:3}"
+    case "$path" in infra/*) continue;; esac
+    if [ "$code" = "??" ]; then AUTO=0; break; fi           # untracked outside infra/
+    [ -n "$(git diff --numstat -- "$path")" ] && { AUTO=0; break; }  # real content change
+  done < <(git status --porcelain)
+  if [ "$AUTO" = 1 ]; then
+    git add -A && git commit -m "auto: state drift" --quiet && git push --quiet
+  else
+    notify "🚫 deploy skipped: uncommitted local changes in agency-os (commit or stash them)"
+    exit 1
+  fi
 fi
 
-sudo /usr/bin/systemctl restart agency-worker agency-bot
+MERGED=0
+if [ "$LOCAL" != "$REMOTE" ]; then
+  git merge --ff-only origin/main --quiet || { notify "🚫 deploy failed: non-fast-forward"; exit 1; }
+  chmod +x scripts/*.sh
 
-# verify both came up; if not, roll back and restart again
-sleep 3
-if ! systemctl is-active --quiet agency-worker || ! systemctl is-active --quiet agency-bot; then
-  git reset --hard "$LOCAL" --quiet
+  # compile gate: never restart into broken python
+  if ! python3 -m py_compile scripts/worker.py scripts/*.py 2>/tmp/deploy-err.txt || \
+     ! bot/.venv/bin/python -m py_compile bot/agency_bot.py 2>>/tmp/deploy-err.txt; then
+    git reset --hard "$LOCAL" --quiet
+    notify "🔥 deploy ROLLED BACK ($SUBJECT): compile error — $(head -c 300 /tmp/deploy-err.txt)"
+    exit 1
+  fi
+  MERGED=1
+fi
+
+# restart when newly merged, or when the running worker predates the last change to scripts/ or bot/
+NEED=0
+if [ "$MERGED" = 1 ]; then
+  NEED=1
+else
+  LAST=$(git log -1 --format=%ct -- scripts/ bot/)
+  if [ -n "$LAST" ]; then
+    WORKER_START=$(systemctl show agency-worker -p ActiveEnterTimestamp --value)
+    [ -n "$WORKER_START" ] && [ "$(date -d "$WORKER_START" +%s)" -lt "$LAST" ] && NEED=1
+  fi
+fi
+[ "$NEED" = 0 ] && { echo "up to date"; exit 0; }
+
 # drain: give in-flight tasks up to 3 min to finish before restarting
 DRAIN_NOTE=""
 if [ -n "$(grep POSTGRES_PASSWORD "$REPO/.env" 2>/dev/null)" ]; then
@@ -57,6 +81,12 @@ if [ -n "$(grep POSTGRES_PASSWORD "$REPO/.env" 2>/dev/null)" ]; then
 fi
 
 sudo /usr/bin/systemctl restart agency-worker agency-bot
+
+# verify both came up; if not, roll back and restart again
+sleep 3
+if ! systemctl is-active --quiet agency-worker || ! systemctl is-active --quiet agency-bot; then
+  [ "$MERGED" = 1 ] && git reset --hard "$LOCAL" --quiet
+  sudo /usr/bin/systemctl restart agency-worker agency-bot
   notify "🔥 deploy ROLLED BACK ($SUBJECT): service failed to start"
   exit 1
 fi
