@@ -1,0 +1,13 @@
+title = "Agency OS gitleaks config"
+
+[allowlist]
+  description = "Known false positives — gitignored dev artifacts, not real secrets"
+  paths = [
+    '''\.next/.*''',
+    '''node_modules/.*''',
+    '''\.git/.*''',
+    '''\.env''',
+    '''\.env\..*''',
+    '''certificates/.*''',
+    '''\.terragrunt-cache/.*''',
+  ]

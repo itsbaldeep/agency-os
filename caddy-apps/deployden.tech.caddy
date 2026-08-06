@@ -1,0 +1,7 @@
+deployden.tech {
+    reverse_proxy 127.0.0.1:3014
+}
+
+www.deployden.tech {
+    redir https://deployden.tech{uri} permanent
+}

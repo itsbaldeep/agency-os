@@ -1,0 +1,13 @@
+.env
+bot/.env
+*.env
+!*.env.example
+data/
+backups/
+logs/
+__pycache__/
+bot/.venv/
+node_modules/
+*.db
+*.db-shm
+*.db-wal

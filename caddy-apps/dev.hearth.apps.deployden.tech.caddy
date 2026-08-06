@@ -1,0 +1,3 @@
+dev.hearth.apps.deployden.tech {
+    reverse_proxy 100.64.0.1:4001
+}

@@ -1,0 +1,282 @@
+#!/usr/bin/env python3
+"""
+agency_bot.py — Discord steering bot for Agency OS.
+
+Two-way bridge: connects OUTBOUND to Discord's gateway (works from behind
+the tailnet, zero exposed ports) and reads/writes the same Postgres tables
+the worker and approval-executor already poll.
+
+Commands (in the configured channel only):
+  !task <spec>              queue a task with the default type
+  !task <type>: <spec>      queue a task with an explicit type
+  !queue                    show queued/running tasks
+  !status                   24h summary: tasks by status, spend
+  !approvals                list pending approvals
+  !approve <id>             mark an approval approved (executor applies it)
+  !reject <id> [reason]     mark an approval rejected
+  !fail <task_id>           show the error text of a failed task
+
+Push notifications (no polling by you):
+  - posts when a task finishes (with cost) or fails (with error)
+  - posts when a new approval appears, with its id ready for !approve
+
+Env (see /etc/agency/bot.env):
+  DISCORD_TOKEN, DISCORD_CHANNEL_ID, OWNER_ID
+  PGHOST, PGUSER, PGPASSWORD, PGDATABASE
+  DEFAULT_TASK_TYPE      (must be a type worker.py dispatches on)
+  APPROVAL_APPROVED_STATUS / APPROVAL_REJECTED_STATUS
+                         (must match what approval-executor.sh looks for;
+                          defaults: approved / rejected)
+"""
+
+import os
+import asyncio
+import datetime as dt
+
+import discord
+from discord.ext import commands
+import psycopg2
+import psycopg2.extras
+from psycopg2.extras import Json
+
+CHANNEL_ID = int(os.environ["DISCORD_CHANNEL_ID"])
+OWNER_ID = int(os.environ.get("OWNER_ID", "0"))
+DEFAULT_TYPE = os.environ.get("DEFAULT_TASK_TYPE", "generate_draft")
+ST_APPROVED = os.environ.get("APPROVAL_APPROVED_STATUS", "approved")
+ST_REJECTED = os.environ.get("APPROVAL_REJECTED_STATUS", "rejected")
+DONE_STATES = ("completed", "done", "success")
+FAIL_STATES = ("failed", "error")
+
+
+def q(sql, args=(), fetch=True):
+    """One short-lived connection per query: simple and stale-proof."""
+    with psycopg2.connect(
+        host=os.environ.get("PGHOST", "100.64.0.1"),
+        user=os.environ.get("PGUSER", "agency"),
+        password=os.environ["PGPASSWORD"],
+        dbname=os.environ.get("PGDATABASE", "agencyos"),
+        connect_timeout=10,
+    ) as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql, args)
+            return cur.fetchall() if fetch else cur.rowcount
+
+
+intents = discord.Intents.default()
+intents.message_content = True
+bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
+
+# high-water marks for the push loop
+_last_task_seen = dt.datetime.now(dt.timezone.utc)
+_known_approvals: set = set()
+_primed = False
+
+
+def guard(ctx) -> bool:
+    if ctx.channel.id != CHANNEL_ID:
+        return False
+    if OWNER_ID and ctx.author.id != OWNER_ID:
+        return False
+    return True
+
+
+@bot.command(name="task")
+async def task_cmd(ctx, *, spec: str):
+    if not guard(ctx):
+        return
+    ttype = DEFAULT_TYPE
+    first, _, rest = spec.partition(" ")
+    if first.endswith(":") and len(first) > 1:
+        ttype, spec = first[:-1], rest.strip()
+    rows = q(
+        """INSERT INTO tasks (type, status, params, triggered_by)
+           VALUES (%s, 'queued', %s, 'discord') RETURNING id""",
+        (ttype, Json({"spec": spec, "source": "discord",
+                      "requested_by": str(ctx.author)})),
+    )
+    await ctx.reply(f"🧾 queued **task {rows[0]['id']}** (`{ttype}`)\n> {spec[:180]}")
+
+
+@bot.command(name="queue")
+async def queue_cmd(ctx):
+    if not guard(ctx):
+        return
+    rows = q("""SELECT id, type, status,
+                       COALESCE(params->>'spec','') AS spec, created_at
+                FROM tasks WHERE status IN ('queued','running')
+                ORDER BY id LIMIT 15""")
+    if not rows:
+        await ctx.reply("📭 queue is empty — feed me with `!task <spec>`")
+        return
+    lines = [f"`{r['id']}` **{r['status']}** {r['type']} — {r['spec'][:70]}"
+             for r in rows]
+    await ctx.reply("**Queue**\n" + "\n".join(lines))
+
+
+@bot.command(name="status")
+async def status_cmd(ctx):
+    if not guard(ctx):
+        return
+    rows = q("""SELECT status, count(*) AS n, COALESCE(sum(cost),0) AS cost
+                FROM tasks WHERE created_at > now() - interval '24 hours'
+                GROUP BY status ORDER BY n DESC""")
+    pend = q("SELECT count(*) AS n FROM approvals WHERE status = 'pending'")
+    total_cost = sum(float(r["cost"]) for r in rows)
+    lines = [f"**{r['status']}**: {r['n']}" for r in rows] or ["no tasks in 24h"]
+    lines.append(f"💸 24h spend: ${total_cost:.4f}")
+    lines.append(f"📋 approvals pending: {pend[0]['n']}")
+    await ctx.reply("**Status (24h)**\n" + "\n".join(lines))
+
+
+@bot.command(name="approvals")
+async def approvals_cmd(ctx):
+    if not guard(ctx):
+        return
+    rows = q("""SELECT * FROM approvals WHERE status = 'pending'
+                ORDER BY id DESC LIMIT 10""")
+    if not rows:
+        await ctx.reply("✅ nothing pending")
+        return
+    import json as _json
+    lines = []
+    for r in rows:
+        payload = r.get("payload") or {}
+        gist = (payload.get("title") or payload.get("summary")
+                or payload.get("subdomain") or _json.dumps(payload)[:80])
+        age = (dt.datetime.now(dt.timezone.utc) - r["requested_at"]).days
+        lines.append(f"`{r['id']}` **{r['type']}** — {str(gist)[:80]} ({age}d old)")
+    await ctx.reply("**Pending approvals** — `!approve <id>` / `!reject <id>`\n"
+                    + "\n".join(lines))
+
+
+@bot.command(name="approve")
+async def approve_cmd(ctx, approval_id: int):
+    if not guard(ctx):
+        return
+    n = q("""UPDATE approvals SET status=%s, decided_at=now()
+             WHERE id=%s AND status='pending'""",
+          (ST_APPROVED, approval_id), fetch=False)
+    await ctx.reply(f"✅ approval {approval_id} → {ST_APPROVED} "
+                    f"(executor applies within 60s)" if n else
+                    f"⚠️ approval {approval_id} not found or not pending")
+
+
+@bot.command(name="reject")
+async def reject_cmd(ctx, approval_id: int, *, reason: str = ""):
+    if not guard(ctx):
+        return
+    n = q("""UPDATE approvals SET status=%s, decided_at=now(), note=%s
+             WHERE id=%s AND status='pending'""",
+          (ST_REJECTED, reason or None, approval_id), fetch=False)
+    msg = f"🛑 approval {approval_id} → {ST_REJECTED}"
+    if reason:
+        msg += f" — {reason}"
+    await ctx.reply(msg if n else f"⚠️ approval {approval_id} not found or not pending")
+
+
+@bot.command(name="fail")
+async def fail_cmd(ctx, task_id: int):
+    if not guard(ctx):
+        return
+    rows = q("SELECT id, type, status, error FROM tasks WHERE id=%s", (task_id,))
+    if not rows:
+        await ctx.reply("not found")
+        return
+    r = rows[0]
+    await ctx.reply(f"task `{r['id']}` ({r['type']}, {r['status']})\n"
+                    f"```{(r['error'] or 'no error recorded')[:1500]}```")
+
+
+
+@bot.command(name="fix")
+async def fix_cmd(ctx, repo: str, *, description: str):
+    """!fix <repo>[@base_branch] <description> — dev task via propose_fix.
+    Worker will: branch, run OpenCode, commit, push, open a PR."""
+    if not guard(ctx):
+        return
+    base = "main"
+    if "@" in repo:
+        repo, base = repo.split("@", 1)
+    rows = q(
+        """INSERT INTO tasks (type, status, params, triggered_by)
+           VALUES ('propose_fix', 'queued', %s, 'discord') RETURNING id""",
+        (Json({"repo": repo, "base": base, "description": description,
+               "source": "discord", "requested_by": str(ctx.author)}),),
+    )
+    await ctx.reply(f"🔧 queued **fix task {rows[0]['id']}** on `{repo}` "
+                    f"(base `{base}`)\n> {description[:180]}\n"
+                    f"PR link arrives here when it's done.")
+
+
+@bot.command(name="help")
+async def help_cmd(ctx):
+    if not guard(ctx):
+        return
+    await ctx.reply(
+        "`!fix <repo>[@base] <description>` — dev task → PR\n"
+        "`!task <spec>` · `!task <type>: <spec>` · `!queue` · `!status`\n"
+        "`!approvals` · `!approve <id>` · `!reject <id> [reason]` · `!fail <id>`"
+    )
+
+
+async def push_loop():
+    """Real-time events: finished/failed tasks and new approvals."""
+    global _last_task_seen, _primed
+    await bot.wait_until_ready()
+    channel = bot.get_channel(CHANNEL_ID)
+    while not bot.is_closed():
+        try:
+            if not _primed:  # don't replay history on startup
+                for r in q("SELECT id FROM approvals WHERE status='pending'"):
+                    _known_approvals.add(r["id"])
+                _primed = True
+
+            rows = q("""SELECT id, type, status, cost, error, result_ref,
+                               COALESCE(params->>'spec', params->>'description', '') AS spec,
+                               finished_at
+                        FROM tasks
+                        WHERE finished_at > %s ORDER BY finished_at""",
+                     (_last_task_seen,))
+            for r in rows:
+                _last_task_seen = max(_last_task_seen, r["finished_at"])
+                if r["status"] in DONE_STATES:
+                    pr = ""
+                    try:
+                        import json as _json
+                        ref = _json.loads(r.get("result_ref") or "{}")
+                        if ref.get("pr_url"):
+                            pr = f"\n🔗 {ref['pr_url']}"
+                    except Exception:
+                        pass
+                    await channel.send(
+                        f"✅ **task {r['id']}** done (${float(r['cost'] or 0):.4f}) "
+                        f"— {r['spec'][:120]}{pr}")
+                elif r["status"] in FAIL_STATES:
+                    await channel.send(
+                        f"❌ **task {r['id']}** FAILED — {r['spec'][:100]}\n"
+                        f"```{(r['error'] or '')[:400]}```")
+
+            for r in q("SELECT id FROM approvals WHERE status='pending'"):
+                if r["id"] not in _known_approvals:
+                    _known_approvals.add(r["id"])
+                    await channel.send(
+                        f"📋 new approval `{r['id']}` waiting — "
+                        f"`!approvals` to view, `!approve {r['id']}` to ship")
+        except Exception as e:
+            print(f"[push_loop] {e}", flush=True)
+        await asyncio.sleep(45)
+
+
+@bot.event
+async def on_ready():
+    print(f"logged in as {bot.user}", flush=True)
+
+
+async def main():
+    async with bot:
+        bot.loop.create_task(push_loop())
+        await bot.start(os.environ["DISCORD_TOKEN"])
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

@@ -1,0 +1,46 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: agency-postgres
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    networks:
+      - net-control
+    ports:
+      - "100.64.0.1:5432:5432"
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24-alpine
+    container_name: agency-clickhouse
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - ./data/clickhouse:/var/lib/clickhouse
+      - ./config/clickhouse-config.xml:/etc/clickhouse-server/config.d/custom.xml:ro
+      - ./config/clickhouse-performance.xml:/etc/clickhouse-server/config.d/performance.xml:ro
+      - ./config/clickhouse-users.xml:/etc/clickhouse-server/users.d/performance.xml:ro
+    networks:
+      - net-control
+    ports:
+      - "100.64.0.1:8123:8123"
+      - "100.64.0.1:9000:9000"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 2g
+
+networks:
+  net-control:
+    external: true
