@@ -67,8 +67,9 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 # high-water marks for the push loop
-_last_task_seen = dt.datetime.now(dt.timezone.utc)
+_last_task_seen = dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=15)
 _known_approvals: set = set()
+_announced_tasks: set = set()
 _primed = False
 
 
@@ -267,7 +268,7 @@ async def help_cmd(ctx):
 
 async def push_loop():
     """Real-time events: finished/failed tasks and new approvals."""
-    global _last_task_seen, _primed
+    global _last_task_seen, _primed, _announced_tasks
     await bot.wait_until_ready()
     channel = bot.get_channel(CHANNEL_ID)
     while not bot.is_closed():
@@ -285,6 +286,9 @@ async def push_loop():
                      (_last_task_seen,))
             for r in rows:
                 _last_task_seen = max(_last_task_seen, r["finished_at"])
+                if r["id"] in _announced_tasks or r["status"] not in DONE_STATES + FAIL_STATES:
+                    continue
+                _announced_tasks.add(r["id"])
                 if r["status"] in DONE_STATES:
                     import re as _re
                     m = _re.search(r"https://github\.com/\S+/pull/\d+", r.get("result_ref") or "")
