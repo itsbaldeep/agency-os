@@ -14,6 +14,21 @@ def load_env():
                 os.environ[k] = v
 
 load_env()
+
+def redact_secrets(text):
+    try:
+        with open(ENV_PATH) as f:
+            for line in f:
+                line = line.strip()
+                if "=" in line and not line.startswith("#"):
+                    k, v = line.split("=", 1)
+                    k = k.upper()
+                    if any(s in k for s in ("PASSWORD", "TOKEN", "SECRET", "WEBHOOK")) and len(v) >= 6:
+                        text = text.replace(v, "[REDACTED]")
+    except Exception:
+        pass
+    return text
+
 DB_HOST = "100.64.0.1"
 DB_NAME = "agencyos"
 DB_USER = "agency"
@@ -389,7 +404,7 @@ def handle_agent_task(task):
         proc.kill()
         proc.wait()
         return {"ok": False, "error": f"agent task timed out after {timeout_s}s"}
-    out = re.sub(r'\x1b\[[0-9;]*m', '', "".join(lines)).strip()
+    out = redact_secrets(re.sub(r'\x1b\[[0-9;]*m', '', "".join(lines)).strip())
     if not out:
         out = f"(opencode exited {proc.returncode}, no output)"
     if proc.returncode != 0:
@@ -414,7 +429,8 @@ def handle_ask(task):
                "100.64.0.1 using the POSTGRES_PASSWORD from /home/agency/agency-os/.env. STRICTLY READ-ONLY: "
                "never modify files, never run git commands that change state, never UPDATE/INSERT/DELETE in any "
                "database, never restart services. Answer the question directly and concisely, stating exact "
-               "names, ports, counts and values you observed.")
+               "names, ports, counts and values you observed. Never print credential values or the "
+               "contents of .env files; use credentials silently.")
     prompt = f"{sys_ctx}\n\nQuestion: {question}"
 
     oc_env = {**os.environ, "HOME": "/home/agency",
@@ -437,7 +453,7 @@ def handle_ask(task):
         proc.kill()
         proc.wait()
         return {"ok": False, "error": f"ask timed out after {timeout_s}s"}
-    out = re.sub(r'\x1b\[[0-9;]*m', '', "".join(lines)).strip()
+    out = redact_secrets(re.sub(r'\x1b\[[0-9;]*m', '', "".join(lines)).strip())
     if not out:
         out = f"(opencode exited {proc.returncode}, no output)"
     if proc.returncode != 0:
