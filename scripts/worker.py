@@ -397,6 +397,54 @@ def handle_agent_task(task):
     return {"ok": True, "content": out[-1500:], "prompt_tokens": 0, "completion_tokens": 0, "cost": 0}
 
 
+def handle_ask(task):
+    params = task["params"] or {}
+    question = (params.get("question") or "").strip()
+    model = params.get("model") or "opencode/glm-5.2"
+    timeout_s = int(params.get("timeout") or 300)
+
+    if not question:
+        return {"ok": False, "error": "question is required"}
+
+    import subprocess, os as _os, re
+    sys_ctx = ("You are the operations assistant for this VPS (Agency OS). Answer using LIVE data by "
+               "running read-only commands: docker ps, systemctl list-units --type=service --state=running, "
+               "ss -tlnp, df -h, free -h, crontab -l, reading files under /home/agency/agency-os and "
+               "/home/agency/projects, and read-only psql SELECT queries against the agencyos database at "
+               "100.64.0.1 using the POSTGRES_PASSWORD from /home/agency/agency-os/.env. STRICTLY READ-ONLY: "
+               "never modify files, never run git commands that change state, never UPDATE/INSERT/DELETE in any "
+               "database, never restart services. Answer the question directly and concisely, stating exact "
+               "names, ports, counts and values you observed.")
+    prompt = f"{sys_ctx}\n\nQuestion: {question}"
+
+    oc_env = {**os.environ, "HOME": "/home/agency",
+              "OPENAI_BASE_URL": ZEN_URL.rsplit("/chat", 1)[0],
+              "OPENAI_API_KEY": ZEN_KEY, "NO_COLOR": "1"}
+    oc_env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
+    proc = subprocess.Popen(
+        ["/home/agency/.opencode/bin/opencode", "run", prompt,
+         "--auto",
+         "--model", model],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        cwd="/home/agency", env=oc_env,
+    )
+    lines = []
+    try:
+        for line in proc.stdout:
+            lines.append(line)
+        proc.wait(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        return {"ok": False, "error": f"ask timed out after {timeout_s}s"}
+    out = re.sub(r'\x1b\[[0-9;]*m', '', "".join(lines)).strip()
+    if not out:
+        out = f"(opencode exited {proc.returncode}, no output)"
+    if proc.returncode != 0:
+        return {"ok": False, "error": out[-500:]}
+    return {"ok": True, "content": out, "prompt_tokens": 0, "completion_tokens": 0, "cost": 0}
+
+
 def slug(text):
     import re
     s = text.lower().strip()
@@ -1788,6 +1836,7 @@ DISPATCH = {
     "run_brand_audit": handle_run_brand_audit,
     "client_import_repo": handle_client_import_repo,
     "client_new_project": handle_client_new_project,
+    "ask": handle_ask,
     "design_page": handle_design_page,
     "search_jobs": handle_search_jobs,
     "generate_resume": handle_generate_resume,
