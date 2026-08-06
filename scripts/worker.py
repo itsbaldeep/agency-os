@@ -61,6 +61,10 @@ TOKEN_BUDGET_TOTAL = 60_000  # abort if total prompt+completion exceeds this
 INPUT_COST_PER_TOKEN = 0.15 / 1_000_000
 OUTPUT_COST_PER_TOKEN = 0.60 / 1_000_000
 
+MODEL_PRICING = {
+    "opencode/deepseek-v4-flash": {"in": INPUT_COST_PER_TOKEN, "out": OUTPUT_COST_PER_TOKEN},
+}
+
 def get_conn():
     return psycopg2.connect(host=DB_HOST, port=5432, dbname=DB_NAME, user=DB_USER, password=DB_PASS)
 
@@ -292,7 +296,8 @@ def handle_propose_fix(task):
                     total_in += tokens.get("input", 0)
                     total_out += tokens.get("output", 0)
 
-        cost = total_in * INPUT_COST_PER_TOKEN + total_out * OUTPUT_COST_PER_TOKEN
+        prices = MODEL_PRICING.get(model, {"in": INPUT_COST_PER_TOKEN, "out": OUTPUT_COST_PER_TOKEN})
+        cost = total_in * prices["in"] + total_out * prices["out"]
 
         # Step 3: check if anything changed
         status = git("status", "--porcelain")
@@ -353,6 +358,16 @@ def handle_propose_fix(task):
             "diff": diff_text,
             "changed_files": names_text,
         })
+
+        try:
+            _tu = get_conn()
+            _tuc = _tu.cursor()
+            _tuc.execute("INSERT INTO token_usage (model, tokens_in, tokens_out, cost_usd) VALUES (%s, %s, %s, %s)",
+                         (model, total_in, total_out, round(cost, 8)))
+            _tu.commit()
+            _tu.close()
+        except Exception as e:
+            print(f"[worker] Failed to record token_usage: {e}", flush=True)
 
         return {
             "ok": True,
