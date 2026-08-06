@@ -390,7 +390,7 @@ def handle_agent_task(task):
         out = f"(opencode exited {proc.returncode}, no output)"
     if proc.returncode != 0:
         return {"ok": False, "error": out[-500:]}
-    return {"ok": True, "content": out[-1500:]}
+    return {"ok": True, "content": out[-1500:], "prompt_tokens": 0, "completion_tokens": 0, "cost": 0}
 
 
 def slug(text):
