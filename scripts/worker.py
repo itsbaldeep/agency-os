@@ -205,7 +205,7 @@ def call_zen(prompt, model="deepseek-v4-flash", max_tokens=1500, temperature=Non
 # repos we control. Client repos must go through a sandboxed
 # execution boundary (separate container, no host git access,
 # limited token scope) before they can be added to this list.
-ALLOWED_REPOS = {"hearth", "streamwise", "dashboard", "agency-os"}
+ALLOWED_REPOS = {"hearth", "streamwise", "agency-dashboard", "agency-os"}
 
 def handle_propose_fix(task):
     params = task["params"] or {}
