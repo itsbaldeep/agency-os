@@ -348,6 +348,37 @@ def handle_propose_fix(task):
         return {"ok": False, "error": str(e)[:500]}
 
 
+def handle_agent_task(task):
+    params = task["params"] or {}
+    repo = params.get("repo", "")
+    prompt = (params.get("prompt") or "").strip()
+
+    if repo not in ALLOWED_REPOS:
+        return {"ok": False, "error": f"Repo '{repo}' is not on the allowed list: {sorted(ALLOWED_REPOS)}"}
+    if not prompt:
+        return {"ok": False, "error": "prompt is required"}
+
+    import subprocess
+    repo_path = f"/home/agency/projects/{repo}"
+    oc_env = {**os.environ, "HOME": "/home/agency",
+              "OPENAI_BASE_URL": ZEN_URL.rsplit("/chat", 1)[0],
+              "OPENAI_API_KEY": ZEN_KEY}
+    oc_env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
+    try:
+        oc = subprocess.run(
+            ["/home/agency/.opencode/bin/opencode", "run", prompt,
+             "--dangerously-skip-permissions", "--format", "text",
+             "--model", "opencode/deepseek-v4-flash"],
+            capture_output=True, text=True, timeout=300, cwd=repo_path, env=oc_env,
+        )
+        out = (oc.stdout or "").strip() or (oc.stderr or "").strip()
+        if not out:
+            out = f"(opencode exited {oc.returncode}, no output)"
+        return {"ok": oc.returncode == 0, "content": out[-1500:]}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "agent task timed out after 300s"}
+
+
 def slug(text):
     import re
     s = text.lower().strip()
@@ -1735,6 +1766,7 @@ def handle_run_job_campaign(task):
 DISPATCH = {
     "generate_draft": handle_generate_draft,
     "propose_fix": handle_propose_fix,
+    "agent_task": handle_agent_task,
     "run_brand_audit": handle_run_brand_audit,
     "client_import_repo": handle_client_import_repo,
     "client_new_project": handle_client_new_project,

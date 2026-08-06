@@ -208,12 +208,28 @@ async def fix_cmd(ctx, repo: str, *, description: str):
                     f"PR link arrives here when it's done.")
 
 
+@bot.command(name="run")
+async def run_cmd(ctx, repo: str, *, prompt: str):
+    """!run <repo> <prompt> — ask opencode to do something in a checked-out repo.
+    No git ops: worker runs opencode headlessly and returns the raw output."""
+    if not guard(ctx):
+        return
+    rows = q(
+        """INSERT INTO tasks (type, status, params, triggered_by)
+           VALUES ('agent_task', 'queued', %s, 'discord') RETURNING id""",
+        (Json({"repo": repo, "prompt": prompt, "source": "discord",
+               "requested_by": str(ctx.author)}),),
+    )
+    await ctx.reply(f"🤖 queued **agent task {rows[0]['id']}** on `{repo}`\n> {prompt[:180]}")
+
+
 @bot.command(name="help")
 async def help_cmd(ctx):
     if not guard(ctx):
         return
     await ctx.reply(
         "`!fix <repo>[@base] <description>` — dev task → PR\n"
+        "`!run <repo> <prompt>` — run opencode in a repo (no git ops)\n"
         "`!task <spec>` · `!task <type>: <spec>` · `!queue` · `!status`\n"
         "`!approvals` · `!approve <id>` · `!reject <id> [reason]` · `!fail <id>`"
     )
