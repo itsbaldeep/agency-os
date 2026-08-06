@@ -254,6 +254,35 @@ async def run_cmd(ctx, repo: str, *, prompt: str):
     await ctx.reply(f"🤖 queued **agent task {rows[0]['id']}** on `{repo}`\n> {prompt[:180]}")
 
 
+@bot.command(name="ask")
+async def ask_cmd(ctx, *, question: str):
+    """!ask <question> — answer a question with opencode (prefixes: model= timeout=)."""
+    if not guard(ctx):
+        return
+    words = question.split(" ")
+    model = timeout = None
+    for front in ("model=", "timeout="):
+        if words and words[0].startswith(front):
+            val, words = words[0][len(front):], words[1:]
+            if front == "model=":
+                model = val
+            else:
+                timeout = int(val)
+    question = " ".join(words)
+    params = {"question": question, "source": "discord",
+              "requested_by": str(ctx.author)}
+    if model:
+        params["model"] = model
+    if timeout:
+        params["timeout"] = timeout
+    rows = q(
+        """INSERT INTO tasks (type, status, params, triggered_by)
+           VALUES ('ask', 'queued', %s, 'discord') RETURNING id""",
+        (Json(params),),
+    )
+    await ctx.reply(f"🧠 thinking about it — task {rows[0]['id']}")
+
+
 @bot.command(name="help")
 async def help_cmd(ctx):
     if not guard(ctx):
@@ -261,6 +290,7 @@ async def help_cmd(ctx):
     await ctx.reply(
         "`!fix <repo>[@base] <description>` — dev task → PR (prefixes: model= timeout=)\n"
         "`!run <repo> <prompt>` — run opencode in a repo (no git ops; prefixes: model= timeout=)\n"
+        "`!ask <question>` — answer a question (prefixes: model= timeout=)\n"
         "`!task <spec>` · `!task <type>: <spec>` · `!queue` · `!status`\n"
         "`!approvals` · `!approve <id>` · `!reject <id> [reason]` · `!fail <id>`"
     )
@@ -279,7 +309,7 @@ async def push_loop():
                 _primed = True
 
             rows = q("""SELECT id, type, status, cost, error, result_ref,
-                               COALESCE(params->>'prompt', params->>'spec', params->>'description', '') AS spec,
+                                COALESCE(params->>'question', params->>'prompt', params->>'spec', params->>'description', '') AS spec,
                                finished_at
                         FROM tasks
                         WHERE finished_at > %s ORDER BY finished_at""",
@@ -289,7 +319,17 @@ async def push_loop():
                 if r["id"] in _announced_tasks or r["status"] not in DONE_STATES + FAIL_STATES:
                     continue
                 _announced_tasks.add(r["id"])
-                if r["status"] in DONE_STATES:
+                if r["status"] in DONE_STATES and r["type"] == "ask":
+                    answer = r["result_ref"] or "no answer"
+                    if len(answer) > 9500:
+                        import io as _io
+                        await channel.send(
+                            file=discord.File(_io.BytesIO(answer.encode()),
+                                             filename=f"ask-{r['id']}.md"))
+                    else:
+                        for i in range(0, min(len(answer), 9500), 1900):
+                            await channel.send(answer[i:i + 1900])
+                elif r["status"] in DONE_STATES:
                     import re as _re
                     m = _re.search(r"https://github\.com/\S+/pull/\d+", r.get("result_ref") or "")
                     pr = f"\n🔗 {m.group(0)}" if m else ""
