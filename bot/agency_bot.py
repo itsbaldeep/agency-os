@@ -248,7 +248,7 @@ async def push_loop():
                 _primed = True
 
             rows = q("""SELECT id, type, status, cost, error, result_ref,
-                               COALESCE(params->>'spec', params->>'description', '') AS spec,
+                               COALESCE(params->>'prompt', params->>'spec', params->>'description', '') AS spec,
                                finished_at
                         FROM tasks
                         WHERE finished_at > %s ORDER BY finished_at""",
@@ -259,9 +259,10 @@ async def push_loop():
                     import re as _re
                     m = _re.search(r"https://github\.com/\S+/pull/\d+", r.get("result_ref") or "")
                     pr = f"\n🔗 {m.group(0)}" if m else ""
+                    ref = f"\n```{r['result_ref'][:900]}```" if r['type'] == 'agent_task' and r['result_ref'] else ""
                     await channel.send(
                         f"✅ **task {r['id']}** done (${float(r['cost'] or 0):.4f}) "
-                        f"— {r['spec'][:120]}{pr}")
+                        f"— {r['spec'][:120]}{pr}{ref}")
                 elif r["status"] in FAIL_STATES:
                     await channel.send(
                         f"❌ **task {r['id']}** FAILED — {r['spec'][:100]}\n"
