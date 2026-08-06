@@ -342,6 +342,10 @@ def handle_propose_fix(task):
             body = e.read().decode()[:500]
             raise RuntimeError(f"GitHub API error {e.code}: {body}")
 
+        # Success: delete the local fix branch, never leave orphans
+        git("checkout", base_branch)
+        git("branch", "-D", branch)
+
         # Store everything on the task's result_ref (JSON)
         result = json.dumps({
             "pr_url": pr_url,
