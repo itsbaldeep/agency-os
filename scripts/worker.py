@@ -1861,4 +1861,18 @@ if __name__ == "__main__":
             poll()
         except Exception as e:
             print(f"[worker] Poll error: {e}", flush=True)
+        # Requeue tasks stuck 'running' for 20+ min (worker crash/slow handler).
+        # ponytail: naive staleness via rowcount; needs a lock/leader if multiple workers.
+        # Does this duplicate run-job.sh's sweep? Yes-ish, but that only sweeps job_runs.
+        try:
+            _c = get_conn()
+            _cu = _c.cursor()
+            _cu.execute("UPDATE tasks SET status='queued', started_at=NULL WHERE status='running' AND started_at < now() - interval '20 minutes'")
+            _n = _cu.rowcount
+            _c.commit()
+            _c.close()
+            if _n:
+                print(f"[worker] Requeued {_n} stale task(s)", flush=True)
+        except Exception as _e:
+            print(f"[worker] Requeue error: {_e}", flush=True)
         time.sleep(2)
