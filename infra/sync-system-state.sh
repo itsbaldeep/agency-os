@@ -35,7 +35,13 @@ cp /home/agency/.opencode/opencode.jsonc infra/opencode/ 2>/dev/null || true
 PGPASSWORD=$(grep POSTGRES_PASSWORD "$REPO/.env" | cut -d= -f2) \
   pg_dump -h 100.64.0.1 -U agency -d agencyos --schema-only > infra/agencyos-schema.sql
 
-# 8. Package inventory for the bootstrap script
+# 8. Seed background_jobs (the only table that belongs in git) as idempotent SQL
+PGPASSWORD=$(grep POSTGRES_PASSWORD "$REPO/.env" | cut -d= -f2) \
+  psql -h 100.64.0.1 -U agency -d agencyos -At \
+  -c "SELECT format('INSERT INTO background_jobs (id, name, script_path, schedule, enabled, requires_approval) VALUES (%L, %L, %L, %L, %s, %s) ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, script_path=EXCLUDED.script_path, schedule=EXCLUDED.schedule, enabled=EXCLUDED.enabled, requires_approval=EXCLUDED.requires_approval;', id, name, script_path, schedule, enabled, requires_approval) FROM background_jobs;" \
+  > infra/seed.sql
+
+# 9. Package inventory for the bootstrap script
 dpkg --get-selections | grep -v deinstall > infra/apt-packages.txt
 
 echo "synced. review with: git status && git diff"

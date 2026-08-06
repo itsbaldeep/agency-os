@@ -52,6 +52,7 @@ find "$REPO" -maxdepth 2 -name 'docker-compose*.yml' -print
 echo ">> bring up agency-postgres/clickhouse/dashboard from the compose files above"
 echo ">> then restore data:  pg_restore -h 100.64.0.1 -U agency -d agencyos <latest.dump>"
 echo ">> schema-only fallback: psql -h 100.64.0.1 -U agency -d agencyos -f infra/agencyos-schema.sql"
+echo ">> then seed jobs: psql -h 100.64.0.1 -U agency -d agencyos -f infra/seed.sql"
 
 echo "== 10. start services =="
 sudo systemctl enable --now agency-worker agency-bot opencode caddy
