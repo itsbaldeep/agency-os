@@ -153,6 +153,17 @@ def _draft_validate(data, params):
         wmax = int((params.get("word_count_max") or 1600))
         if not (wmin <= words <= wmax):
             fails.append(f"body word count {words} (need {wmin}-{wmax})")
+    meta_phrases = ["training-knowledge proxy", "as an AI", "language model", "my training data", "I cannot", "knowledge cutoff"]
+    bodies = []
+    if isinstance(sections, list):
+        bodies += [s.get("body_markdown") or "" for s in sections if isinstance(s, dict)]
+    if isinstance(faqs, list):
+        bodies += [f.get("a") or "" for f in faqs if isinstance(f, dict)]
+    for body in bodies:
+        low = body.lower()
+        for p in meta_phrases:
+            if p in low:
+                fails.append(f"meta-language leaked into prose: {p}")
     return fails
 
 def _draft_assemble(data):
@@ -199,7 +210,8 @@ Return ONLY a JSON object (no prose, no code fences) with EXACTLY these keys:
 - At least 3 sections and at least 3 faqs.
 - "meta_description" must be at most 160 characters.
 - Total words across all section bodies must be between {wmin} and {wmax}.
-- The string "[PLACEHOLDER" must NEVER appear. If a statistic or source is not certain, write around it without inventing numbers."""
+- The string "[PLACEHOLDER" must NEVER appear. If a statistic or source is not certain, write around it without inventing numbers.
+- Never mention AI, training data, knowledge limitations, or proxies. When a statistic is uncertain, simply write the claim qualitatively without numbers — do not explain why."""
     json_only = 'CRITICAL: Respond with ONLY the JSON object. Your very first output character must be { and your last must be }. No explanation, no reasoning, no markdown fences.'
     prompt = brief + "\n\n" + hard_reqs + "\n\n" + json_only
     attempt_reasons = []
