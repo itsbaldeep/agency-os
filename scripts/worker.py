@@ -652,26 +652,25 @@ def handle_propose_fix(task):
                 "invalid syntax, broken invocations. Ignore style. If none, reply exactly CLEAN. "
                 f"Task description: {description}\nDiff: {review_diff}")
             rev = call_zen(review_prompt, model=review_model, max_tokens=1200)
-            if rev.get("ok"):
+            verdict = (rev.get("content") or "").strip() if rev.get("ok") else ""
+            if rev.get("ok") and verdict:
                 total_in += rev.get("prompt_tokens", 0)
                 total_out += rev.get("completion_tokens", 0)
                 cost = total_in * prices["in"] + total_out * prices["out"]
-            verdict = (rev.get("content") or "").strip() if rev.get("ok") else ""
-            token = os.environ.get("GITHUB_TOKEN", "")
-            gh_headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
-                          "User-Agent": "AgencyOS-Worker/1.0"}
-            ureq = urllib.request.Request(
-                f"https://api.github.com/repos/{proj['github_owner']}/{repo}/issues/{review_pr}/comments",
-                data=json.dumps({"body": f"🔍 Machine review ({review_model}):\n\n{verdict}"}).encode(),
-                headers={**gh_headers, "Content-Type": "application/json"})
-            urllib.request.urlopen(ureq, timeout=30)
-            if verdict != "CLEAN":
-                lreq = urllib.request.Request(
-                    f"https://api.github.com/repos/{proj['github_owner']}/{repo}/issues/{review_pr}/labels",
-                    data=json.dumps({"labels": ["hold"]}).encode(),
+                token = os.environ.get("GITHUB_TOKEN", "")
+                gh_headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
+                              "User-Agent": "AgencyOS-Worker/1.0"}
+                ureq = urllib.request.Request(
+                    f"https://api.github.com/repos/{proj['github_owner']}/{repo}/issues/{review_pr}/comments",
+                    data=json.dumps({"body": f"🔍 Machine review ({review_model}):\n\n{verdict}"}).encode(),
                     headers={**gh_headers, "Content-Type": "application/json"})
-                urllib.request.urlopen(lreq, timeout=30)
-                result += " | ⏸️ held: review found issues"
+                urllib.request.urlopen(ureq, timeout=30)
+                if verdict != "CLEAN":
+                    lreq = urllib.request.Request(
+                        f"https://api.github.com/repos/{proj['github_owner']}/{repo}/issues/{review_pr}/labels",
+                        data=json.dumps({"labels": ["hold"]}).encode(),
+                        headers={**gh_headers, "Content-Type": "application/json"})
+                    urllib.request.urlopen(lreq, timeout=30)
         except Exception:
             pass
 
