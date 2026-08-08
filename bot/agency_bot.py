@@ -46,6 +46,7 @@ ST_APPROVED = os.environ.get("APPROVAL_APPROVED_STATUS", "approved")
 ST_REJECTED = os.environ.get("APPROVAL_REJECTED_STATUS", "rejected")
 DONE_STATES = ("completed", "done", "success")
 FAIL_STATES = ("failed", "error")
+DASHBOARD_URL = os.environ.get("DASHBOARD_URL", "http://100.64.0.1:5001")
 
 
 def q(sql, args=(), fetch=True):
@@ -93,7 +94,8 @@ async def task_cmd(ctx, *, spec: str):
         (ttype, Json({"spec": spec, "source": "discord",
                       "requested_by": str(ctx.author)})),
     )
-    await ctx.reply(f"🧾 queued **task {rows[0]['id']}** (`{ttype}`)\n> {spec[:180]}")
+    await ctx.reply(f"🧾 queued **task {rows[0]['id']}** (`{ttype}`)\n> {spec[:180]}"
+                    f"\n🔎 {DASHBOARD_URL}/tasks/{rows[0]['id']}")
 
 
 @bot.command(name="queue")
@@ -222,7 +224,8 @@ async def fix_cmd(ctx, repo: str, *, description: str):
     base_txt = f" (base `{base}`)" if base else ""
     await ctx.reply(f"🔧 queued **fix task {rows[0]['id']}** on `{repo}`"
                     f"{base_txt}\n> {description[:180]}\n"
-                    f"PR link arrives here when it's done.")
+                    f"PR link arrives here when it's done."
+                    f"\n🔎 {DASHBOARD_URL}/tasks/{rows[0]['id']}")
 
 
 @bot.command(name="run")
@@ -252,7 +255,8 @@ async def run_cmd(ctx, repo: str, *, prompt: str):
            VALUES ('agent_task', 'queued', %s, 'discord') RETURNING id""",
         (Json(params),),
     )
-    await ctx.reply(f"🤖 queued **agent task {rows[0]['id']}** on `{repo}`\n> {prompt[:180]}")
+    await ctx.reply(f"🤖 queued **agent task {rows[0]['id']}** on `{repo}`\n> {prompt[:180]}"
+                    f"\n🔎 {DASHBOARD_URL}/tasks/{rows[0]['id']}")
 
 
 @bot.command(name="ask")
@@ -281,7 +285,8 @@ async def ask_cmd(ctx, *, question: str):
            VALUES ('ask', 'queued', %s, 'discord') RETURNING id""",
         (Json(params),),
     )
-    await ctx.reply(f"🧠 thinking about it — task {rows[0]['id']}")
+    await ctx.reply(f"🧠 thinking about it — task {rows[0]['id']}"
+                    f"\n🔎 {DASHBOARD_URL}/tasks/{rows[0]['id']}")
 
 
 @bot.command(name="draft")
@@ -336,7 +341,8 @@ async def draft_cmd(ctx, *, spec: str):
            VALUES ('generate_draft', 'queued', %s, 'discord') RETURNING id""",
         (Json(params),),
     )
-    await ctx.reply(f"✍️ drafting — task {rows[0]['id']}")
+    await ctx.reply(f"✍️ drafting — task {rows[0]['id']}"
+                    f"\n🔎 {DASHBOARD_URL}/tasks/{rows[0]['id']}")
 
 
 @bot.command(name="help")
@@ -391,11 +397,13 @@ async def push_loop():
                     ref = f"\n```{r['result_ref'][:900]}```" if r['type'] == 'agent_task' and r['result_ref'] else ""
                     await channel.send(
                         f"✅ **task {r['id']}** done (${float(r['cost'] or 0):.4f}) "
-                        f"— {r['spec'][:120]}{pr}{ref}")
+                        f"— {r['spec'][:120]}{pr}{ref}"
+                        f"\n🔎 {DASHBOARD_URL}/tasks/{r['id']}")
                 elif r["status"] in FAIL_STATES:
                     await channel.send(
                         f"❌ **task {r['id']}** FAILED — {r['spec'][:100]}\n"
-                        f"```{(r['error'] or '')[:400]}```")
+                        f"```{(r['error'] or '')[:400]}```"
+                        f"\n🔎 {DASHBOARD_URL}/tasks/{r['id']}")
                 q("UPDATE tasks SET announced_at=now() WHERE id=%s",
                   (r["id"],), fetch=False)
 
