@@ -83,29 +83,25 @@ def guard(ctx) -> bool:
 
 
 def run_gh(args, repo):
-    """Run a gh command; on failure (e.g. missing label) create the hold
-    label once and retry. Returns None on success, else stderr."""
-    base = ["gh", *args, "--repo", f"itsbaldeep/{repo}"]
-    for attempt in range(2):
-        try:
-            p = subprocess.run(base, capture_output=True, text=True, timeout=15)
-        except subprocess.TimeoutExpired:
-            return "timed out after 15s"
-        if p.returncode == 0:
-            return None
-        if attempt == 0:
-            subprocess.run(["gh", "label", "create", "hold",
-                            "--color", "D93F0B",
-                            "--description", "blocked from auto-merge",
-                            *base[-2:]], capture_output=True, text=True, timeout=15)
-    return (p.stderr or p.stdout).strip()
+    """Execute a gh REST command; return None on success, else stderr."""
+    try:
+        p = subprocess.run(["gh", "api", *args,
+                            "--repo", f"itsbaldeep/{repo}"],
+                           capture_output=True, text=True, timeout=15)
+    except subprocess.TimeoutExpired:
+        return "timed out after 15s"
+    if p.returncode == 0:
+        return None
+    return p.stderr.strip()
 
 
 @bot.command(name="hold")
 async def hold_cmd(ctx, pr_number: int, repo: str = "agency-os"):
     if not guard(ctx):
         return
-    err = run_gh(["pr", "edit", str(pr_number), "--add-label", "hold"], repo)
+    err = run_gh(["-X", "POST",
+                  f"repos/itsbaldeep/{repo}/issues/{pr_number}/labels",
+                  "-f", "labels[]=hold"], repo)
     await ctx.reply(f"⏸️ hold on {repo}#{pr_number}" if not err else f"❌ {err}")
 
 
@@ -113,7 +109,8 @@ async def hold_cmd(ctx, pr_number: int, repo: str = "agency-os"):
 async def unhold_cmd(ctx, pr_number: int, repo: str = "agency-os"):
     if not guard(ctx):
         return
-    err = run_gh(["pr", "edit", str(pr_number), "--remove-label", "hold"], repo)
+    err = run_gh(["-X", "DELETE",
+                  f"repos/itsbaldeep/{repo}/issues/{pr_number}/labels/hold"], repo)
     await ctx.reply(f"▶️ released {repo}#{pr_number}" if not err else f"❌ {err}")
 
 
