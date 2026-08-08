@@ -471,6 +471,7 @@ async def help_cmd(ctx):
 
 @bot.event
 async def on_message(message):
+    print(f"on_message fired: chan={message.channel.id} author={message.author.id} len={len(message.content)}", flush=True)
     if (not message.author.bot
             and ASSISTANT_CHANNEL_ID
             and message.channel.id == ASSISTANT_CHANNEL_ID
