@@ -12,7 +12,7 @@ for REPO in agency-os agency-dashboard; do
       CREATED_EPOCH=$(date -d "${CREATED/Z/+0000}" +%s)
       [ $(( $(date +%s) - CREATED_EPOCH )) -lt 300 ] && { echo "skip $REPO PR#$N: too new"; continue; }
       ALLOK=$(gh pr view "$N" --repo "itsbaldeep/$REPO" --json statusCheckRollup \
-        -q 'if (.statusCheckRollup|length)==0 then false else ([.[].conclusion]|all(.=="SUCCESS")) end')
+        -q '.statusCheckRollup | if length==0 then "false" else (map(if .__typename=="CheckRun" then .conclusion=="SUCCESS" else (.state=="SUCCESS") end) | all | tostring) end')
       [ "$ALLOK" != "true" ] && { echo "skip $REPO PR#$N: checks not all SUCCESS"; continue; }
       gh pr merge "$N" --repo "itsbaldeep/$REPO" --merge --delete-branch && echo "merged $REPO PR#$N: $TITLE" \
         && [ -n "$WEBHOOK" ] && curl -sf --max-time 10 -H "Content-Type: application/json" \
