@@ -171,7 +171,16 @@ Return ONLY a JSON object (no prose, no code fences) with EXACTLY these keys:
 - "faqs": array of objects {{"q": string, "a": string}} with AT LEAST 3
 - "image_slots": array of objects {{"alt": string, "prompt": string, "placement": string}}
 - "sources": array of strings"""
-    prompt = brief
+    tkw = (params.get("target_keyword") or "").strip()
+    wmin = int(params.get("word_count_min") or 700)
+    wmax = int(params.get("word_count_max") or 1600)
+    hard_reqs = f"""HARD REQUIREMENTS (must all hold for your output JSON):
+- The exact phrase "{tkw}" must appear VERBATIM (case-insensitive) in the "title" AND in the first section's "body_markdown".
+- At least 3 sections and at least 3 faqs.
+- "meta_description" must be at most 160 characters.
+- Total words across all section bodies must be between {wmin} and {wmax}.
+- The string "[PLACEHOLDER" must NEVER appear. If a statistic or source is not certain, write around it without inventing numbers."""
+    prompt = brief + "\n\n" + hard_reqs
     for attempt in range(2):
         result = call_zen(prompt, model=params.get("model") or MODEL_CONFIG["quality"], max_tokens=6000, temperature=MODEL_CONFIG["temp_structured"])
         if not result["ok"]:
