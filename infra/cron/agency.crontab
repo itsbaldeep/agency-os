@@ -16,3 +16,4 @@
 */2 * * * * /home/agency/agency-os/scripts/run-job.sh 8 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
 */3 * * * * /home/agency/agency-os/scripts/run-job.sh 9 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
 0 4 * * 1 /home/agency/agency-os/scripts/run-job.sh 10 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
+*/3 * * * * /home/agency/agency-os/scripts/run-job.sh 11 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1

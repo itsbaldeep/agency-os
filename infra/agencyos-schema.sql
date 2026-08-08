@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict HG87YrTfP941OfcKRmemTtWndh7hT36E6XzBcZNwUbqEfcyPZPIgdzTitJiv8Gb
+\restrict dxWAlzudjfiZUS4ohyGwvUq6EPiY6hegD9MkFM2Aw0ihpayptI4aC0neQmiPTOU
 
 -- Dumped from database version 16.14
 -- Dumped by pg_dump version 18.4 (Ubuntu 18.4-0ubuntu0.26.04.1)
@@ -377,6 +377,44 @@ ALTER SEQUENCE public.brands_id_seq OWNER TO agency;
 --
 
 ALTER SEQUENCE public.brands_id_seq OWNED BY public.brands.id;
+
+
+--
+-- Name: capabilities; Type: TABLE; Schema: public; Owner: agency
+--
+
+CREATE TABLE public.capabilities (
+    id integer NOT NULL,
+    project_id bigint,
+    capability text NOT NULL,
+    status text NOT NULL,
+    evidence jsonb DEFAULT '{}'::jsonb NOT NULL,
+    checked_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+ALTER TABLE public.capabilities OWNER TO agency;
+
+--
+-- Name: capabilities_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
+--
+
+CREATE SEQUENCE public.capabilities_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.capabilities_id_seq OWNER TO agency;
+
+--
+-- Name: capabilities_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
+--
+
+ALTER SEQUENCE public.capabilities_id_seq OWNED BY public.capabilities.id;
 
 
 --
@@ -1432,6 +1470,13 @@ ALTER TABLE ONLY public.brands ALTER COLUMN id SET DEFAULT nextval('public.brand
 
 
 --
+-- Name: capabilities id; Type: DEFAULT; Schema: public; Owner: agency
+--
+
+ALTER TABLE ONLY public.capabilities ALTER COLUMN id SET DEFAULT nextval('public.capabilities_id_seq'::regclass);
+
+
+--
 -- Name: clients id; Type: DEFAULT; Schema: public; Owner: agency
 --
 
@@ -1662,6 +1707,22 @@ ALTER TABLE ONLY public.brands
 
 ALTER TABLE ONLY public.brands
     ADD CONSTRAINT brands_slug_key UNIQUE (slug);
+
+
+--
+-- Name: capabilities capabilities_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+--
+
+ALTER TABLE ONLY public.capabilities
+    ADD CONSTRAINT capabilities_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: capabilities capabilities_project_id_capability_key; Type: CONSTRAINT; Schema: public; Owner: agency
+--
+
+ALTER TABLE ONLY public.capabilities
+    ADD CONSTRAINT capabilities_project_id_capability_key UNIQUE (project_id, capability);
 
 
 --
@@ -1994,6 +2055,14 @@ ALTER TABLE ONLY public.brands
 
 
 --
+-- Name: capabilities capabilities_project_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+--
+
+ALTER TABLE ONLY public.capabilities
+    ADD CONSTRAINT capabilities_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.projects(id);
+
+
+--
 -- Name: clients clients_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
 --
 
@@ -2317,5 +2386,5 @@ ALTER TABLE ONLY public.token_usage
 -- PostgreSQL database dump complete
 --
 
-\unrestrict HG87YrTfP941OfcKRmemTtWndh7hT36E6XzBcZNwUbqEfcyPZPIgdzTitJiv8Gb
+\unrestrict dxWAlzudjfiZUS4ohyGwvUq6EPiY6hegD9MkFM2Aw0ihpayptI4aC0neQmiPTOU
 
