@@ -2277,24 +2277,48 @@ def handle_defend_audit(task):
         except Exception as e:
             robots = {"status": "missing" if "404" in str(e) or "HTTP Error 404" in str(e) else "unknown", "evidence": {"exists": False, "error": str(e)[:500]}}
 
-    sitemap_text = ""
-    try:
-        r = _audit_fetch(url + "/sitemap.xml")
-        sitemap_text = r["body"]
-    except Exception:
+    sitemap = {"status": "missing", "evidence": {"exists": False}}
+    for cand in ["/sitemap_index.xml", "/sitemap.xml", "/wp-sitemap.xml"]:
         try:
-            r = _audit_fetch(url + "/sitemap_index.xml")
-            sitemap_text = r["body"]
-        except Exception as e:
-            sitemap = {"status": "missing" if "404" in str(e) or "HTTP Error 404" in str(e) else "unknown", "evidence": {"exists": False, "error": str(e)[:500]}}
-    if sitemap_text:
-        urls = re.findall(r'<loc>\s*(.*?)\s*</loc>', sitemap_text, re.I | re.S)
-        lastmods = re.findall(r'<lastmod>\s*(.*?)\s*</lastmod>', sitemap_text, re.I | re.S)
-        sitemap = {"status": "available", "evidence": {
-            "exists": True,
-            "url_count": len(urls),
-            "most_recent_lastmod": max(lastmods) if lastmods else None,
-        }}
+            body = _audit_fetch(url + cand)["body"]
+        except Exception:
+            continue
+        if not re.search(r'<urlset|<sitemapindex', body, re.I):
+            continue
+        if re.search(r'<sitemapindex', body, re.I):
+            children = re.findall(r'<loc>\s*(.*?)\s*</loc>', body, re.I | re.S)
+            url_count = 0
+            latest = None
+            children_ev = {}
+            for cu in children[:6]:
+                try:
+                    cbody = _audit_fetch(cu)["body"]
+                except Exception:
+                    continue
+                if not re.search(r'<urlset', cbody, re.I):
+                    continue
+                c_urls = re.findall(r'<loc>\s*(.*?)\s*</loc>', cbody, re.I | re.S)
+                c_lastmods = re.findall(r'<lastmod>\s*(.*?)\s*</lastmod>', cbody, re.I | re.S)
+                url_count += len(c_urls)
+                c_latest = max(c_lastmods) if c_lastmods else None
+                if c_latest and (latest is None or c_latest > latest):
+                    latest = c_latest
+                children_ev[cu] = c_latest
+            sitemap = {"status": "available", "evidence": {
+                "exists": True, "url_count": url_count,
+                "most_recent_lastmod": latest,
+                "children": children_ev,
+            }}
+            break
+        else:
+            urls = re.findall(r'<loc>\s*(.*?)\s*</loc>', body, re.I | re.S)
+            lastmods = re.findall(r'<lastmod>\s*(.*?)\s*</lastmod>', body, re.I | re.S)
+            sitemap = {"status": "available", "evidence": {
+                "exists": True,
+                "url_count": len(urls),
+                "most_recent_lastmod": max(lastmods) if lastmods else None,
+            }}
+            break
 
     for sub in ["/blog/", "/feed/"]:
         try:
