@@ -8,7 +8,7 @@ cd "$REPO"
 notify() {  # best-effort Discord webhook, never fatal
   local msg="$1"
   local hook
-  hook=$(grep '^DISCORD_WEBHOOK_URL=' "$REPO/.env" 2>/dev/null | cut -d= -f2-)
+  hook=$(grep '^DISCORD_WEBHOOK_URL=' /home/agency/agency-os/.env 2>/dev/null | cut -d= -f2-)
   [ -n "$hook" ] && curl -sf -X POST -H 'Content-Type: application/json' \
     -d "{\"content\": \"$msg\"}" "$hook" >/dev/null 2>&1
   echo "$msg"
@@ -32,8 +32,11 @@ deploy() { docker compose -f "$REPO/docker-compose.yml" up -d --build dashboard;
 
 deploy || { git reset --hard "$LOCAL" --quiet; notify "🔥 deploy ROLLED BACK ($SUBJECT): build/up failed"; exit 1; }
 
-# verify the container came up; if not, roll back to the previous commit and rebuild
-sleep 3
+# verify the container came up; wait up to 30s, roll back only if it never does
+for _ in $(seq 0 9); do
+  sleep 3
+  docker inspect -f '{{.State.Running}}' agency-dashboard 2>/dev/null | grep -q '^true$' && break
+done
 if ! docker inspect -f '{{.State.Running}}' agency-dashboard 2>/dev/null | grep -q '^true$'; then
   git reset --hard "$LOCAL" --quiet
   deploy || notify "🔥 ROLLED BACK ($SUBJECT) but rebuild ALSO failed"
