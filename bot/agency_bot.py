@@ -67,9 +67,7 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 # high-water marks for the push loop
-_last_task_seen = dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=15)
 _known_approvals: set = set()
-_announced_tasks: set = set()
 _primed = False
 
 
@@ -298,7 +296,7 @@ async def help_cmd(ctx):
 
 async def push_loop():
     """Real-time events: finished/failed tasks and new approvals."""
-    global _last_task_seen, _primed, _announced_tasks
+    global _primed
     await bot.wait_until_ready()
     channel = bot.get_channel(CHANNEL_ID)
     while not bot.is_closed():
@@ -309,16 +307,14 @@ async def push_loop():
                 _primed = True
 
             rows = q("""SELECT id, type, status, cost, error, result_ref,
-                                COALESCE(params->>'question', params->>'prompt', params->>'spec', params->>'description', '') AS spec,
-                               finished_at
+                                COALESCE(params->>'question', params->>'prompt', params->>'spec', params->>'description', '') AS spec
                         FROM tasks
-                        WHERE finished_at > %s ORDER BY finished_at""",
-                     (_last_task_seen,))
+                        WHERE finished_at IS NOT NULL AND announced_at IS NULL
+                          AND finished_at > now() - interval '24 hours'
+                        ORDER BY finished_at""")
             for r in rows:
-                _last_task_seen = max(_last_task_seen, r["finished_at"])
-                if r["id"] in _announced_tasks or r["status"] not in DONE_STATES + FAIL_STATES:
+                if r["status"] not in DONE_STATES + FAIL_STATES:
                     continue
-                _announced_tasks.add(r["id"])
                 if r["status"] in DONE_STATES and r["type"] == "ask":
                     answer = r["result_ref"] or "no answer"
                     if len(answer) > 9500:
@@ -341,6 +337,8 @@ async def push_loop():
                     await channel.send(
                         f"❌ **task {r['id']}** FAILED — {r['spec'][:100]}\n"
                         f"```{(r['error'] or '')[:400]}```")
+                q("UPDATE tasks SET announced_at=now() WHERE id=%s",
+                  (r["id"],), fetch=False)
 
             for r in q("SELECT id FROM approvals WHERE status='pending'"):
                 if r["id"] not in _known_approvals:
