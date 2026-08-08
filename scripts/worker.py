@@ -2245,7 +2245,7 @@ def handle_defend_audit(task):
         html = r["body"].lower()
         rg = lambda p: re.compile(p, re.I)
         meta_desc = rg(r'<meta[^>]+name=["\']description["\'][^>]*>').search(html) or rg(r'<meta[^>]+content=["\'][^>]*["\'][^>]+name=["\']description["\']').search(html)
-        imgs = [m.group(1).strip().lower() for m in re.finditer(r'<img[^>]*\balt=["\']([^"\']*)["\'][^>]*>|<img[^>]*>', html, re.I)]
+        imgs = [(m.group(1) or "").strip().lower() for m in re.finditer(r'<img[^>]*\balt=["\']([^"\']*)["\'][^>]*>|<img[^>]*>', html, re.I)]
         img_count = len(imgs)
         bad_alt = 0
         for a in imgs:
@@ -2343,7 +2343,7 @@ def handle_defend_audit(task):
         "You are summarizing a technical website audit for a non-technical business owner. "
         "Write 5-8 short plain sentences covering what works and what needs attention. Do not use jargon.\n\n"
         "Findings (JSON):\n" + json.dumps({c: cap for c, cap in capabilities}, default=str)[:4000],
-        model=MODEL_CONFIG["cheap"], max_tokens=800)
+        model="deepseek-v4-flash", max_tokens=800)
     if not result["ok"]:
         return result
     return {"ok": True, "content": result.get("content", ""),
