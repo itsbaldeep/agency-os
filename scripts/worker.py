@@ -324,6 +324,7 @@ Requirements:
     return result
 
 def call_zen(prompt, model="deepseek-v4-flash", max_tokens=1500, temperature=None, timeout=90):
+    model = model.removeprefix("opencode/")
     body_dict = {"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": max_tokens}
     if temperature is not None:
         body_dict["temperature"] = temperature
