@@ -289,11 +289,12 @@ async def draft_cmd(ctx, *, spec: str):
     """!draft <brand> keyword=<kw> [words=<min>-<max>] <brief> — queue a blog draft."""
     if not guard(ctx):
         return
-    brand, _, rest = spec.partition(" ")
-    words = rest.split(" ")
+    words = spec.split(" ")
+    split = next((i for i, w in enumerate(words) if w.startswith("keyword=") and "=" in w[8:]), len(words))
+    brand, rest = " ".join(words[:split]).strip(), words[split:]
     kw = wmin = wmax = None
     out = []
-    for w in words:
+    for w in rest:
         if w.startswith("keyword=") and "=" in w[8:]:
             kw = w.split("=", 1)[1]
         elif w.startswith("words=") and "=" in w[6:] and "-" in w:
@@ -332,7 +333,7 @@ async def help_cmd(ctx):
         "`!ask <question>` — answer a question (prefixes: model= timeout=)\n"
         "`!task <spec>` · `!task <type>: <spec>` · `!queue` · `!status`\n"
         "`!approvals` · `!approve <id>` · `!reject <id> [reason]` · `!fail <id>` · "
-        "`!draft <brand> keyword=<kw> [words=<min>-<max>] <brief>`"
+        "`!draft <brand name> keyword=<kw> [words=<min>-<max>] <brief>`"
     )
 
 
