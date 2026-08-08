@@ -290,6 +290,11 @@ async def draft_cmd(ctx, *, spec: str):
     if not guard(ctx):
         return
     import re as _re
+    model = None
+    mdl = _re.search(r"\s+model=(\S+)", spec)
+    if mdl:
+        model = mdl.group(1)
+        spec = spec[:mdl.start()] + spec[mdl.end():]
     m = _re.search(r"\s+keyword=", spec)
     if not m:
         await ctx.reply("Usage: `!draft <project name> keyword=<kw> "
@@ -324,6 +329,8 @@ async def draft_cmd(ctx, *, spec: str):
               "suggestion": brief, "suggestion_title": brief[:80],
               "target_keyword": kw or "", "word_count_min": wmin or 700,
               "word_count_max": wmax or 1600, "source": "discord"}
+    if model:
+        params["model"] = model
     rows = q(
         """INSERT INTO tasks (type, status, params, triggered_by)
            VALUES ('generate_draft', 'queued', %s, 'discord') RETURNING id""",
@@ -342,7 +349,7 @@ async def help_cmd(ctx):
         "`!ask <question>` — answer a question (prefixes: model= timeout=)\n"
         "`!task <spec>` · `!task <type>: <spec>` · `!queue` · `!status`\n"
         "`!approvals` · `!approve <id>` · `!reject <id> [reason]` · `!fail <id>` · "
-        "`!draft <project name> keyword=<kw> [words=<min>-<max>] <brief>`"
+        "`!draft <project name> keyword=<kw> [words=<min>-<max>] [model=<m>] <brief>`"
     )
 
 
