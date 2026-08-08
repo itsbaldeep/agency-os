@@ -262,7 +262,7 @@ How much have I spent on AI tokens today / this week / on project <name>?
 ### Near-term (Phase 2 — more autonomy)
 - **Scheduled agent runs:** the agent wakes up, checks health, runs routine maintenance, and reports — without you prompting it. Built on top of the existing cron layer.
 - **Auto-retry deploys:** currently the agent self-heals within a session; Phase 2 makes this durable across sessions via the job queue.
-- **More skills:** database migration skill, performance-testing skill, SEO audit skill for marketing sites, blog-post drafting + content-review flow.
+- **More skills:** database migration skill, performance-testing skill, SEO audit skill for marketing sites, blog-post drafting and content-review flow.
 
 ### Medium-term (Phase 3 — scale out)
 - **Multiple VPS / per-client isolation:** each client's POC runs on its own server. The control plane (Postgres, ClickHouse, dashboard) stays on the current box; workloads move out.
