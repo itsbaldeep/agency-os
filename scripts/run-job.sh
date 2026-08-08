@@ -63,5 +63,19 @@ DETAIL_SAFE=$(echo "$DETAIL" | tr '\n' ' ' | sed "s/'/''/g")
 psql -h "$PGHOST" -U "$PGUSER" -d agencyos -c \
   "UPDATE job_runs SET status='$STATUS', finished_at=now(), duration_sec=$DURATION, detail='$DETAIL_SAFE' WHERE id=$RUN_ID"
 
+# Notify on failure (throttled, never fatal)
+if [ "$STATUS" = "failed" ] && [ -n "$RUN_ID" ]; then
+  MARKER="/home/agency/agency-os/logs/.alert-$JOB_NAME"
+  if [ ! -e "$MARKER" ] || [ "$(( $(date +%s) - $(stat -c %Y "$MARKER") ))" -ge 1800 ]; then
+    WEBHOOK=$(grep DISCORD_WEBHOOK_URL /home/agency/agency-os/.env | cut -d= -f2)
+    if [ -n "$WEBHOOK" ]; then
+      NOTIFY_DETAIL="${DETAIL:0:300}"
+      curl -sf --max-time 10 -H "Content-Type: application/json" \
+        -d "{ \"content\": \"🚨 job $JOB_NAME failed (run $RUN_ID): $NOTIFY_DETAIL\" }" \
+        "$WEBHOOK" && touch "$MARKER"
+    fi
+  fi
+fi
+
 echo "$JOB_NAME completed: $STATUS in ${DURATION}s"
 flock -u 200
