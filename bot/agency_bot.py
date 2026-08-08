@@ -387,6 +387,38 @@ async def draft_cmd(ctx, *, spec: str):
                     f"\n🔎 {DASHBOARD_URL}/tasks/{rows[0]['id']}")
 
 
+@bot.command(name="audit")
+async def audit_cmd(ctx, project: str, url: str = None):
+    """!audit <project name or repo_name> [url] — queue a defend_audit task."""
+    if not guard(ctx):
+        return
+    rows = q("SELECT id, name, repo_url FROM projects "
+             "WHERE name ILIKE %s OR repo_name ILIKE %s", (project, project))
+    if not rows:
+        names = [r["name"] for r in q("SELECT name FROM projects ORDER BY name")]
+        await ctx.reply(f"❌ project **{project}** not found.\n"
+                        f"Available: {', '.join(names)}")
+        return
+    row = rows[0]
+    if url and url.startswith("http"):
+        target = url
+    elif row["repo_url"] and row["repo_url"].startswith("http"):
+        target = row["repo_url"]
+    else:
+        await ctx.reply(f"⚠️ no url on project **{row['name']}** — "
+                        f"pass one: `!audit {project} <https://...>`")
+        return
+    params = {"project_id": row["id"], "url": target,
+              "source": "discord", "requested_by": str(ctx.author)}
+    inserted = q(
+        """INSERT INTO tasks (type, status, params, triggered_by)
+           VALUES ('defend_audit', 'queued', %s, 'discord') RETURNING id""",
+        (Json(params),),
+    )
+    await ctx.reply(f"🛡️ auditing **{row['name']}** — task {inserted[0]['id']}"
+                    f"\n🔎 {DASHBOARD_URL}/tasks/{inserted[0]['id']}")
+
+
 @bot.command(name="help")
 async def help_cmd(ctx):
     if not guard(ctx):
@@ -398,7 +430,8 @@ async def help_cmd(ctx):
         "`!ask <question>` — answer a question (prefixes: model= timeout=)\n"
         "`!task <spec>` · `!task <type>: <spec>` · `!queue` · `!status`\n"
         "`!approvals` · `!approve <id>` · `!reject <id> [reason]` · `!fail <id>` · "
-        "`!draft <project name> keyword=<kw> [words=<min>-<max>] [model=<m>] <brief>`"
+        "`!draft <project name> keyword=<kw> [words=<min>-<max>] [model=<m>] <brief>`\n"
+        "`!audit <project name or repo_name> [url]` — queue a defend_audit"
     )
 
 
