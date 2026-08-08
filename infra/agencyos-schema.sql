@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict a8Pwe5a8DTpxrNhJzSRStBUuwayOnnV0Zt3GvaI8qYC7CRGfOPjtN7wOupmU9Ke
+\restrict HG87YrTfP941OfcKRmemTtWndh7hT36E6XzBcZNwUbqEfcyPZPIgdzTitJiv8Gb
 
 -- Dumped from database version 16.14
 -- Dumped by pg_dump version 18.4 (Ubuntu 18.4-0ubuntu0.26.04.1)
@@ -350,7 +350,8 @@ CREATE TABLE public.brands (
     slug text NOT NULL,
     access_tier text DEFAULT '0'::text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    project_id bigint
 );
 
 
@@ -516,7 +517,8 @@ CREATE TABLE public.content_items (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     suggestion_id integer,
     task_id integer,
-    compliance_flags jsonb DEFAULT '[]'::jsonb NOT NULL
+    compliance_flags jsonb DEFAULT '[]'::jsonb NOT NULL,
+    structured jsonb
 );
 
 
@@ -1133,7 +1135,12 @@ CREATE TABLE public.projects (
     state public.project_state DEFAULT 'idea'::public.project_state NOT NULL,
     prd_path text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    repo_name text,
+    github_owner text DEFAULT 'itsbaldeep'::text NOT NULL,
+    base_branch text DEFAULT 'main'::text NOT NULL,
+    local_path text,
+    agent_allowed boolean DEFAULT false NOT NULL
 );
 
 
@@ -1308,7 +1315,8 @@ CREATE TABLE public.tasks (
     triggered_by text DEFAULT 'manual'::text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     started_at timestamp with time zone,
-    finished_at timestamp with time zone
+    finished_at timestamp with time zone,
+    announced_at timestamp with time zone
 );
 
 
@@ -1825,6 +1833,14 @@ ALTER TABLE ONLY public.projects
 
 
 --
+-- Name: projects projects_repo_name_key; Type: CONSTRAINT; Schema: public; Owner: agency
+--
+
+ALTER TABLE ONLY public.projects
+    ADD CONSTRAINT projects_repo_name_key UNIQUE (repo_name);
+
+
+--
 -- Name: resume_versions resume_versions_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
 --
 
@@ -1967,6 +1983,14 @@ ALTER TABLE ONLY public.brand_pipelines
 
 ALTER TABLE ONLY public.brand_properties
     ADD CONSTRAINT brand_properties_brand_id_fkey FOREIGN KEY (brand_id) REFERENCES public.brands(id) ON DELETE CASCADE;
+
+
+--
+-- Name: brands brands_project_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+--
+
+ALTER TABLE ONLY public.brands
+    ADD CONSTRAINT brands_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.projects(id);
 
 
 --
@@ -2293,5 +2317,5 @@ ALTER TABLE ONLY public.token_usage
 -- PostgreSQL database dump complete
 --
 
-\unrestrict a8Pwe5a8DTpxrNhJzSRStBUuwayOnnV0Zt3GvaI8qYC7CRGfOPjtN7wOupmU9Ke
+\unrestrict HG87YrTfP941OfcKRmemTtWndh7hT36E6XzBcZNwUbqEfcyPZPIgdzTitJiv8Gb
 
