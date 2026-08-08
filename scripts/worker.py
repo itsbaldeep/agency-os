@@ -173,7 +173,7 @@ Return ONLY a JSON object (no prose, no code fences) with EXACTLY these keys:
 - "sources": array of strings"""
     prompt = brief
     for attempt in range(2):
-        result = call_zen(prompt, model=MODEL_CONFIG["quality"], max_tokens=6000, temperature=MODEL_CONFIG["temp_structured"])
+        result = call_zen(prompt, model=params.get("model") or MODEL_CONFIG["quality"], max_tokens=6000, temperature=MODEL_CONFIG["temp_structured"])
         if not result["ok"]:
             if attempt == 0:
                 continue
@@ -188,7 +188,8 @@ Return ONLY a JSON object (no prose, no code fences) with EXACTLY these keys:
         if attempt == 0:
             prompt = brief + f"\n\nYour previous output failed these checks: {', '.join(reasons)}. Return corrected JSON only."
     else:
-        return {"ok": False, "error": "draft failed validation: " + ", ".join(reasons)}
+        raw = (result.get("content") or "")[:200]
+        return {"ok": False, "error": "draft failed validation: " + ", ".join(reasons) + " | raw output starts: " + raw}
 
     body = _draft_assemble(data)
 
