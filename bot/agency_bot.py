@@ -30,6 +30,7 @@ Env (see /etc/agency/bot.env):
 """
 import os
 import re
+import subprocess
 
 import asyncio
 import datetime as dt
@@ -79,6 +80,41 @@ def guard(ctx) -> bool:
     if OWNER_ID and ctx.author.id != OWNER_ID:
         return False
     return True
+
+
+def run_gh(args, repo):
+    """Run a gh command; on failure (e.g. missing label) create the hold
+    label once and retry. Returns None on success, else stderr."""
+    base = ["gh", *args, "--repo", f"itsbaldeep/{repo}"]
+    for attempt in range(2):
+        try:
+            p = subprocess.run(base, capture_output=True, text=True, timeout=15)
+        except subprocess.TimeoutExpired:
+            return "timed out after 15s"
+        if p.returncode == 0:
+            return None
+        if attempt == 0:
+            subprocess.run(["gh", "label", "create", "hold",
+                            "--color", "D93F0B",
+                            "--description", "blocked from auto-merge",
+                            *base[2:]], capture_output=True, text=True, timeout=15)
+    return (p.stderr or p.stdout).strip()
+
+
+@bot.command(name="hold")
+async def hold_cmd(ctx, pr_number: int, repo: str = "agency-os"):
+    if not guard(ctx):
+        return
+    err = run_gh(["pr", "edit", str(pr_number), "--add-label", "hold"], repo)
+    await ctx.reply(f"⏸️ hold on {repo}#{pr_number}" if not err else f"❌ {err}")
+
+
+@bot.command(name="unhold")
+async def unhold_cmd(ctx, pr_number: int, repo: str = "agency-os"):
+    if not guard(ctx):
+        return
+    err = run_gh(["pr", "edit", str(pr_number), "--remove-label", "hold"], repo)
+    await ctx.reply(f"▶️ released {repo}#{pr_number}" if not err else f"❌ {err}")
 
 
 @bot.command(name="task")
@@ -431,7 +467,8 @@ async def help_cmd(ctx):
         "`!task <spec>` · `!task <type>: <spec>` · `!queue` · `!status`\n"
         "`!approvals` · `!approve <id>` · `!reject <id> [reason]` · `!fail <id>` · "
         "`!draft <project name> keyword=<kw> [words=<min>-<max>] [model=<m>] <brief>`\n"
-        "`!audit <project name or repo_name> [url]` — queue a defend_audit"
+        "`!audit <project name or repo_name> [url]` — queue a defend_audit\n"
+        "`!hold <pr> [repo]` · `!unhold <pr> [repo]` — toggle auto-merge block (default repo: agency-os)"
     )
 
 
