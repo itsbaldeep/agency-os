@@ -193,7 +193,7 @@ async def fix_cmd(ctx, repo: str, *, description: str):
     Worker will: branch, run OpenCode, commit, push, open a PR."""
     if not guard(ctx):
         return
-    base = "main"
+    base = None
     if "@" in repo:
         repo, base = repo.split("@", 1)
     model = timeout = None
@@ -206,8 +206,10 @@ async def fix_cmd(ctx, repo: str, *, description: str):
             else:
                 timeout = int(val)
     description = " ".join(words)
-    params = {"repo": repo, "base": base, "description": description,
+    params = {"repo": repo, "description": description,
               "source": "discord", "requested_by": str(ctx.author)}
+    if base:
+        params["base"] = base
     if model:
         params["model"] = model
     if timeout:
@@ -217,8 +219,9 @@ async def fix_cmd(ctx, repo: str, *, description: str):
            VALUES ('propose_fix', 'queued', %s, 'discord') RETURNING id""",
         (Json(params),),
     )
-    await ctx.reply(f"🔧 queued **fix task {rows[0]['id']}** on `{repo}` "
-                    f"(base `{base}`)\n> {description[:180]}\n"
+    base_txt = f" (base `{base}`)" if base else ""
+    await ctx.reply(f"🔧 queued **fix task {rows[0]['id']}** on `{repo}`"
+                    f"{base_txt}\n> {description[:180]}\n"
                     f"PR link arrives here when it's done.")
 
 
