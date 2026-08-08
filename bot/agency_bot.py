@@ -286,31 +286,40 @@ async def ask_cmd(ctx, *, question: str):
 
 @bot.command(name="draft")
 async def draft_cmd(ctx, *, spec: str):
-    """!draft <brand> keyword=<kw> [words=<min>-<max>] <brief> — queue a blog draft."""
+    """!draft <project name> keyword=<kw> [words=<min>-<max>] <brief> — queue a blog draft."""
     if not guard(ctx):
         return
-    words = spec.split(" ")
-    split = next((i for i, w in enumerate(words) if w.startswith("keyword=") and "=" in w[8:]), len(words))
-    brand, rest = " ".join(words[:split]).strip(), words[split:]
-    kw = wmin = wmax = None
-    out = []
-    for w in rest:
-        if w.startswith("keyword=") and "=" in w[8:]:
-            kw = w.split("=", 1)[1]
-        elif w.startswith("words=") and "=" in w[6:] and "-" in w:
-            lo, _, hi = w.split("=", 1)[1].partition("-")
-            if lo.isdigit() and hi.isdigit():
-                wmin, wmax = int(lo), int(hi)
-        else:
-            out.append(w)
-    brief = " ".join(out).strip()
-    rows = q("SELECT id FROM brands WHERE name ILIKE %s LIMIT 1", (brand,))
+    import re as _re
+    m = _re.search(r"\s+keyword=", spec)
+    if not m:
+        await ctx.reply("Usage: `!draft <project name> keyword=<kw> "
+                        "[words=<min>-<max>] <brief>`")
+        return
+    project = spec[:m.start()].strip()
+    rest = spec[m.end():]
+    wm = _re.search(r"\s+words=", rest)
+    kw = rest[:wm.start()].strip() if wm else rest.strip()
+    wmin = wmax = None
+    brief = ""
+    if wm:
+        tail = rest[wm.end():].strip()
+        tok, _, brief = tail.partition(" ")
+        lo, _, hi = tok.partition("-")
+        if lo.isdigit() and hi.isdigit():
+            wmin, wmax = int(lo), int(hi)
+    rows = q("""SELECT id, name FROM projects
+                WHERE name ILIKE %s OR repo_name ILIKE %s""", (project, project))
     if not rows:
-        names = [r["name"] for r in q("SELECT name FROM brands ORDER BY name")]
-        await ctx.reply(f"❌ brand **{brand}** not found.\n"
+        names = [r["name"] for r in q("SELECT name FROM projects ORDER BY name")]
+        await ctx.reply(f"❌ project **{project}** not found.\n"
                         f"Available: {', '.join(names)}")
         return
-    brand_id = rows[0]["id"]
+    project_id, name = rows[0]["id"], rows[0]["name"]
+    brand = q("SELECT id FROM brands WHERE project_id = %s", (project_id,))
+    if not brand:
+        brand = q("""INSERT INTO brands (name, project_id) VALUES (%s, %s) RETURNING id""",
+                  (name, project_id))
+    brand_id = brand[0]["id"]
     params = {"content_type": "blog_post", "brand_id": brand_id,
               "suggestion": brief, "suggestion_title": brief[:80],
               "target_keyword": kw or "", "word_count_min": wmin or 700,
@@ -333,7 +342,7 @@ async def help_cmd(ctx):
         "`!ask <question>` — answer a question (prefixes: model= timeout=)\n"
         "`!task <spec>` · `!task <type>: <spec>` · `!queue` · `!status`\n"
         "`!approvals` · `!approve <id>` · `!reject <id> [reason]` · `!fail <id>` · "
-        "`!draft <brand name> keyword=<kw> [words=<min>-<max>] <brief>`"
+        "`!draft <project name> keyword=<kw> [words=<min>-<max>] <brief>`"
     )
 
 
