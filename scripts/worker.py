@@ -2423,7 +2423,101 @@ def handle_defend_audit(task):
             "cost": result.get("cost", 0)}
 
 
+def handle_assistant_turn(task):
+    """Answer the operator conversationally using live state + conversation turns."""
+    import subprocess
+    params = task["params"] or {}
+    channel_id = params.get("channel_id") or 0
+    message = (params.get("message") or "").strip()
+
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+
+        cur.execute("SELECT role, content FROM assistant_messages ORDER BY id DESC LIMIT 20")
+        turns = list(reversed(cur.fetchall()))
+
+        live = []
+        for repo in ("agency-os", "agency-dashboard"):
+            try:
+                p = subprocess.run(["gh", "pr", "list", "--repo", f"itsbaldeep/{repo}",
+                                    "--json", "number,title"],
+                                   capture_output=True, text=True, timeout=10)
+                prs = json.loads(p.stdout or "[]")
+                live.append(f"{repo} open PRs: " + "; ".join(f"#{x['number']} {x['title']}" for x in prs))
+            except Exception:
+                live.append(f"{repo} open PRs: unavailable")
+
+        cur.execute("""SELECT id, type, status,
+                       COALESCE(params->>'question', params->>'prompt', params->>'spec',
+                                params->>'description', '') AS spec
+                       FROM tasks ORDER BY id DESC LIMIT 8""")
+        live.append("last 8 tasks: " + "; ".join(f"#{r[0]} {r[2]} {r[1]} {r[3][:40]}" for r in cur.fetchall()))
+
+        cur.execute("SELECT count(*) FROM suggestions WHERE status='pending'")
+        live.append(f"pending suggestions: {cur.fetchone()[0]}")
+
+        cur.execute("SELECT id, type FROM tasks WHERE status='running'")
+        live.append("running tasks: " + ", ".join(f"#{r[0]} {r[1]}" for r in cur.fetchall()))
+    finally:
+        conn.close()
+
+    conversation = "\n".join(f"{r[0]}: {r[1]}" for r in turns)
+    if message and (not turns or turns[-1][1] != message):
+        conversation += f"\nuser: {message}"
+
+    prompt = ('You are the Agency OS assistant. You manage an autonomous dev+marketing platform. '
+              'Answer the operator conversationally and concisely using the live state and conversation below. '
+              'If action is needed, end your reply with a single line: ACTION: {"type": "...", "params": {...}} '
+              'where type is one of propose_fix, agent_task, ask, generate_draft, defend_audit. '
+              'Only include ACTION when the operator asked for work to be done.\n\n'
+              f"LIVE STATE:\n{chr(10).join(live)}\n\nCONVERSATION:\n{conversation}\n\n{message}")
+
+    result = call_zen(prompt, model="glm-5.2", max_tokens=2500)
+    if not result["ok"]:
+        return result
+
+    reply = (result.get("content") or "").strip()
+    lines = reply.splitlines()
+    if lines and lines[-1].startswith("ACTION:"):
+        action_line = lines[-1][len("ACTION:"):].strip()
+        reply = "\n".join(lines[:-1]).strip()
+        conn = get_conn()
+        try:
+            a = json.loads(action_line)
+            t = a.get("type")
+            if t in ("propose_fix", "agent_task", "ask", "generate_draft", "defend_audit"):
+                cur = conn.cursor()
+                params_json = json.dumps(a.get("params") or {})
+                cur.execute(
+                    "INSERT INTO tasks (type, status, params, triggered_by) "
+                    "VALUES (%s, 'queued', %s, 'assistant') RETURNING id",
+                    (t, params_json))
+                tid = cur.fetchone()[0]
+                conn.commit()
+                reply += f"\n\n→ queued task {tid} ({t})"
+        except Exception:
+            pass
+        finally:
+            conn.close()
+
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("INSERT INTO assistant_messages (channel_id, role, content) VALUES (%s, 'assistant', %s)",
+                    (channel_id, reply))
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {"ok": True, "content": reply,
+            "prompt_tokens": result.get("prompt_tokens", 0),
+            "completion_tokens": result.get("completion_tokens", 0),
+            "cost": result.get("cost", 0)}
+
+
 DISPATCH = {
+    "assistant_turn": handle_assistant_turn,
     "defend_audit": handle_defend_audit,
     "generate_draft": handle_generate_draft,
     "propose_fix": handle_propose_fix,
