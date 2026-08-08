@@ -97,7 +97,7 @@ def run_gh(args, repo):
             subprocess.run(["gh", "label", "create", "hold",
                             "--color", "D93F0B",
                             "--description", "blocked from auto-merge",
-                            *base[2:]], capture_output=True, text=True, timeout=15)
+                            *base[-2:]], capture_output=True, text=True, timeout=15)
     return (p.stderr or p.stdout).strip()
 
 
