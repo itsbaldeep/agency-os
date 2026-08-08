@@ -365,12 +365,14 @@ def handle_onboard_project(task):
     try:
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO projects (name, repo_name, repo_url, github_owner, base_branch, agent_allowed) "
-            "VALUES (%s, %s, %s, %s, %s, true) "
-            "ON CONFLICT (repo_name) DO UPDATE SET "
-            "repo_url=EXCLUDED.repo_url, github_owner=EXCLUDED.github_owner, "
-            "base_branch=EXCLUDED.base_branch, agent_allowed=true",
-            (repo_name, repo_name, git_url, github_owner, base_branch))
+            "UPDATE projects SET repo_name=%s, repo_url=%s, github_owner=%s, base_branch=%s, agent_allowed=true "
+            "WHERE repo_name=%s OR name=%s",
+            (repo_name, git_url, github_owner, base_branch, repo_name, repo_name))
+        if cur.rowcount == 0:
+            cur.execute(
+                "INSERT INTO projects (name, repo_name, repo_url, github_owner, base_branch, agent_allowed) "
+                "VALUES (%s, %s, %s, %s, %s, true)",
+                (repo_name, repo_name, git_url, github_owner, base_branch))
         conn.commit()
     finally:
         conn.close()
@@ -2086,7 +2088,13 @@ def poll():
             cur.execute("UPDATE tasks SET status='failed', error=%s, finished_at=now() WHERE id=%s", (err, tid))
             conn.commit()
             return True
-        result = handler(task)
+        try:
+            result = handler(task)
+        except Exception as e:
+            cur.execute("UPDATE tasks SET status='failed', error=%s, finished_at=now() WHERE id=%s", (str(e)[:500], tid))
+            conn.commit()
+            print(f"[worker] Task {tid} crashed in handler: {e}", flush=True)
+            return True
         if result.get("ok"):
             content = result.get("content", "")
             cur.execute(
