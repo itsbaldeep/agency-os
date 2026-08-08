@@ -292,3 +292,5 @@ How much have I spent on AI tokens today / this week / on project <name>?
 | Logs | ~/agency-os/logs/ |
 | Backups | ~/agency-os/backups/ (nightly) |
 | Env/secrets | ~/agency-os/.env (never share) |
+
+Roadmap-driven autonomous development enabled 2026-08.
