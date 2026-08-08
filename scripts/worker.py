@@ -650,10 +650,10 @@ def handle_propose_fix(task):
             review_prompt = (
                 "You are reviewing a code diff before auto-merge. "
                 "List ONLY merge-blocking defects: crashes, wrong logic, security issues, "
-                "invalid syntax, broken invocations. Ignore style. If none, reply exactly CLEAN. "
-                "Output ONLY your final verdict: either the single word CLEAN, or a short numbered list of defects. No reasoning, no deliberation. "
+                "invalid syntax, broken invocations. Ignore style. "
+                "You may think briefly, but your reply MUST end with a final line that is exactly VERDICT: CLEAN or exactly VERDICT: DEFECTS (with a short numbered defect list above it). "
                 f"Task description: {description}\nDiff: {diff_text[:9000]}")
-            rev = call_zen(review_prompt, model=review_model, max_tokens=1200)
+            rev = call_zen(review_prompt, model=review_model, max_tokens=4000)
             verdict = (rev.get("content") or "").strip() if rev.get("ok") else ""
             if rev.get("ok") and verdict:
                 total_in += rev.get("prompt_tokens", 0)
@@ -662,13 +662,17 @@ def handle_propose_fix(task):
                 token = os.environ.get("GITHUB_TOKEN", "")
                 gh_headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
                               "User-Agent": "AgencyOS-Worker/1.0"}
-                ureq = urllib.request.Request(
-                    f"https://api.github.com/repos/{proj['github_owner']}/{repo}/issues/{review_pr}/comments",
-                    data=json.dumps({"body": f"🔍 Machine review ({review_model}):\n\n{verdict[:1500]}"}).encode(),
-                    headers={**gh_headers, "Content-Type": "application/json"})
-                urllib.request.urlopen(ureq, timeout=30)
                 last_line = next((l.strip() for l in reversed(verdict.splitlines()) if l.strip()), "")
-                if verdict != "CLEAN" and last_line != "CLEAN":
+                if last_line != "VERDICT: CLEAN":
+                    d = verdict.lower().find("defect")
+                    from_defect = verdict[d:] if d != -1 else verdict
+                    note = from_defect if len(from_defect) <= 1200 else verdict[-1200:]
+                    ureq = urllib.request.Request(
+                        f"https://api.github.com/repos/{proj['github_owner']}/{repo}/issues/{review_pr}/comments",
+                        data=json.dumps({"body": f"🔍 Machine review ({review_model}):\n\n{note}"}).encode(),
+                        headers={**gh_headers, "Content-Type": "application/json"})
+                    urllib.request.urlopen(ureq, timeout=30)
+                if last_line != "VERDICT: CLEAN":
                     lreq = urllib.request.Request(
                         f"https://api.github.com/repos/{proj['github_owner']}/{repo}/issues/{review_pr}/labels",
                         data=json.dumps({"labels": ["hold"]}).encode(),
