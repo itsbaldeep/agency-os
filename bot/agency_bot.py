@@ -28,8 +28,9 @@ Env (see /etc/agency/bot.env):
                          (must match what approval-executor.sh looks for;
                           defaults: approved / rejected)
 """
-
 import os
+import re
+
 import asyncio
 import datetime as dt
 
@@ -228,6 +229,47 @@ async def fix_cmd(ctx, repo: str, *, description: str):
                     f"\n🔎 {DASHBOARD_URL}/tasks/{rows[0]['id']}")
 
 
+@bot.command(name="fixpr")
+async def fixpr_cmd(ctx, *, arg: str):
+    """!fixpr <github-pr-url> <description> — fix task on an existing PR
+    (prefixes: model= timeout=)."""
+    if not guard(ctx):
+        return
+    words = arg.split(" ")
+    model = timeout = None
+    for front in ("model=", "timeout="):
+        if words and words[0].startswith(front):
+            val, words = words[0][len(front):], words[1:]
+            if front == "model=":
+                model = val
+            else:
+                timeout = int(val)
+    m = re.match(r"https://github\.com/[^/]+/([^/]+)/pull/([0-9]+)", words[0])
+    if not m:
+        await ctx.reply("usage: `!fixpr <github-pr-url> <description>` "
+                        "(prefixes: model= timeout=)")
+        return
+    repo, pr_number = m.group(1), int(m.group(2))
+    description = " ".join(words[1:])
+    if not description:
+        await ctx.reply("usage: `!fixpr <github-pr-url> <description>`")
+        return
+    params = {"repo": repo, "pr_number": pr_number, "description": description,
+              "source": "discord", "requested_by": str(ctx.author)}
+    if model:
+        params["model"] = model
+    if timeout:
+        params["timeout"] = timeout
+    rows = q(
+        """INSERT INTO tasks (type, status, params, triggered_by)
+           VALUES ('propose_fix', 'queued', %s, 'discord') RETURNING id""",
+        (Json(params),),
+    )
+    await ctx.reply(f"🔧 queued fix task {rows[0]['id']} onto PR #{pr_number} "
+                    f"of `{repo}`\n> {description[:180]}\n"
+                    f"\n🔎 {DASHBOARD_URL}/tasks/{rows[0]['id']}")
+
+
 @bot.command(name="run")
 async def run_cmd(ctx, repo: str, *, prompt: str):
     """!run <repo> <prompt> — ask opencode to do something in a checked-out repo.
@@ -351,6 +393,7 @@ async def help_cmd(ctx):
         return
     await ctx.reply(
         "`!fix <repo>[@base] <description>` — dev task → PR (prefixes: model= timeout=)\n"
+        "`!fixpr <pr-url> <description>` — fix an existing PR (prefixes: model= timeout=)\n"
         "`!run <repo> <prompt>` — run opencode in a repo (no git ops; prefixes: model= timeout=)\n"
         "`!ask <question>` — answer a question (prefixes: model= timeout=)\n"
         "`!task <spec>` · `!task <type>: <spec>` · `!queue` · `!status`\n"
