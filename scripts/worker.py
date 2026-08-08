@@ -508,9 +508,36 @@ def handle_propose_fix(task):
         token = os.environ.get("GITHUB_TOKEN", "")
         if not token:
             raise RuntimeError("GITHUB_TOKEN not set")
+        pr_title = f"fix: {description[:60]}"
         pr_body = f"## Auto-generated PR\n\n**Description:** {description}\n\n**Changes:**\n```\n{names_text}\n```\n\nTriggered by Agency OS worker task #{task['id']}."
+        zen = call_zen(
+            "Return ONLY a JSON object {\"title\": string max 70 chars in conventional-commit style, "
+            "\"summary\": 2-3 sentence description of what changed and why, "
+            "\"notes\": 1-2 sentences on decisions or caveats}.\n"
+            f"Task: {description}\nDiff stat:\n{names_text}",
+            model="deepseek-v4-flash",
+        )
+        if zen.get("ok"):
+            try:
+                parsed = json.loads(zen["content"])
+                new_title = str(parsed.get("title", "")).strip()
+                summary = str(parsed.get("summary", "")).strip()
+                if new_title and summary:
+                    notes = str(parsed.get("notes", "")).strip()
+                    pr_title = new_title[:70]
+                    pr_body = (
+                        f"## Summary\n{summary}\n\n## Changes\n```\n{names_text}\n```\n\n"
+                        f"## Notes\n{notes}\n\n---\n"
+                        f"<details><summary>Original task</summary>\n\n{description}\n\n</details>\n\n"
+                        f"Triggered by Agency OS worker task #{task['id']}."
+                    )
+            except Exception:
+                pass
+            total_in += zen.get("prompt_tokens", 0)
+            total_out += zen.get("completion_tokens", 0)
+            cost = total_in * prices["in"] + total_out * prices["out"]
         pr_payload = json.dumps({
-            "title": f"fix: {description[:60]}",
+            "title": pr_title,
             "head": branch,
             "base": base_branch,
             "body": pr_body,
