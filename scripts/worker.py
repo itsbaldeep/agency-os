@@ -460,6 +460,7 @@ def handle_propose_fix(task):
     repo_path = proj["local_path"]
     base_branch = params.get("base") or proj["base_branch"]
     branch = f"fix/worker-{task['id']}-{slug(description)[:30]}"
+    import os, subprocess, tempfile
     pr_number = params.get("pr_number")
     existing_pr_url = None
     if pr_number:
@@ -478,8 +479,6 @@ def handle_propose_fix(task):
         except urllib.error.HTTPError as e:
             body = e.read().decode()[:500]
             return {"ok": False, "error": f"GitHub API error {e.code}: {body}"}
-
-    import os, subprocess, tempfile
 
     def git(*args, repo_dir=repo_path):
         return subprocess.run(["git"] + list(args), capture_output=True, text=True,
