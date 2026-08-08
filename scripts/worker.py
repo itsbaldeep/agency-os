@@ -2212,7 +2212,148 @@ def handle_self_review(task):
         conn.close()
 
 
+def _audit_fetch(url, timeout=20):
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"})
+    resp = urllib.request.urlopen(req, timeout=timeout)
+    body = resp.read()
+    try:
+        text = body.decode("utf-8", "replace")
+    except Exception:
+        text = ""
+    return {"status": resp.status, "body": text, "raw": body}
+
+
+def handle_defend_audit(task):
+    """Deterministic SEO/identity audit of a public website. No opencode; one Zen summary at the end."""
+    import re
+    params = task["params"] or {}
+    project_id = params.get("project_id")
+    url = (params.get("url") or "").strip().rstrip("/")
+    if not project_id or not url:
+        return {"ok": False, "error": "project_id and url are required"}
+    if not url.startswith(("http://", "https://")):
+        return {"ok": False, "error": "url must start with http:// or https://"}
+
+    homepage = {"status": "unknown", "evidence": {}}
+    robots = {"status": "unknown", "evidence": {}}
+    sitemap = {"status": "unknown", "evidence": {}}
+    wp_rest = {"status": "unknown", "evidence": {}}
+    blog_feeds = {}
+
+    try:
+        r = _audit_fetch(url)
+        html = r["body"].lower()
+        rg = lambda p: re.compile(p, re.I)
+        meta_desc = rg(r'<meta[^>]+name=["\']description["\'][^>]*>').search(html) or rg(r'<meta[^>]+content=["\'][^>]*["\'][^>]+name=["\']description["\']').search(html)
+        imgs = [m.group(1).strip().lower() for m in re.finditer(r'<img[^>]*\balt=["\']([^"\']*)["\'][^>]*>|<img[^>]*>', html, re.I)]
+        img_count = len(imgs)
+        bad_alt = 0
+        for a in imgs:
+            if not a or len(a) > 120:
+                bad_alt += 1
+        gen_m = re.search(r'<meta[^>]+name=["\']generator["\'][^>]+content=["\']([^"\']*)["\']', html, re.I)
+        homepage = {"status": "available", "evidence": {
+            "has_meta_description": bool(meta_desc),
+            "has_og_tags": bool(rg(r'property=["\']og:').search(html)),
+            "has_twitter_card": bool(rg(r'name=["\']twitter:card["\']').search(html) or rg(r'property=["\']twitter:card["\']').search(html)),
+            "has_canonical": bool(rg(r'rel=["\']canonical["\']').search(html)),
+            "has_jsonld": bool(rg(r'application/ld\+json').search(html)),
+            "generator": gen_m.group(1).strip() if gen_m else None,
+            "img_count": img_count,
+            "img_missing_or_long_alt": bad_alt,
+        }}
+    except Exception as e:
+        homepage = {"status": "unknown", "evidence": {"error": str(e)[:500]}}
+
+    for path_label, path in [("robots", "/robots.txt")]:
+        try:
+            r = _audit_fetch(url + path)
+            txt = r["body"]
+            robots = {"status": "available", "evidence": {
+                "exists": True,
+                "disallow_all": bool(re.search(r'^\s*disallow:\s*/\s*$', txt, re.M | re.I)),
+                "sitemap_declared": bool(re.search(r'^\s*sitemap:', txt, re.M | re.I)),
+            }}
+        except Exception as e:
+            robots = {"status": "missing" if "404" in str(e) or "HTTP Error 404" in str(e) else "unknown", "evidence": {"exists": False, "error": str(e)[:500]}}
+
+    sitemap_text = ""
+    try:
+        r = _audit_fetch(url + "/sitemap.xml")
+        sitemap_text = r["body"]
+    except Exception:
+        try:
+            r = _audit_fetch(url + "/sitemap_index.xml")
+            sitemap_text = r["body"]
+        except Exception as e:
+            sitemap = {"status": "missing" if "404" in str(e) or "HTTP Error 404" in str(e) else "unknown", "evidence": {"exists": False, "error": str(e)[:500]}}
+    if sitemap_text:
+        urls = re.findall(r'<loc>\s*(.*?)\s*</loc>', sitemap_text, re.I | re.S)
+        lastmods = re.findall(r'<lastmod>\s*(.*?)\s*</lastmod>', sitemap_text, re.I | re.S)
+        sitemap = {"status": "available", "evidence": {
+            "exists": True,
+            "url_count": len(urls),
+            "most_recent_lastmod": max(lastmods) if lastmods else None,
+        }}
+
+    for sub in ["/blog/", "/feed/"]:
+        try:
+            r = _audit_fetch(url + sub)
+            blog_feeds[sub] = True
+        except Exception:
+            blog_feeds[sub] = False
+    blog = {"status": "available" if blog_feeds.get("/blog/") else "missing", "evidence": {"blog_200": blog_feeds.get("/blog/", False)}}
+    feed = {"status": "available" if blog_feeds.get("/feed/") else "missing", "evidence": {"feed_200": blog_feeds.get("/feed/", False)}}
+
+    try:
+        r = _audit_fetch(url + "/wp-json/")
+        json.loads(r["raw"])
+        wp_rest = {"status": "available", "evidence": {"returns_json": True}}
+    except Exception as e:
+        wp_rest = {"status": "missing" if "404" in str(e) or "HTTP Error 404" in str(e) else "unknown", "evidence": {"returns_json": False, "error": str(e)[:500]}}
+
+    capabilities = [
+        ("homepage", homepage), ("robots_txt", robots), ("sitemap", sitemap),
+        ("blog", blog), ("rss_feed", feed), ("wp_rest_api", wp_rest),
+        ("seo_meta_description", {"status": "available" if homepage["evidence"].get("has_meta_description") else "missing", "evidence": homepage["evidence"]}),
+        ("social_sharing", {"status": "available" if homepage["evidence"].get("has_og_tags") and homepage["evidence"].get("has_twitter_card") else "missing", "evidence": homepage["evidence"]}),
+        ("structured_data", {"status": "available" if homepage["evidence"].get("has_jsonld") else "missing", "evidence": homepage["evidence"]}),
+        ("image_alt_text", {"status": "available" if homepage["evidence"].get("img_missing_or_long_alt") == 0 else "defective", "evidence": homepage["evidence"]}),
+    ]
+
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        for cap_name, cap in capabilities:
+            cur.execute(
+                "INSERT INTO capabilities (project_id, capability, status, evidence, checked_at) "
+                "VALUES (%s, %s, %s, %s, now()) "
+                "ON CONFLICT (project_id, capability) DO UPDATE SET "
+                "status=EXCLUDED.status, evidence=EXCLUDED.evidence, checked_at=now()",
+                (project_id, cap_name, cap["status"], json.dumps(cap["evidence"])))
+        conn.commit()
+    finally:
+        conn.close()
+
+    summary_lines = []
+    if homepage.get("status") != "unknown":
+        ev = homepage["evidence"]
+        summary_lines.append(f"The homepage is reachable, has a meta description and canonical link, and {ev.get('img_missing_or_long_alt', 0)} image(s) lack a proper short alt text.")
+    result = call_zen(
+        "You are summarizing a technical website audit for a non-technical business owner. "
+        "Write 5-8 short plain sentences covering what works and what needs attention. Do not use jargon.\n\n"
+        "Findings (JSON):\n" + json.dumps({c: cap for c, cap in capabilities}, default=str)[:4000],
+        model=MODEL_CONFIG["cheap"], max_tokens=800)
+    if not result["ok"]:
+        return result
+    return {"ok": True, "content": result.get("content", ""),
+            "prompt_tokens": result.get("prompt_tokens", 0),
+            "completion_tokens": result.get("completion_tokens", 0),
+            "cost": result.get("cost", 0)}
+
+
 DISPATCH = {
+    "defend_audit": handle_defend_audit,
     "generate_draft": handle_generate_draft,
     "propose_fix": handle_propose_fix,
     "agent_task": handle_agent_task,
