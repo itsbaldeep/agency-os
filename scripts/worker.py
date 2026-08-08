@@ -147,6 +147,21 @@ def _draft_validate(data, params):
             fails.append("target_keyword missing from first section")
     if "[PLACEHOLDER" in json.dumps(data):
         fails.append("contains [PLACEHOLDER token")
+    _meta_phrases = ["training-knowledge proxy", "as an AI", "language model", "my training data", "I cannot", "knowledge cutoff"]
+    _candidate_text = []
+    if isinstance(sections, list):
+        for s in sections:
+            if isinstance(s, dict):
+                _candidate_text.append(s.get("body_markdown") or "")
+    if isinstance(faqs, list):
+        for f in faqs:
+            if isinstance(f, dict):
+                _candidate_text.append(f.get("a") or "")
+    for _phrase in _meta_phrases:
+        for _block in _candidate_text:
+            if _phrase.lower() in _block.lower():
+                fails.append(f"meta-language leaked into prose: {_phrase}")
+                break
     if isinstance(sections, list):
         words = sum(len((s.get("body_markdown") or "").split()) for s in sections if isinstance(s, dict))
         wmin = int((params.get("word_count_min") or 700))
@@ -199,7 +214,8 @@ Return ONLY a JSON object (no prose, no code fences) with EXACTLY these keys:
 - At least 3 sections and at least 3 faqs.
 - "meta_description" must be at most 160 characters.
 - Total words across all section bodies must be between {wmin} and {wmax}.
-- The string "[PLACEHOLDER" must NEVER appear. If a statistic or source is not certain, write around it without inventing numbers."""
+- The string "[PLACEHOLDER" must NEVER appear. If a statistic or source is not certain, write around it without inventing numbers.
+- Never mention AI, training data, knowledge limitations, or proxies. When a statistic is uncertain, simply write the claim qualitatively without numbers — do not explain why."""
     json_only = 'CRITICAL: Respond with ONLY the JSON object. Your very first output character must be { and your last must be }. No explanation, no reasoning, no markdown fences.'
     prompt = brief + "\n\n" + hard_reqs + "\n\n" + json_only
     attempt_reasons = []
