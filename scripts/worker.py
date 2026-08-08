@@ -218,6 +218,55 @@ def call_zen(prompt, model="deepseek-v4-flash", max_tokens=1500, temperature=Non
     except Exception as e:
         return {"ok": False, "error": str(e)[:500]}
 
+def handle_onboard_project(task):
+    """Deterministic repo onboarding. Never invokes opencode."""
+    import re as _re, subprocess, os as _os
+
+    params = task["params"] or {}
+    repo_name = (params.get("repo_name") or "").strip()
+    if not _re.fullmatch(r"[a-z0-9-]+", repo_name):
+        return {"ok": False, "error": "repo_name required, must match ^[a-z0-9-]+$"}
+    git_url = (params.get("git_url") or "").strip()
+    if not git_url:
+        return {"ok": False, "error": "git_url is required"}
+    github_owner = params.get("github_owner") or "itsbaldeep"
+    base_branch = params.get("base_branch") or "main"
+
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO projects (name, repo_name, repo_url, github_owner, base_branch, agent_allowed) "
+            "VALUES (%s, %s, %s, %s, %s, true) "
+            "ON CONFLICT (repo_name) DO UPDATE SET "
+            "repo_url=EXCLUDED.repo_url, github_owner=EXCLUDED.github_owner, "
+            "base_branch=EXCLUDED.base_branch, agent_allowed=true",
+            (repo_name, repo_name, git_url, github_owner, base_branch))
+        conn.commit()
+    finally:
+        conn.close()
+
+    local_path = f"/home/agency/projects/{repo_name}"
+    if not _os.path.isdir(local_path):
+        clone = subprocess.run(["git", "clone", git_url, local_path],
+                               capture_output=True, text=True, timeout=120,
+                               env={**_os.environ, "GIT_TERMINAL_PROMPT": "0"})
+        if clone.returncode != 0:
+            return {"ok": False, "error": f"git clone failed: {clone.stderr.strip()[:500]}"}
+    elif not _os.path.isdir(f"{local_path}/.git"):
+        return {"ok": False, "error": f"Directory exists but is not a git repo: {local_path}"}
+
+    fetch = subprocess.run(["git", "fetch", "origin"], capture_output=True, text=True,
+                           cwd=local_path, timeout=120,
+                           env={**_os.environ, "GIT_TERMINAL_PROMPT": "0"})
+    if fetch.returncode != 0:
+        return {"ok": False, "error": f"git fetch failed: {fetch.stderr.strip()[:500]}"}
+
+    return {"ok": True,
+            "content": f"onboarded {repo_name} (base {base_branch}), clone ready at {local_path}",
+            "prompt_tokens": 0, "completion_tokens": 0, "cost": 0}
+
+
 def get_project(repo_name):
     conn = get_conn()
     try:
@@ -1880,6 +1929,7 @@ DISPATCH = {
     "ask": handle_ask,
     "design_page": handle_design_page,
     "search_jobs": handle_search_jobs,
+    "onboard_project": handle_onboard_project,
     "generate_resume": handle_generate_resume,
     "generate_cover_letter": handle_generate_cover_letter,
     "find_contacts": handle_find_contacts,
