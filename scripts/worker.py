@@ -567,7 +567,7 @@ def handle_propose_fix(task):
 
         # Step 5: capture diff for dashboard
         diff_proc = git("diff", f"{base_branch}..{branch}")
-        diff_text = diff_proc.stdout[:50000]
+        diff_text = diff_proc.stdout
         names_proc = git("diff", "--name-status", f"{base_branch}..{branch}")
         names_text = names_proc.stdout[:5000]
 
@@ -644,13 +644,15 @@ def handle_propose_fix(task):
         # Step 7: machine review of the diff before auto-merge
         try:
             review_pr = pr_number if pr_number else pr_data["number"]
-            review_diff = git("diff", f"{base_branch}..{branch}").stdout[:9000]
+            if not diff_text.strip():
+                raise RuntimeError("empty diff, skipping review")
             review_model = "glm-5.2" if "flash" in model else "deepseek-v4-flash"
             review_prompt = (
                 "You are reviewing a code diff before auto-merge. "
                 "List ONLY merge-blocking defects: crashes, wrong logic, security issues, "
                 "invalid syntax, broken invocations. Ignore style. If none, reply exactly CLEAN. "
-                f"Task description: {description}\nDiff: {review_diff}")
+                "Output ONLY your final verdict: either the single word CLEAN, or a short numbered list of defects. No reasoning, no deliberation. "
+                f"Task description: {description}\nDiff: {diff_text[:9000]}")
             rev = call_zen(review_prompt, model=review_model, max_tokens=1200)
             verdict = (rev.get("content") or "").strip() if rev.get("ok") else ""
             if rev.get("ok") and verdict:
@@ -662,10 +664,11 @@ def handle_propose_fix(task):
                               "User-Agent": "AgencyOS-Worker/1.0"}
                 ureq = urllib.request.Request(
                     f"https://api.github.com/repos/{proj['github_owner']}/{repo}/issues/{review_pr}/comments",
-                    data=json.dumps({"body": f"🔍 Machine review ({review_model}):\n\n{verdict}"}).encode(),
+                    data=json.dumps({"body": f"🔍 Machine review ({review_model}):\n\n{verdict[:1500]}"}).encode(),
                     headers={**gh_headers, "Content-Type": "application/json"})
                 urllib.request.urlopen(ureq, timeout=30)
-                if verdict != "CLEAN":
+                last_line = next((l.strip() for l in reversed(verdict.splitlines()) if l.strip()), "")
+                if verdict != "CLEAN" and last_line != "CLEAN":
                     lreq = urllib.request.Request(
                         f"https://api.github.com/repos/{proj['github_owner']}/{repo}/issues/{review_pr}/labels",
                         data=json.dumps({"labels": ["hold"]}).encode(),
