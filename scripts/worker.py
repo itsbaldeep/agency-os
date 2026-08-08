@@ -218,28 +218,33 @@ def call_zen(prompt, model="deepseek-v4-flash", max_tokens=1500, temperature=Non
     except Exception as e:
         return {"ok": False, "error": str(e)[:500]}
 
-# ── REPO ALLOWLIST for propose_fix ──────────────────────────────
-# Only agency-owned repos under ~/projects can be targeted.
-# --dangerously-skip-permissions is safe here because these are
-# repos we control. Client repos must go through a sandboxed
-# execution boundary (separate container, no host git access,
-# limited token scope) before they can be added to this list.
-ALLOWED_REPOS = {"hearth", "streamwise", "agency-dashboard", "agency-os"}
+def get_project(repo_name):
+    conn = get_conn()
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            "SELECT repo_name, github_owner, base_branch, "
+            "COALESCE(local_path, '/home/agency/projects/' || repo_name) AS local_path "
+            "FROM projects WHERE repo_name=%s AND agent_allowed=true", (repo_name,))
+        return cur.fetchone()
+    finally:
+        conn.close()
 
 def handle_propose_fix(task):
     params = task["params"] or {}
     repo = params.get("repo", "")
     description = params.get("description", "")
-    base_branch = params.get("base", "main")
     model = params.get("model") or "opencode/deepseek-v4-flash"
     timeout_s = int(params.get("timeout") or 180)
 
-    if repo not in ALLOWED_REPOS:
-        return {"ok": False, "error": f"Repo '{repo}' is not on the allowed list: {sorted(ALLOWED_REPOS)}"}
+    proj = get_project(repo)
+    if not proj:
+        return {"ok": False, "error": f"Repo '{repo}' is not authorized for propose_fix"}
     if not description.strip():
         return {"ok": False, "error": "description is required"}
 
-    repo_path = f"/home/agency/projects/{repo}"
+    repo_path = proj["local_path"]
+    base_branch = params.get("base") or proj["base_branch"]
     branch = f"fix/worker-{task['id']}-{slug(description)[:30]}"
 
     import os, subprocess, tempfile
@@ -331,7 +336,7 @@ def handle_propose_fix(task):
             "body": pr_body,
         }).encode()
         pr_req = urllib.request.Request(
-            f"https://api.github.com/repos/itsbaldeep/{repo}/pulls",
+            f"https://api.github.com/repos/{proj['github_owner']}/{repo}/pulls",
             data=pr_payload,
             headers={
                 "Authorization": f"Bearer {token}",
@@ -391,13 +396,14 @@ def handle_agent_task(task):
     model = params.get("model") or "opencode/deepseek-v4-flash"
     timeout_s = int(params.get("timeout") or 300)
 
-    if repo not in ALLOWED_REPOS:
-        return {"ok": False, "error": f"Repo '{repo}' is not on the allowed list: {sorted(ALLOWED_REPOS)}"}
+    proj = get_project(repo)
+    if not proj:
+        return {"ok": False, "error": f"Repo '{repo}' is not authorized for agent tasks"}
     if not prompt:
         return {"ok": False, "error": "prompt is required"}
 
     import subprocess, os as _os, re
-    repo_path = f"/home/agency/projects/{repo}"
+    repo_path = proj["local_path"]
     log_path = f"/home/agency/agency-os/logs/task-{task['id']}.log"
     oc_env = {**os.environ, "HOME": "/home/agency",
               "OPENAI_BASE_URL": ZEN_URL.rsplit("/chat", 1)[0],
