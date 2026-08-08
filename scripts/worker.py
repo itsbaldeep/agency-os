@@ -101,6 +101,26 @@ def _draft_parse_json(content):
                 return None
         return None
 
+def _parse_json_list(content):
+    s = (content or "").strip()
+    if s.startswith("```"):
+        lines = s.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        s = "\n".join(lines).strip()
+    a, b = s.find("["), s.rfind("]")
+    if a != -1 and b > a:
+        try:
+            return json.loads(s[a:b+1])
+        except Exception:
+            return None
+    try:
+        return json.loads(s)
+    except Exception:
+        return None
+
 def _draft_validate(data, params):
     fails = []
     title = (data.get("title") or "").strip()
@@ -2091,6 +2111,85 @@ def handle_run_job_campaign(task):
     return result
 
 
+def handle_self_review(task):
+    """Deterministic self-review: collect signals via SQL, one Zen call for fix suggestions."""
+    conn = get_conn()
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            "SELECT type, error FROM tasks WHERE status='failed' AND finished_at > now() - interval '7 days'")
+        failed_tasks = cur.fetchall()
+        cur.execute(
+            "SELECT bj.name AS job_name, count(*) AS n FROM job_runs jr "
+            "JOIN background_jobs bj ON bj.id = jr.job_id "
+            "WHERE jr.status='failed' AND jr.started_at > now() - interval '7 days' GROUP BY bj.name")
+        job_fails = cur.fetchall()
+        cur.execute(
+            "SELECT type, COALESCE(SUM(cost),0) AS cost FROM tasks "
+            "WHERE created_at > now() - interval '7 days' GROUP BY type")
+        task_cost = cur.fetchall()
+        cur.execute(
+            "SELECT count(*) AS n FROM content_items "
+            "WHERE status='draft' AND created_at < now() - interval '7 days'")
+        stale_drafts = cur.fetchone()["n"]
+
+        failed_txt = "\n".join(f"  {t['type']}: {t['error']}" for t in failed_tasks) or "  none"
+        job_txt = "\n".join(f"  {j['job_name']}: {j['n']}" for j in job_fails) or "  none"
+        cost_txt = "\n".join(f"  {c['type']}: ${float(c['cost']):.4f}" for c in task_cost) or "  none"
+
+        prompt = (
+            "You are reviewing this Agency OS system. Below are the last 7 days of signals:\n\n"
+            f"FAILED TASKS:\n{failed_txt}\n\n"
+            f"JOB_RUN FAILURES BY JOB:\n{job_txt}\n\n"
+            f"COST BY TASK TYPE:\n{cost_txt}\n\n"
+            f"STALE DRAFTS (older than 7 days): {stale_drafts}\n\n"
+            "Return ONLY a JSON array of at most 3 objects, each with exactly the keys "
+            '{"title": string, "rationale": string, "proposed_fix_description": string}. '
+            'proposed_fix_description must read as a self-contained fix task description. '
+            "No prose, no code fences."
+        )
+        result = call_zen(prompt, model=MODEL_CONFIG["quality"], max_tokens=1500, temperature=MODEL_CONFIG["temp_structured"])
+        if not result["ok"]:
+            return result
+
+        items = _parse_json_list(result.get("content") or "")
+        if not isinstance(items, list) or not items:
+            return {"ok": False, "error": f"self_review: output was not a JSON array. Raw: {(result.get('content') or '')[:200]}"}
+
+        cur.execute(
+            "INSERT INTO brands (name, slug, access_tier) VALUES ('system', 'system', '0') "
+            "ON CONFLICT (slug) DO NOTHING")
+        cur.execute("SELECT id FROM brands WHERE slug='system'")
+        sysbrand = cur.fetchone()["id"]
+
+        titles = []
+        for s in items[:3]:
+            if not isinstance(s, dict):
+                continue
+            title = str(s.get("title") or "").strip()
+            rationale = str(s.get("rationale") or "").strip()
+            fix = str(s.get("proposed_fix_description") or "").strip()
+            if not title or not fix:
+                continue
+            full = rationale if rationale else "Self-review suggestion."
+            if fix:
+                full += "\n\nPROPOSED FIX:\n" + fix
+            cur.execute(
+                "INSERT INTO suggestions (brand_id, title, rationale, action_type, status) "
+                "VALUES (%s, %s, %s, 'propose_fix', 'pending')",
+                (sysbrand, title[:500], full[:5000]))
+            titles.append(title)
+        conn.commit()
+
+        return {"ok": True,
+                "content": json.dumps({"titles": titles, "count": len(titles)}, separators=(',', ':')),
+                "prompt_tokens": result.get("prompt_tokens", 0),
+                "completion_tokens": result.get("completion_tokens", 0),
+                "cost": result.get("cost", 0)}
+    finally:
+        conn.close()
+
+
 DISPATCH = {
     "generate_draft": handle_generate_draft,
     "propose_fix": handle_propose_fix,
@@ -2108,6 +2207,7 @@ DISPATCH = {
     "generate_linkedin_note": handle_generate_linkedin_note,
     "send_application_email": handle_send_application_email,
     "run_job_campaign": handle_run_job_campaign,
+    "self_review": handle_self_review,
 }
 
 def poll():
