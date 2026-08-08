@@ -79,6 +79,151 @@ def ch_trace(event):
     except:
         pass
 
+def _draft_parse_json(content):
+    s = (content or "").strip()
+    if s.startswith("```"):
+        lines = s.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        s = "\n".join(lines).strip()
+    try:
+        d = json.loads(s)
+        return d if isinstance(d, dict) else None
+    except Exception:
+        a, b = s.find("{"), s.rfind("}")
+        if a != -1 and b > a:
+            try:
+                d = json.loads(s[a:b+1])
+                return d if isinstance(d, dict) else None
+            except Exception:
+                return None
+        return None
+
+def _draft_validate(data, params):
+    fails = []
+    title = (data.get("title") or "").strip()
+    if not title:
+        fails.append("title empty")
+    meta = (data.get("meta_description") or "").strip()
+    if not (1 <= len(meta) <= 160):
+        fails.append(f"meta_description {len(meta)} chars (need 1-160)")
+    sections = data.get("sections")
+    faqs = data.get("faqs")
+    if not isinstance(sections, list) or len(sections) < 3:
+        fails.append("need >=3 sections")
+    if not isinstance(faqs, list) or len(faqs) < 3:
+        fails.append("need >=3 faqs")
+    target = (params.get("target_keyword") or "").strip()
+    if target:
+        tl = target.lower()
+        first_body = ""
+        if isinstance(sections, list) and sections and isinstance(sections[0], dict):
+            first_body = (sections[0].get("body_markdown") or "")
+        if tl not in title.lower():
+            fails.append("target_keyword missing from title")
+        if tl not in first_body.lower():
+            fails.append("target_keyword missing from first section")
+    if "[PLACEHOLDER" in json.dumps(data):
+        fails.append("contains [PLACEHOLDER token")
+    if isinstance(sections, list):
+        words = sum(len((s.get("body_markdown") or "").split()) for s in sections if isinstance(s, dict))
+        wmin = int((params.get("word_count_min") or 700))
+        wmax = int((params.get("word_count_max") or 1600))
+        if not (wmin <= words <= wmax):
+            fails.append(f"body word count {words} (need {wmin}-{wmax})")
+    return fails
+
+def _draft_assemble(data):
+    parts = [f"# {data['title']}", "", f"*{data['meta_description']}*", ""]
+    for s in data["sections"]:
+        parts += [f"## {s['heading']}", "", s["body_markdown"], ""]
+    parts += ["## FAQs", ""]
+    for f in data["faqs"]:
+        parts += [f"**{f['q']}**", "", f["a"], ""]
+    return "\n".join(parts).rstrip()
+
+def _draft_blog_post(params, suggestion_text, brand_context):
+    brief = f"""You are writing a blog post for this brand.
+
+Suggestion to fulfill: {suggestion_text}
+
+Brand context (use ONLY this for claims about the brand):
+{brand_context}
+
+Structure requirements (apply to the content you write):
+1. LEAD: Front-loaded answer — state the key takeaway in the first paragraph.
+2. BODY: Question-led sections using H2 headings (e.g. "What Makes X Different?" / "How Does Y Work?").
+3. SCHEMA-READY: Headings should be natural FAQ/Article schema targets.
+4. GROUNDING: Every stat or claim NOT found in the brand context must be omitted or written generically. Never invent a number, quote, or label. No [PLACEHOLDER tokens allowed in the output.
+5. BRAND CLAIMS: If the brand's own positioning uses superlatives (e.g. "cleanest", "best"), quote them as the brand's claim — do NOT assert them as objective fact. Write "the brand positions itself as..." not "it is the cleanest..."
+6. NO HEALTH CLAIMS: Do not make medical/health claims ("cure", "boost immunity", "detox") unless the brand context explicitly provides evidence.
+7. TONE: Informative, helpful, not salesy.
+8. LABEL any search-engine or AI-visibility claims as "training-knowledge proxy".
+
+Return ONLY a JSON object (no prose, no code fences) with EXACTLY these keys:
+- "title": string
+- "slug": string (url-safe slug)
+- "meta_description": string, 1-160 chars
+- "target_keyword": string
+- "sections": array of objects {{"heading": string, "body_markdown": string}} with AT LEAST 3
+- "faqs": array of objects {{"q": string, "a": string}} with AT LEAST 3
+- "image_slots": array of objects {{"alt": string, "prompt": string, "placement": string}}
+- "sources": array of strings"""
+    prompt = brief
+    for attempt in range(2):
+        result = call_zen(prompt, model=MODEL_CONFIG["quality"], max_tokens=6000, temperature=MODEL_CONFIG["temp_structured"])
+        if not result["ok"]:
+            if attempt == 0:
+                continue
+            return result
+        data = _draft_parse_json(result.get("content") or "")
+        if data is None:
+            reasons = ["output was not valid JSON"]
+        else:
+            reasons = _draft_validate(data, params)
+        if data is not None and not reasons:
+            break
+        if attempt == 0:
+            prompt = brief + f"\n\nYour previous output failed these checks: {', '.join(reasons)}. Return corrected JSON only."
+    else:
+        return {"ok": False, "error": "draft failed validation: " + ", ".join(reasons)}
+
+    body = _draft_assemble(data)
+
+    compliance_flags = []
+    try:
+        sys.path.insert(0, "/home/agency/agency-os/scripts")
+        import importlib.util as _ciu
+        _cspec = _ciu.spec_from_file_location("sug_mod2", "/home/agency/agency-os/scripts/suggestion-engine.py")
+        _csug = _ciu.module_from_spec(_cspec)
+        _cspec.loader.exec_module(_csug)
+        compliance_flags = _csug.check_compliance(params.get("suggestion", ""), body)
+    except Exception:
+        pass
+
+    suggestion_id = params.get("suggestion_id")
+    brand_id = params.get("brand_id")
+    suggestion_title = params.get("suggestion_title") or (params.get("suggestion", "")[:80])
+    try:
+        _conn2 = get_conn()
+        _c2 = _conn2.cursor()
+        _c2.execute(
+            "INSERT INTO content_items (brand_id, suggestion_id, title, content_type, body, status, compliance_flags, structured) "
+            "VALUES (%s, %s, %s, %s, %s, 'draft', %s, %s) RETURNING id",
+            (brand_id, suggestion_id, (data.get("title") or suggestion_title)[:200], "blog_post", body,
+             json.dumps(compliance_flags) if compliance_flags else "[]", json.dumps(data))
+        )
+        ci_id = _c2.fetchone()[0]
+        _conn2.commit()
+        _conn2.close()
+        result["content_item_id"] = ci_id
+    except Exception as e:
+        print(f"[worker] Failed to create content_items row: {e}", flush=True)
+
+    return result
+
 def handle_generate_draft(task):
     params = task["params"] or {}
     suggestion_text = params.get("suggestion", "")
@@ -87,25 +232,9 @@ def handle_generate_draft(task):
     content_item_id = params.get("content_item_id")
 
     if content_type == "blog_post":
-        prompt = f"""You are writing a blog post for this brand. Write 500-800 words.
+        return _draft_blog_post(params, suggestion_text, brand_context)
 
-Suggestion to fulfill: {suggestion_text}
-
-Brand context (use ONLY this for claims about the brand):
-{brand_context}
-
-STRUCTURE (per GEO requirements):
-1. LEAD: Front-loaded answer — state the key takeaway in the first paragraph.
-2. BODY: Question-led sections using H2 headings (e.g. "## What Makes X Different?" / "## How Does Y Work?").
-3. SCHEMA-READY: Headings should be natural FAQ/Article schema targets.
-4. PLACEHOLDER RULE: Every stat or claim NOT found in the brand context MUST be written as [PLACEHOLDER: description of what to fill]. Never invent a number or quote.
-5. BRAND CLAIMS: If the brand's own positioning uses superlatives (e.g. "cleanest", "best"), quote them as the brand's claim — do NOT assert them as objective fact. Write "the brand positions itself as..." not "it is the cleanest..."
-6. NO HEALTH CLAIMS: Do not make medical/health claims ("cure", "boost immunity", "detox") unless the brand context explicitly provides evidence.
-7. TONE: Informative, helpful, not salesy. ~500-800 words.
-8. LABEL any search-engine or AI-visibility claims as "training-knowledge proxy".
-
-Output as plain text with markdown headings. Do not include compliance warnings in the output."""
-    elif content_type == "human_article":
+    if content_type == "human_article":
         prompt = f"""Write a blog article that reads as human-written — no detectable AI patterns. Target 600-1200 words.
 
 Suggestion to fulfill: {suggestion_text}
