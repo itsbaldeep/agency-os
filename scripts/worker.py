@@ -181,8 +181,9 @@ Return ONLY a JSON object (no prose, no code fences) with EXACTLY these keys:
 - Total words across all section bodies must be between {wmin} and {wmax}.
 - The string "[PLACEHOLDER" must NEVER appear. If a statistic or source is not certain, write around it without inventing numbers."""
     prompt = brief + "\n\n" + hard_reqs
+    attempt_reasons = []
     for attempt in range(2):
-        result = call_zen(prompt, model=params.get("model") or MODEL_CONFIG["quality"], max_tokens=6000, temperature=MODEL_CONFIG["temp_structured"])
+        result = call_zen(prompt, model=params.get("model") or MODEL_CONFIG["quality"], max_tokens=6000, temperature=MODEL_CONFIG["temp_structured"], timeout=180)
         if not result["ok"]:
             if attempt == 0:
                 continue
@@ -192,13 +193,15 @@ Return ONLY a JSON object (no prose, no code fences) with EXACTLY these keys:
             reasons = ["output was not valid JSON"]
         else:
             reasons = _draft_validate(data, params)
+        attempt_reasons.append(", ".join(reasons))
         if data is not None and not reasons:
             break
         if attempt == 0:
-            prompt = brief + f"\n\nYour previous output failed these checks: {', '.join(reasons)}. Return corrected JSON only."
+            prompt = brief + "\n\n" + hard_reqs + "\n\nYour previous output failed these checks: " + ", ".join(reasons) + ". Here is your previous JSON to correct: " + (result.get("content") or "")[:3000] + "\nReturn the corrected JSON only."
     else:
         raw = (result.get("content") or "")[:200]
-        return {"ok": False, "error": "draft failed validation: " + ", ".join(reasons) + " | raw output starts: " + raw}
+        reasons_list = attempt_reasons + [""] * (2 - len(attempt_reasons))
+        return {"ok": False, "error": f"draft failed validation: attempt 1: {reasons_list[0]} | attempt 2: {reasons_list[1]} | raw output starts: {raw}"}
 
     body = _draft_assemble(data)
 
