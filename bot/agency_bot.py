@@ -42,6 +42,7 @@ import psycopg2.extras
 from psycopg2.extras import Json
 
 CHANNEL_ID = int(os.environ["DISCORD_CHANNEL_ID"])
+ASSISTANT_CHANNEL_ID = int(os.environ.get("ASSISTANT_CHANNEL_ID", "0"))
 OWNER_ID = int(os.environ.get("OWNER_ID", "0"))
 DEFAULT_TYPE = os.environ.get("DEFAULT_TASK_TYPE", "generate_draft")
 ST_APPROVED = os.environ.get("APPROVAL_APPROVED_STATUS", "approved")
@@ -469,11 +470,30 @@ async def help_cmd(ctx):
     )
 
 
+@bot.event
+async def on_message(message):
+    if (not message.author.bot
+            and ASSISTANT_CHANNEL_ID
+            and message.channel.id == ASSISTANT_CHANNEL_ID
+            and message.author.id == OWNER_ID
+            and not message.content.startswith("!")):
+        content = message.content.strip()
+        if content:
+            q("INSERT INTO assistant_messages (role, content) "
+              "VALUES ('user', %s)", (content,))
+            q("""INSERT INTO tasks (type, status, params, triggered_by)
+                 VALUES ('assistant_turn', 'queued', %s, 'assistant')""",
+              (Json({"message": content}),))
+            await message.add_reaction("\U0001F914")
+    await bot.process_commands(message)
+
+
 async def push_loop():
     """Real-time events: finished/failed tasks and new approvals."""
     global _primed
     await bot.wait_until_ready()
     channel = bot.get_channel(CHANNEL_ID)
+    assistant = bot.get_channel(ASSISTANT_CHANNEL_ID) if ASSISTANT_CHANNEL_ID else None
     while not bot.is_closed():
         try:
             if not _primed:  # don't replay history on startup
@@ -490,7 +510,18 @@ async def push_loop():
             for r in rows:
                 if r["status"] not in DONE_STATES + FAIL_STATES:
                     continue
-                if r["status"] in DONE_STATES and r["type"] == "ask":
+                if assistant and r["type"] == "assistant_turn":
+                    if r["status"] in DONE_STATES:
+                        answer = r["result_ref"] or ""
+                        for i in range(0, len(answer), 1900):
+                            await assistant.send(answer[i:i + 1900])
+                    else:
+                        await assistant.send(
+                            f"❌ **task {r['id']}** FAILED — "
+                            f"{r['spec'][:100]}\n"
+                            f"```{(r['error'] or '')[:400]}```"
+                            f"\n🔎 {DASHBOARD_URL}/tasks/{r['id']}")
+                elif r["status"] in DONE_STATES and r["type"] == "ask":
                     answer = r["result_ref"] or "no answer"
                     if len(answer) > 9500:
                         import io as _io
