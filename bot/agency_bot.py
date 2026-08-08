@@ -284,6 +284,44 @@ async def ask_cmd(ctx, *, question: str):
     await ctx.reply(f"🧠 thinking about it — task {rows[0]['id']}")
 
 
+@bot.command(name="draft")
+async def draft_cmd(ctx, *, spec: str):
+    """!draft <brand> keyword=<kw> [words=<min>-<max>] <brief> — queue a blog draft."""
+    if not guard(ctx):
+        return
+    brand, _, rest = spec.partition(" ")
+    words = rest.split(" ")
+    kw = wmin = wmax = None
+    out = []
+    for w in words:
+        if w.startswith("keyword=") and "=" in w[8:]:
+            kw = w.split("=", 1)[1]
+        elif w.startswith("words=") and "=" in w[6:] and "-" in w:
+            lo, _, hi = w.split("=", 1)[1].partition("-")
+            if lo.isdigit() and hi.isdigit():
+                wmin, wmax = int(lo), int(hi)
+        else:
+            out.append(w)
+    brief = " ".join(out).strip()
+    rows = q("SELECT id FROM brands WHERE name ILIKE %s LIMIT 1", (brand,))
+    if not rows:
+        names = [r["name"] for r in q("SELECT name FROM brands ORDER BY name")]
+        await ctx.reply(f"❌ brand **{brand}** not found.\n"
+                        f"Available: {', '.join(names)}")
+        return
+    brand_id = rows[0]["id"]
+    params = {"content_type": "blog_post", "brand_id": brand_id,
+              "suggestion": brief, "suggestion_title": brief[:80],
+              "target_keyword": kw or "", "word_count_min": wmin or 700,
+              "word_count_max": wmax or 1600, "source": "discord"}
+    rows = q(
+        """INSERT INTO tasks (type, status, params, triggered_by)
+           VALUES ('generate_draft', 'queued', %s, 'discord') RETURNING id""",
+        (Json(params),),
+    )
+    await ctx.reply(f"✍️ drafting — task {rows[0]['id']}")
+
+
 @bot.command(name="help")
 async def help_cmd(ctx):
     if not guard(ctx):
@@ -293,7 +331,8 @@ async def help_cmd(ctx):
         "`!run <repo> <prompt>` — run opencode in a repo (no git ops; prefixes: model= timeout=)\n"
         "`!ask <question>` — answer a question (prefixes: model= timeout=)\n"
         "`!task <spec>` · `!task <type>: <spec>` · `!queue` · `!status`\n"
-        "`!approvals` · `!approve <id>` · `!reject <id> [reason]` · `!fail <id>`"
+        "`!approvals` · `!approve <id>` · `!reject <id> [reason]` · `!fail <id>` · "
+        "`!draft <brand> keyword=<kw> [words=<min>-<max>] <brief>`"
     )
 
 
