@@ -200,10 +200,11 @@ Return ONLY a JSON object (no prose, no code fences) with EXACTLY these keys:
 - "meta_description" must be at most 160 characters.
 - Total words across all section bodies must be between {wmin} and {wmax}.
 - The string "[PLACEHOLDER" must NEVER appear. If a statistic or source is not certain, write around it without inventing numbers."""
-    prompt = brief + "\n\n" + hard_reqs
+    json_only = 'CRITICAL: Respond with ONLY the JSON object. Your very first output character must be { and your last must be }. No explanation, no reasoning, no markdown fences.'
+    prompt = brief + "\n\n" + hard_reqs + "\n\n" + json_only
     attempt_reasons = []
     for attempt in range(2):
-        result = call_zen(prompt, model=params.get("model") or MODEL_CONFIG["quality"], max_tokens=6000, temperature=MODEL_CONFIG["temp_structured"], timeout=180)
+        result = call_zen(prompt, model=params.get("model") or MODEL_CONFIG["quality"], max_tokens=14000, temperature=MODEL_CONFIG["temp_structured"], timeout=180)
         if not result["ok"]:
             if attempt == 0:
                 continue
@@ -217,11 +218,12 @@ Return ONLY a JSON object (no prose, no code fences) with EXACTLY these keys:
         if data is not None and not reasons:
             break
         if attempt == 0:
-            prompt = brief + "\n\n" + hard_reqs + "\n\nYour previous output failed these checks: " + ", ".join(reasons) + ". Here is your previous JSON to correct: " + (result.get("content") or "")[:3000] + "\nReturn the corrected JSON only."
+            prompt = brief + "\n\n" + hard_reqs + "\n\n" + json_only + "\n\nYour previous output failed these checks: " + ", ".join(reasons) + ". Here is your previous JSON to correct: " + (result.get("content") or "")[:3000] + "\nReturn the corrected JSON only."
     else:
         raw = (result.get("content") or "")[:200]
+        raw_end = (result.get("content") or "")[-120:]
         reasons_list = attempt_reasons + [""] * (2 - len(attempt_reasons))
-        return {"ok": False, "error": f"draft failed validation: attempt 1: {reasons_list[0]} | attempt 2: {reasons_list[1]} | raw output starts: {raw}"}
+        return {"ok": False, "error": f"draft failed validation: attempt 1: {reasons_list[0]} | attempt 2: {reasons_list[1]} | raw output starts: {raw} | raw output ends: {raw_end}"}
 
     body = _draft_assemble(data)
 
