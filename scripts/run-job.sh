@@ -69,7 +69,7 @@ if [ "$STATUS" = "failed" ] && [ -n "$RUN_ID" ]; then
   if [ ! -e "$MARKER" ] || [ "$(( $(date +%s) - $(stat -c %Y "$MARKER") ))" -ge 1800 ]; then
     WEBHOOK=$(grep DISCORD_WEBHOOK_URL /home/agency/agency-os/.env | cut -d= -f2)
     if [ -n "$WEBHOOK" ]; then
-      NOTIFY_DETAIL="${DETAIL:0:300}"
+      NOTIFY_DETAIL=$(echo "$DETAIL" | tr '\n' ' ' | tr '"' "'" | cut -c1-300)
       curl -sf --max-time 10 -H "Content-Type: application/json" \
         -d "{ \"content\": \"🚨 job $JOB_NAME failed (run $RUN_ID): $NOTIFY_DETAIL\" }" \
         "$WEBHOOK" && touch "$MARKER"
