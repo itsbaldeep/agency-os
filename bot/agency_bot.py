@@ -83,11 +83,10 @@ def guard(ctx) -> bool:
     return True
 
 
-def run_gh(args, repo):
+def run_gh(args):
     """Execute a gh REST command; return None on success, else stderr."""
     try:
-        p = subprocess.run(["gh", "api", *args,
-                            "--repo", f"itsbaldeep/{repo}"],
+        p = subprocess.run(["gh", "api", *args],
                            capture_output=True, text=True, timeout=15)
     except subprocess.TimeoutExpired:
         return "timed out after 15s"
@@ -102,7 +101,7 @@ async def hold_cmd(ctx, pr_number: int, repo: str = "agency-os"):
         return
     err = run_gh(["-X", "POST",
                   f"repos/itsbaldeep/{repo}/issues/{pr_number}/labels",
-                  "-f", "labels[]=hold"], repo)
+                  "-f", "labels[]=hold"])
     await ctx.reply(f"⏸️ hold on {repo}#{pr_number}" if not err else f"❌ {err}")
 
 
@@ -111,7 +110,7 @@ async def unhold_cmd(ctx, pr_number: int, repo: str = "agency-os"):
     if not guard(ctx):
         return
     err = run_gh(["-X", "DELETE",
-                  f"repos/itsbaldeep/{repo}/issues/{pr_number}/labels/hold"], repo)
+                  f"repos/itsbaldeep/{repo}/issues/{pr_number}/labels/hold"])
     await ctx.reply(f"▶️ released {repo}#{pr_number}" if not err else f"❌ {err}")
 
 
