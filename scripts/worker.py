@@ -29,6 +29,19 @@ def redact_secrets(text):
         pass
     return text
 
+DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
+
+def post_discord(text):
+    if not DISCORD_WEBHOOK_URL:
+        return
+    try:
+        data = json.dumps({"content": text[:2000]}).encode()
+        req = urllib.request.Request(DISCORD_WEBHOOK_URL, data=data,
+                                     headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=15)
+    except Exception:
+        pass
+
 DB_HOST = "100.64.0.1"
 DB_NAME = "agencyos"
 DB_USER = "agency"
@@ -642,11 +655,13 @@ def handle_propose_fix(task):
         })
 
         # Step 7: machine review of the diff before auto-merge
+        review_pr = pr_number if pr_number else pr_data["number"]
+        review_model = "glm-5.2" if "flash" in model else "deepseek-v4-flash"
+        outcome = "failure"
+        note = "review did not produce a verdict"
         try:
-            review_pr = pr_number if pr_number else pr_data["number"]
             if not diff_text.strip():
                 raise RuntimeError("empty diff, skipping review")
-            review_model = "glm-5.2" if "flash" in model else "deepseek-v4-flash"
             review_prompt = (
                 "You are reviewing a code diff before auto-merge. "
                 "List ONLY merge-blocking defects: crashes, wrong logic, security issues, "
@@ -655,31 +670,36 @@ def handle_propose_fix(task):
                 f"Task description: {description}\nDiff: {diff_text[:9000]}")
             rev = call_zen(review_prompt, model=review_model, max_tokens=4000)
             verdict = (rev.get("content") or "").strip() if rev.get("ok") else ""
-            if rev.get("ok") and verdict:
-                total_in += rev.get("prompt_tokens", 0)
-                total_out += rev.get("completion_tokens", 0)
-                cost = total_in * prices["in"] + total_out * prices["out"]
-                token = os.environ.get("GITHUB_TOKEN", "")
-                gh_headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
-                              "User-Agent": "AgencyOS-Worker/1.0"}
-                last_line = next((l.strip() for l in reversed(verdict.splitlines()) if l.strip()), "")
-                if last_line != "VERDICT: CLEAN":
-                    d = verdict.lower().find("defect")
-                    from_defect = verdict[d:] if d != -1 else verdict
-                    note = from_defect if len(from_defect) <= 1200 else verdict[-1200:]
-                    ureq = urllib.request.Request(
-                        f"https://api.github.com/repos/{proj['github_owner']}/{repo}/issues/{review_pr}/comments",
-                        data=json.dumps({"body": f"🔍 Machine review ({review_model}):\n\n{note}"}).encode(),
-                        headers={**gh_headers, "Content-Type": "application/json"})
-                    urllib.request.urlopen(ureq, timeout=30)
-                if last_line != "VERDICT: CLEAN":
-                    lreq = urllib.request.Request(
-                        f"https://api.github.com/repos/{proj['github_owner']}/{repo}/issues/{review_pr}/labels",
-                        data=json.dumps({"labels": ["hold"]}).encode(),
-                        headers={**gh_headers, "Content-Type": "application/json"})
-                    urllib.request.urlopen(lreq, timeout=30)
-        except Exception:
-            pass
+            if not (rev.get("ok") and verdict):
+                raise RuntimeError("review produced no verdict")
+            total_in += rev.get("prompt_tokens", 0)
+            total_out += rev.get("completion_tokens", 0)
+            cost = total_in * prices["in"] + total_out * prices["out"]
+            token = os.environ.get("GITHUB_TOKEN", "")
+            gh_headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
+                          "User-Agent": "AgencyOS-Worker/1.0"}
+            last_line = next((l.strip() for l in reversed(verdict.splitlines()) if l.strip()), "")
+            if last_line == "VERDICT: CLEAN":
+                outcome = "clean"
+            else:
+                outcome = "hold"
+                d = verdict.lower().find("defect")
+                from_defect = verdict[d:] if d != -1 else verdict
+                note = from_defect if len(from_defect) <= 1200 else verdict[-1200:]
+                ureq = urllib.request.Request(
+                    f"https://api.github.com/repos/{proj['github_owner']}/{repo}/issues/{review_pr}/comments",
+                    data=json.dumps({"body": f"🔍 Machine review ({review_model}):\n\n{note}"}).encode(),
+                    headers={**gh_headers, "Content-Type": "application/json"})
+                urllib.request.urlopen(ureq, timeout=30)
+                lreq = urllib.request.Request(
+                    f"https://api.github.com/repos/{proj['github_owner']}/{repo}/issues/{review_pr}/labels",
+                    data=json.dumps({"labels": ["hold"]}).encode(),
+                    headers={**gh_headers, "Content-Type": "application/json"})
+                urllib.request.urlopen(lreq, timeout=30)
+        except Exception as e:
+            outcome = "failure"
+            note = str(e)[:200]
+        post_discord(f"🗂 PR #{review_pr} review ({review_model}): OUTCOME **{outcome.upper()}**\n```\n{note}\n```")
 
         try:
             _tu = get_conn()
