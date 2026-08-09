@@ -656,7 +656,7 @@ def handle_propose_fix(task):
 
         # Step 7: machine review of the diff before auto-merge
         review_pr = pr_number if pr_number else pr_data["number"]
-        review_model = "glm-5.2" if "flash" in model else "deepseek-v4-flash"
+        review_model = "deepseek-v4-flash"
         outcome = "failure"
         note = "review did not produce a verdict"
         try:
@@ -668,7 +668,7 @@ def handle_propose_fix(task):
                 "invalid syntax, broken invocations. Ignore style. "
                 "You may think briefly, but your reply MUST end with a final line that is exactly VERDICT: CLEAN or exactly VERDICT: DEFECTS (with a short numbered defect list above it). "
                 f"Task description: {description}\nDiff: {diff_text[:9000]}")
-            rev = call_zen(review_prompt, model=review_model, max_tokens=4000)
+            rev = call_zen(review_prompt, model=review_model, max_tokens=6000)
             verdict = (rev.get("content") or "").strip() if rev.get("ok") else ""
             if not (rev.get("ok") and verdict):
                 raise RuntimeError("review produced no verdict")
