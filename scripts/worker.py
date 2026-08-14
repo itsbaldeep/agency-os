@@ -2740,7 +2740,7 @@ def handle_content_research(task):
         "JSON must include every successfully-fetched URL above. No prose outside the JSON."
     )
 
-    result = call_zen(analysis_prompt, model=MODEL_CONFIG["quality"], max_tokens=2500,
+    result = call_zen(analysis_prompt, model=MODEL_CONFIG["quality"], max_tokens=4500,
                       temperature=MODEL_CONFIG["temp_structured"], timeout=120)
     if not result["ok"]:
         return result
