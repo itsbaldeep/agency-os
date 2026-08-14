@@ -2775,7 +2775,31 @@ def handle_content_research(task):
         conn.close()
 
     set_task_progress(task["id"], 100, "research complete")
+
+    # Auto-chain the (cheap, sequential) outline stage. Compose is NOT queued
+    # here — a human must inspect the outline first (the expensive stage gate).
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        outline_params = {"research_id": rid, "target_keyword": target}
+        if params.get("brand_id"):
+            outline_params["brand_id"] = params["brand_id"]
+        if params.get("title"):
+            outline_params["title"] = params["title"]
+        cur.execute(
+            "INSERT INTO tasks (type, status, params, triggered_by) "
+            "VALUES ('content_outline', 'queued', %s, 'research-chain') RETURNING id",
+            (json.dumps(outline_params),))
+        outline_task_id = cur.fetchone()[0]
+        conn.commit()
+    except Exception as e:
+        outline_task_id = None
+        print(f"[worker] content_research: failed to chain outline: {e}", flush=True)
+    finally:
+        conn.close()
+
     content = json.dumps({"research_id": rid, "target_keyword": target,
+                          "outline_task_id": outline_task_id,
                           "gaps": parsed.get("gaps", []), "element_strategy": parsed.get("element_strategy", "")})
     return {"ok": True, "content": content,
             "prompt_tokens": result.get("prompt_tokens", 0),
@@ -2942,7 +2966,8 @@ def handle_content_outline(task):
             "INSERT INTO content_items (brand_id, title, content_type, body, status, structured) "
             "VALUES (%s, %s, 'article', NULL, 'outline', %s) RETURNING id",
             (brand_id,
-             params.get("title") or r["target_keyword"].capitalize(), json.dumps({"blocks": blocks})))
+             params.get("title") or r["target_keyword"].capitalize(),
+             json.dumps({"blocks": blocks, "target_keyword": r["target_keyword"]})))
         ci_id = cur.fetchone()["id"]
         conn.commit()
     finally:
