@@ -82,6 +82,20 @@ MODEL_PRICING = {
 def get_conn():
     return psycopg2.connect(host=DB_HOST, port=5432, dbname=DB_NAME, user=DB_USER, password=DB_PASS)
 
+def set_task_progress(task_id, pct, text=""):
+    """Best-effort live progress for the dashboard (never fatal)."""
+    try:
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute("UPDATE tasks SET progress=%s, progress_text=%s WHERE id=%s",
+                        (int(pct), str(text)[:300], task_id))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
 def ch_trace(event):
     try:
         cols = ["project","session_id","actor","action","detail","gate","decision","ok"]
@@ -569,6 +583,9 @@ def handle_propose_fix(task):
         all_log = []
         produced = False
         for round_i in range(1, max_rounds + 1):
+            _pct = 10 if max_rounds <= 1 else min(75, 10 + round((round_i - 1) * (65 / (max_rounds - 1))))
+            set_task_progress(task["id"], _pct,
+                              f"round {round_i}/{max_rounds}: running opencode self-fix")
             prompt = ponytail_prefix + description
             if problem:
                 prompt += ("\n\nYour earlier attempt was reviewed and flagged these "
@@ -608,6 +625,7 @@ def handle_propose_fix(task):
                 break
             problem = findings
 
+        set_task_progress(task["id"], 80, "pushing branch and opening PR")
         p = git("push", "origin", branch)
         if p.returncode != 0:
             raise RuntimeError(f"git push failed: {(p.stderr or p.stdout)[:300]}")
@@ -689,6 +707,7 @@ def handle_propose_fix(task):
         })
 
         # ── post-PR ensemble review: safety net + universal merge gate ──
+        set_task_progress(task["id"], 95, "running final ensemble review")
         review_pr = pr_number if pr_number else pr_data["number"]
         outcome = "failure"
         findings = rev_notes = ""
@@ -735,6 +754,8 @@ def handle_propose_fix(task):
             _tu.close()
         except Exception as e:
             print(f"[worker] Failed to record token_usage: {e}", flush=True)
+
+        set_task_progress(task["id"], 100, "done")
 
         return {
             "ok": True,
