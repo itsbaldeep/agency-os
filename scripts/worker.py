@@ -522,20 +522,35 @@ def handle_propose_fix(task):
             body = e.read().decode()[:500]
             return {"ok": False, "error": f"GitHub API error {e.code}: {body}"}
 
-    def git(*args, repo_dir=repo_path):
-        return subprocess.run(["git"] + list(args), capture_output=True, text=True,
-                              cwd=repo_dir, timeout=60, env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+    # Isolated worktree so the self-healing deploy job (which resets/merges
+    # inside the main checkout every ~2 min) can never clobber our branch.
+    wk = f"/tmp/agency-fix-{task['id']}-{int(time.time())}"
 
-    # Step 1: fetch latest and set up working branch
-    git("fetch", "origin")
-    if pr_number:
-        git("checkout", "-B", branch, f"origin/{branch}")
-    else:
-        git("checkout", base_branch)
-        git("pull", "origin", base_branch)
-        # Create branch; if it already exists (stale from prior failure), delete it first
-        git("branch", "-D", branch)
-        git("checkout", "-b", branch)
+    def git(*args, repo_dir=None):
+        return subprocess.run(["git"] + list(args), capture_output=True, text=True,
+                              cwd=repo_dir or (wk if os.path.isdir(wk) else repo_path),
+                              timeout=60, env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+
+    def cleanup_worktree():
+        # worktree/branch cleanup must run from the main repo, not the removed wk
+        for c in (["git", "worktree", "remove", "--force", wk],
+                  ["git", "branch", "-D", branch]):
+            subprocess.run(c, cwd=repo_path, capture_output=True, text=True, timeout=60,
+                           env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+
+    # Step 1: fetch latest, then create the isolated worktree on the task branch
+    git("fetch", "origin", repo_dir=repo_path)
+    try:
+        if pr_number:
+            r = git("worktree", "add", wk, "-b", branch, f"origin/{branch}", repo_dir=repo_path)
+        else:
+            git("worktree", "prune", repo_dir=repo_path)
+            r = git("worktree", "add", wk, "-b", branch, f"origin/{base_branch}", repo_dir=repo_path)
+        if r.returncode != 0:
+            raise RuntimeError(f"worktree add failed: {(r.stderr or r.stdout)[:300]}")
+    except Exception as e:
+        cleanup_worktree()
+        return {"ok": False, "error": str(e)[:500]}
 
     try:
         # ── Iterative agentic fix loop ───────────────────────────────────
@@ -555,7 +570,7 @@ def handle_propose_fix(task):
                       "OPENAI_API_KEY": ZEN_KEY}
             oc_env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
             oc = subprocess.run(
-                [opencode_bin, "run", "--dir", repo_path, prompt,
+                [opencode_bin, "run", "--dir", wk, prompt,
                  "--dangerously-skip-permissions", "--format", "json",
                  "--model", model],
                 capture_output=True, text=True, timeout=timeout_s, env=oc_env)
@@ -694,9 +709,8 @@ def handle_propose_fix(task):
                 body = e.read().decode()[:500]
                 raise RuntimeError(f"GitHub API error {e.code}: {body}")
 
-        # Success: delete the local fix branch, never leave orphans
-        git("checkout", base_branch)
-        git("branch", "-D", branch)
+        # Success: remove the isolated worktree (remote branch persists for the PR)
+        cleanup_worktree()
 
         # Store everything on the task's result_ref (JSON)
         result = json.dumps({
@@ -766,9 +780,8 @@ def handle_propose_fix(task):
         }
 
     except Exception as e:
-        # Clean up: delete the local branch, never leave orphans
-        git("checkout", base_branch)
-        git("branch", "-D", branch)
+        # Clean up: remove the isolated worktree, never leave orphans
+        cleanup_worktree()
         return {"ok": False, "error": str(e)[:500]}
 
 
