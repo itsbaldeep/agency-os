@@ -79,6 +79,26 @@ MODEL_PRICING = {
     "opencode/deepseek-v4-flash": {"in": INPUT_COST_PER_TOKEN, "out": OUTPUT_COST_PER_TOKEN},
 }
 
+# ── multi-stage content pipeline block schema ─────────────────────────
+# Typed, dynamically-ordered blocks. The outline stage picks any number/order
+# of any type to fit the article and beat competitors — no template, no
+# minimum-per-type rule.
+# Callee stage (research/outline) holds: brief (+ keyword_target for intro/prose,
+# + chart_type for chart). Composed stage fills the final content per type:
+#   intro/heading -> heading text
+#   prose          -> markdown
+#   table          -> rows[][]
+#   chart          -> data_series + chart_type
+#   callout        -> stat + label
+#   image_slot     -> alt + prompt
+#   faq            -> answer
+#   key_takeaways  -> points[]
+#   steps          -> steps[]
+CONTENT_BLOCK_TYPES = frozenset({
+    "intro", "heading", "prose", "table", "chart", "callout",
+    "image_slot", "faq", "key_takeaways", "steps",
+})
+
 def get_conn():
     return psycopg2.connect(host=DB_HOST, port=5432, dbname=DB_NAME, user=DB_USER, password=DB_PASS)
 
@@ -2616,9 +2636,137 @@ def handle_assistant_turn(task):
             "cost": result.get("cost", 0)}
 
 
+# ── Multi-stage content pipeline: Stage 1 content_research ───────────
+def _fetch_clean(url, max_chars=6000, timeout=25):
+    """Deterministic fetch + light cleanup. Returns (ok, cleaned_text, word_count)
+    or (False, error_msg, 0). Kept minimal: strips <script>/<style>, collapses
+    whitespace, truncates. The LLM reads the messy markup — we don't parse it."""
+    import re as _re, html as _html
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (AgencyOS Content Research; +deployden.tech)", "Accept": "text/html,*/*"})
+    try:
+        resp = urllib.request.urlopen(req, timeout=timeout)
+        raw = resp.read(300_000).decode("utf-8", errors="replace")
+    except Exception as e:
+        return False, f"fetch failed: {str(e)[:200]}", 0
+    # strip script/style blocks (their noise dwarfs markup signal)
+    cleaned = _re.sub(r"<(script|style|noscript)[\s\S]*?</\1>", " ", raw, flags=_re.I)
+    # word count over tag-stripped text (deterministic)
+    text_only = _re.sub(r"<[^>]+>", " ", cleaned)
+    word_count = len(text_only.split())
+    # collapse and truncate the markup we hand to the LLM
+    cleaned = _re.sub(r"[\s]+", " ", cleaned).strip()
+    return True, cleaned[:max_chars], word_count
+
+
+def handle_content_research(task):
+    """Stage 1: fetch competitor URLs, then one call_zen analyses what they
+    use and the topic gap. Deterministic only for fetch-success + word count;
+    the LLM reads the markup for tables/stats/images/charts/headings/freshness."""
+    params = task["params"] or {}
+    target = (params.get("target_keyword") or "").strip()
+    urls = params.get("competitor_urls") or []
+    if not target:
+        return {"ok": False, "error": "content_research: target_keyword is required"}
+    if not urls or not isinstance(urls, list):
+        return {"ok": False, "error": "content_research: competitor_urls list is required"}
+
+    set_task_progress(task["id"], 5, f"research: fetching {len(urls)} competitors")
+    fetched = []
+    for i, u in enumerate(urls):
+        u = str(u).strip()
+        if not u.startswith(("http://", "https://")):
+            u = "https://" + u
+        ok, text_or_err, wc = _fetch_clean(u)
+        fetched.append({
+            "url": u,
+            "extract_ok": ok,
+            "cleaned_text": text_or_err if ok else "",
+            "error": "" if ok else text_or_err,
+            "word_count": wc,
+        })
+        set_task_progress(task["id"], 5 + int(30 * (i + 1) / len(urls)), f"research: fetched {i+1}/{len(urls)}")
+
+    ok_fetched = [f for f in fetched if f["extract_ok"]]
+    if not ok_fetched:
+        errs = "; ".join(f.get("error", "")[:120] for f in fetched)
+        return {"ok": False, "error": f"content_research: all {len(urls)} fetches failed: {errs}"}
+
+    set_task_progress(task["id"], 40, "research: running competitor analysis")
+    analysis_prompt = (
+        "You are a content strategist analyzing competitor articles for a keyword.\n\n"
+        "TARGET KEYWORD: {target}\n\n"
+        "Below is markdown-cleaned source of each competitor page (scripts/styles stripped).\n"
+        "Read the markup carefully. Assess, per competitor:\n"
+        "  - headings[] : the heading structure (h1/h2/h3 text) it uses\n"
+        "  - elements_used[] : which content elements it deploys, from: "
+        "[table, chart, stat, image, callout, faq, steps, list, video, quote]\n"
+        "  - word_count : about how many words it has (grep the # words I counted)\n"
+        "  - freshness : how recently it was updated, if discernible (else 'unknown')\n\n"
+        "== COMPETITORS ==\n"
+    )
+    for f in ok_fetched:
+        analysis_prompt += (
+            f"\n--- URL: {f['url']} (word_count {f['word_count']}) ---\n"
+            f"{f['cleaned_text']}\n"
+        )
+    analysis_prompt += (
+        "\n\nThen, decisively:\n"
+        "1. strongest: the THREE strongest elements you saw across ALL competitors "
+        "(e.g. a table comparing pricing, a concrete stat, a step-by-step guide, a chart, an FAQ run). "
+        "Each: {\"element\": string, \"from_url\": string, \"why\": string}.\n"
+        "2. topic_gap: the SINGLE biggest topic or question these competitors do NOT cover well, "
+        "in one plain-language sentence. This is what our article will beat them on.\n\n"
+        "Respond with ONLY a JSON object:\n"
+        "{\"elements\": [{\"url\": string, \"headings\": [string], \"elements_used\": [string], "
+        "\"word_count\": int, \"freshness\": string}], "
+        "\"strongest\": [{\"element\": string, \"from_url\": string, \"why\": string}], "
+        "\"topic_gap\": string}\n"
+        "JSON must include every successfully-fetched URL above. No prose outside the JSON."
+    )
+
+    result = call_zen(analysis_prompt, model=MODEL_CONFIG["quality"], max_tokens=2500,
+                      temperature=MODEL_CONFIG["temp_structured"], timeout=120)
+    if not result["ok"]:
+        return result
+    parsed = _parse_json_list(result.get("content") or "")
+    if not parsed or not isinstance(parsed, dict):
+        # fall back to best-effort: one object with elements=[] rather than losing the run
+        parsed = {"elements": [], "strongest": [], "topic_gap": "analysis parse failed"}
+    if not parsed.get("topic_gap", "").strip():
+        parsed["topic_gap"] = "competitor analysis incomplete"
+
+    set_task_progress(task["id"], 85, "research: storing result")
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO content_research "
+            "(task_id, keyword_id, target_keyword, competitors, elements, strongest, topic_gap) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+            (task["id"], params.get("keyword_id"), target,
+             json.dumps([{k: f[k] for k in ("url", "extract_ok", "word_count", "error")} for f in fetched]),
+             json.dumps([{k: e.get(k) for k in ("url", "headings", "elements_used", "word_count", "freshness")}
+                         for e in parsed.get("elements", [])]),
+             json.dumps(parsed.get("strongest", [])),
+             parsed["topic_gap"]))
+        rid = cur.fetchone()[0]
+        conn.commit()
+    finally:
+        conn.close()
+
+    set_task_progress(task["id"], 100, "research complete")
+    content = json.dumps({"research_id": rid, "target_keyword": target, "topic_gap": parsed["topic_gap"]})
+    return {"ok": True, "content": content,
+            "prompt_tokens": result.get("prompt_tokens", 0),
+            "completion_tokens": result.get("completion_tokens", 0),
+            "cost": result.get("cost", 0)}
+
+
 DISPATCH = {
     "assistant_turn": handle_assistant_turn,
     "defend_audit": handle_defend_audit,
+    "content_research": handle_content_research,
     "generate_draft": handle_generate_draft,
     "propose_fix": handle_propose_fix,
     "agent_task": handle_agent_task,

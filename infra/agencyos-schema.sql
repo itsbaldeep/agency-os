@@ -583,6 +583,63 @@ ALTER SEQUENCE public.content_items_id_seq OWNER TO agency;
 
 ALTER SEQUENCE public.content_items_id_seq OWNED BY public.content_items.id;
 
+-- content_blocks: composed, per-block output of the multi-stage pipeline.
+-- Outline text is carried in content_items.structured; composed blocks here.
+ALTER TABLE public.content_items ADD COLUMN IF NOT EXISTS content_blocks jsonb;
+
+--
+-- Name: content_research; Type: TABLE; Schema: public; Owner: agency
+--
+
+CREATE TABLE public.content_research (
+    id integer NOT NULL,
+    task_id integer,
+    keyword_id integer,
+    target_keyword text NOT NULL,
+    competitors jsonb DEFAULT '[]'::jsonb NOT NULL,   -- [{url, extract_ok, error?}]
+    elements jsonb NOT NULL,                           -- [{url, headings[], elements_used[], word_count, freshness}]
+    strongest jsonb NOT NULL,                          -- [{element, from_url, why}] (3)
+    topic_gap text NOT NULL,                           -- biggest unmet topic, plain language
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+ALTER TABLE public.content_research OWNER TO agency;
+
+--
+-- Name: content_research_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
+--
+
+CREATE SEQUENCE public.content_research_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.content_research_id_seq OWNER TO agency;
+
+--
+-- Name: content_research_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
+--
+
+ALTER SEQUENCE public.content_research_id_seq OWNED BY public.content_research.id;
+
+--
+-- Name: content_research id; Type: DEFAULT; Schema: public; Owner: agency
+--
+
+ALTER TABLE ONLY public.content_research ALTER COLUMN id SET DEFAULT nextval('public.content_research_id_seq'::regclass);
+
+--
+-- Name: content_research content_research_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+--
+
+ALTER TABLE ONLY public.content_research
+    ADD CONSTRAINT content_research_pkey PRIMARY KEY (id);
+
 
 --
 -- Name: cover_letters; Type: TABLE; Schema: public; Owner: agency
