@@ -2957,11 +2957,312 @@ def handle_content_outline(task):
             "content_item_id": ci_id}
 
 
+# ── Multi-stage content pipeline: Stage 3 content_compose ────────────
+# The reusable soul of every article. Injected into every intro/prose/faq call.
+_CONTENT_VOICE_RULES = (
+    "VOICE (non-negotiable for the whole article):\n"
+    "- Write like an expert explaining to a knowledgeable peer — confident, direct, opinionated. "
+    "Not a textbook, not a sales pitch.\n"
+    "- Vary sentence length sharply: mix short, punchy sentences (4-8 words) with longer "
+    "multi-clause ones (20-30 words). No two consecutive sentences with the same shape.\n"
+    "- One idea per paragraph — if a paragraph carries two ideas, split it.\n"
+    "- Prefer concrete specifics over abstractions: real numbers, named things, tangible steps. "
+    "Replace vague phrasing with specifics.\n"
+    "- BANNED connectors & filler: never start a sentence with 'in conclusion', 'moreover', "
+    "'furthermore', 'it's worth noting', 'however' (as an opener), 'in today's world', "
+    "'in today's digital age', 'as we all know'. Delete them rather than substitute.\n"
+    "- Never mention AI, being a model, training data, knowledge limits, or any 'as an AI' "
+    "self-reference. Write as the author, period.\n"
+    "- Take a real point of view — assert a stance, make a recommendation, call out what's "
+    "overrated. Neutral Wikipedia tone is forbidden."
+)
+
+
+def _content_block_spec(bt):
+    """Type-specific composition instruction: what each block must RETURN (not a generic
+    'write this section')."""
+    return {
+        "intro": (
+            "Compose the article OPENING HOOK — a front-loaded answer to the reader's question. "
+            "Deliver outright the key takeaway in the first line, then one vivid sentence of why it "
+            "matters. It must read as a crafted hook, never a generic 'In today's world' opener. "
+            'RETURN {"markdown": string}.'),
+        "heading": None,          # pure carry: brief IS the heading text
+        "prose": (
+            "Compose this prose section in markdown. Advance exactly one idea; develop it "
+            "concretely. RETURN {\"markdown\": string}."),
+        "key_takeaways": (
+            "Compose a scannable summary box: 3-5 bullet points that each pack a full, "
+            "self-contained answer a skimmer can file away. RETURN {\"points\": [string]}."),
+        "steps": (
+            "Compose a numbered how-to list. Steps must be genuinely actionable and sequential — "
+            "each one a concrete action, not advice. RETURN {\"steps\": [string]}."),
+        "table": (
+            "Compose a comparison/explainer table. First RETURN {\"columns\": [string], "
+            "\"rows\": [[string]]} where the first array is the header row and lead values are "
+            "specific (real numbers, exact names), never generic."),
+        "chart": (
+            "Compose one data series for the specified chart_type. Provide real, internally "
+            "consistent numeric values that make the intended point. "
+            "RETURN {\"data_series\": {\"labels\": [string], \"values\": [number]}, "
+            "\"chart_type\": string, \"title\": string}."),
+        "callout": (
+            "Compose ONE striking statistic and a short label to place beside it as an emphasized "
+            "callout. The stat must be specific and the label punchy. "
+            'RETURN {"stat": string, "label": string}.'),
+        "image_slot": None,       # pure carry: outline already required alt+prompt
+        "faq": (
+            "Compose the answer to this FAQ question in 1-3 sentences, directly and helpfully. "
+            'RETURN {"answer": string}.'),
+    }.get(bt)
+
+
+def _content_compose_validate(filled, keyword):
+    """Deterministic validator for composed content_blocks. Rejects placeholders,
+    meta-language, uniform paragraph lengths, and keyword-stuffing/clutter. Returns [] if clean."""
+    fails = []
+    target = (keyword or "").strip().lower()
+    full_text_parts = []
+    meta_phrases = ["as an ai", "language model", "my training data", "knowledge cutoff",
+                    "training-knowledge proxy", "i cannot", "i'm an ai", "i am an ai",
+                    "as a language model"]
+    for i, b in enumerate(filled):
+        if not isinstance(b, dict):
+            fails.append(f"block {i}: not an object")
+            continue
+        blob = json.dumps(b)
+        if "[placeholder" in blob.lower():
+            fails.append(f"block {i}: contains a placeholder token")
+        low = blob.lower()
+        for p in meta_phrases:
+            if p in low:
+                fails.append(f"block {i}: meta-language leaked ('{p}')")
+        # gather prose-ish text for length-keyword checks
+        for key in ("markdown", "answer"):
+            v = b.get(key)
+            if isinstance(v, str) and v.strip():
+                full_text_parts.append(v)
+        for key in ("points", "steps"):
+            for s in (b.get(key) or []):
+                if isinstance(s, str):
+                    full_text_parts.append(s)
+    # keyword placement contract
+    if target:
+        has_kw = [i for i, b in enumerate(filled) if isinstance(b, dict) and b.get("keyword_target")
+                  and target in json.dumps(b).lower()]
+        intro_idx = next((i for i, b in enumerate(filled) if isinstance(b, dict) and b.get("type") == "intro"), None)
+        if intro_idx is not None and target not in json.dumps(filled[intro_idx]).lower():
+            fails.append("target_keyword missing from intro block")
+        if len([i for i in has_kw if i != intro_idx]) < 1:
+            fails.append("target_keyword must appear in intro AND at least one other keyword_target block")
+        # density ceiling: <= ~once per 150 words overall
+        full = " ".join(full_text_parts)
+        words = len(full.split())
+        occ = 0
+        probe = 0
+        while True:
+            probe = full.lower().find(target, probe)
+            if probe == -1:
+                break
+            occ += 1
+            probe += len(target)
+        ceiling = max(1, words // 150)
+        if occ > ceiling:
+            fails.append(f"target_keyword appears {occ}x in ~{words} words (ceiling {ceiling}, once/150)")
+    # uniform paragraph-length check over prose markdown
+    prose_lens = []
+    for b in filled:
+        if isinstance(b, dict) and b.get("type") in ("prose", "intro"):
+            text = " ".join(b.get("markdown") or "" for b in [b])
+            paras = [p for p in text.replace("\r", "").split("\n\n") if p.split()]
+            prose_lens += [len(p.split()) for p in paras]
+    if len(prose_lens) >= 6:
+        lo, hi = min(prose_lens), max(prose_lens)
+        # flag pathologically uniform lengths (e.g. every paragraph ~5 words)
+        # — natural prose varies; a model churning near-identical sizes is a tell.
+        if hi - lo <= 3:
+            fails.append(f"uniform paragraph lengths across prose (range {lo}-{hi} words)")
+    return fails
+
+
+def _content_assemble_plain(filled):
+    """Render filled blocks to a readable body (pulls the article together for preview/ledger)."""
+    parts = []
+    for b in filled:
+        if not isinstance(b, dict):
+            continue
+        t = b.get("type")
+        if t in ("intro", "heading"):
+            text = b.get("markdown") or b.get("heading") or ""
+            if text:
+                parts.append((f"## {text}" if t == "heading" else text))
+        elif t == "prose":
+            if b.get("markdown"):
+                parts.append(b["markdown"])
+        elif t == "key_takeaways":
+            pts = b.get("points") or []
+            if pts:
+                parts.append("**Key takeaways**\n" + "\n".join(f"- {p}" for p in pts))
+        elif t == "steps":
+            st = b.get("steps") or []
+            if st:
+                parts.append("\n".join(f"{i}. {s}" for i, s in enumerate(st, 1)))
+        elif t == "callout":
+            if b.get("stat"):
+                parts.append(f"> **{b.get('label','')}:** {b['stat']}")
+        elif t == "faq":
+            if b.get("answer"):
+                parts.append(f"**{b.get('brief','Q')}**\n{b['answer']}")
+    return "\n\n".join(parts).rstrip()
+
+
+def handle_content_compose(task):
+    """Stage 3: runs ON DEMAND by content_item_id (approved/inspected before paying for the
+    expensive N-call compose). One call_zen PER content block, each fed the full outline and a
+    running summary of prior blocks for cross-section coherence. Assembles content_blocks on the
+    content_items row and validates deterministically."""
+    params = task["params"] or {}
+    ci_id = params.get("content_item_id")
+    keyword = (params.get("target_keyword") or "").strip()
+    if not ci_id:
+        return {"ok": False, "error": "content_compose: content_item_id is required"}
+    if not keyword:
+        return {"ok": False, "error": "content_compose: target_keyword is required"}
+
+    conn = get_conn()
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT id, brand_id, structured FROM content_items WHERE id=%s AND status='outline'", (ci_id,))
+        row = cur.fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return {"ok": False, "error": f"content_compose: no outline found for content_item {ci_id}"}
+    outline = (row["structured"] or {}).get("blocks") or []
+    if not outline:
+        return {"ok": False, "error": "content_compose: outline has no blocks"}
+
+    # Only content-bearing blocks get an LLM call. heading/image_slot are pure carries:
+    # the outline already fully specifies them (brief IS the heading; alt+prompt required).
+    LLM_BLOCK_TYPES = {"intro", "prose", "key_takeaways", "steps", "table", "chart", "callout", "faq"}
+    filled = []          # final content_blocks
+    running = []         # rolling 2-3 sentence digest of prior sections
+    total_cost = 0.0
+    total_pt = 0
+    total_ct = 0
+    n = len(outline)
+
+    for idx, block in enumerate(outline, 1):
+        bt = block.get("type")
+        set_task_progress(task["id"], int(15 + 80 * (idx - 1) / n),
+                          f"compose: {bt} {idx}/{n}")
+        if bt not in CONTENT_BLOCK_TYPES:
+            filled.append({**block})
+            running.append(f"[{bt} carried as outlined]")
+            continue
+
+        carry = {"type": bt, "brief": block.get("brief", ""), "keyword_target": block.get("keyword_target", False),
+                 "chart_type": block.get("chart_type")}
+        if bt == "heading":
+            carry["heading"] = block.get("brief") or "Untitled section"
+            filled.append(carry)
+            running.append(f"Section heading: {carry['heading']}")
+            continue
+        if bt == "image_slot":
+            carry["alt"] = block.get("alt", "")
+            carry["prompt"] = block.get("prompt", "")
+            filled.append(carry)
+            running.append(f"Image slot: {carry['alt']}")
+            continue
+
+        spec = _content_block_spec(bt)
+        digest = " ".join(running[-2:]) if running else "This is the first content block — no prior sections yet."
+        digest = digest[:2000]
+        voice = _CONTENT_VOICE_RULES if bt in ("intro", "prose", "faq") else ""
+        kw_line = (
+            f"TARGET KEYWORD: \"{keyword}\". This block's keyword_target "
+            f"flag is {block.get('keyword_target', False)}. If true, the keyword must appear "
+            "verbatim, naturally — no stuffing. If false, write naturally without forcing it."
+        )
+        prompt = (
+            "You are composing ONE block of an article.\n\n"
+            "ARTICLE TOPIC / TARGET KEYWORD: {keyword}\n"
+            "FULL ARTICLE OUTLINE (your position in it): blocks {idx} of {n}\n"
+            "{outline_all}\n\n"
+            "WHAT PRIOR SECTIONS ALREADY SAID (write THIS block to flow from and not repeat this):\n"
+            "{digest}\n\n"
+            "YOUR BLOCK (compose exactly this, in full — nothing else, no padding):\n"
+            "type={bt}, brief=\"{brief}\"\n"
+            "{spec}\n\n"
+            "{kw_line}\n"
+            "{voice}\n"
+            "CRITICAL: Respond with ONLY a JSON object of the filled block's content and a "
+            "\"summary\" key:\n"
+            "{{\"content\": {{...filled fields per type as specified above...}}, "
+            "\"summary\": \"2-3 sentence digest of THIS block, written solely as context for the "
+            "next composer so the article stays one coherent piece\"}}\n"
+            "No prose outside the JSON, no code fences."
+        ).format(keyword=keyword, idx=idx, n=n,
+                 outline_all=json.dumps(outline, indent=1)[:4000],
+                 digest=digest, bt=bt, brief=(block.get("brief") or ""),
+                 spec=spec or "", kw_line=kw_line, voice=voice)
+
+        result = call_zen(prompt, model=params.get("model") or MODEL_CONFIG["quality"], max_tokens=1500,
+                          temperature=MODEL_CONFIG["temp_structured"], timeout=120)
+        if not result["ok"]:
+            return result
+        total_pt += result.get("prompt_tokens", 0)
+        total_ct += result.get("completion_tokens", 0)
+        total_cost += result.get("cost", 0)
+
+        parsed = _parse_json_list(result.get("content") or "")
+        parsed_content = {}
+        parsed_summary = ""
+        if isinstance(parsed, dict):
+            parsed_content = parsed.get("content")
+            parsed_summary = parsed.get("summary") or ""
+        if not isinstance(parsed_content, dict):
+            # best-effort: keep the block but mark it uncomposed so validation can flag it
+            parsed_content = {"_error": "composed output was not a JSON object"}
+        blocksum = {**carry, **parsed_content}
+        filled.append(blocksum)
+        if parsed_summary:
+            running.append(parsed_summary)
+        else:
+            running.append(f"[{bt} block composed; topic: {digest[:120]}]")
+
+    set_task_progress(task["id"], 96, "compose: validating")
+    fails = _content_compose_validate(filled, keyword)
+    if fails:
+        return {"ok": False,
+                "error": "compose failed validation: " + "; ".join(fails),
+                "prompt_tokens": total_pt, "completion_tokens": total_ct, "cost": round(total_cost, 8)}
+
+    body = _content_assemble_plain(filled)
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE content_items SET content_blocks=%s, body=%s, status='draft', updated_at=now() "
+            "WHERE id=%s",
+            (json.dumps(filled), body, ci_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+    set_task_progress(task["id"], 100, "compose complete")
+    content = json.dumps({"content_item_id": ci_id, "blocks": len(filled), "note": "compose is the costly stage — review before publishing"})
+    return {"ok": True, "content": content,
+            "prompt_tokens": total_pt, "completion_tokens": total_ct,
+            "cost": round(total_cost, 8), "content_item_id": ci_id}
+
+
 DISPATCH = {
     "assistant_turn": handle_assistant_turn,
     "defend_audit": handle_defend_audit,
     "content_research": handle_content_research,
     "content_outline": handle_content_outline,
+    "content_compose": handle_content_compose,
     "generate_draft": handle_generate_draft,
     "propose_fix": handle_propose_fix,
     "agent_task": handle_agent_task,
