@@ -2737,14 +2737,15 @@ def handle_content_research(task):
         "\"weaknesses\": [string], "
         "\"gaps\": [{\"gap\": string, \"opportunity\": string}], "
         "\"element_strategy\": string}\n"
-        "JSON must include every successfully-fetched URL above. No prose outside the JSON."
+        "JSON must include every successfully-fetched URL above. No prose outside the JSON.\n"
+        "Be concise: cap each headings[] list at 8 and each element to a few words — brevity is required."
     )
 
-    result = call_zen(analysis_prompt, model=MODEL_CONFIG["quality"], max_tokens=4500,
+    result = call_zen(analysis_prompt, model=MODEL_CONFIG["quality"], max_tokens=6000,
                       temperature=MODEL_CONFIG["temp_structured"], timeout=120)
     if not result["ok"]:
         return result
-    parsed = _parse_json_list(result.get("content") or "")
+    parsed = _draft_parse_json(result.get("content") or "")
     if not parsed or not isinstance(parsed, dict):
         # fall back to best-effort rather than losing the run
         parsed = {"elements": [], "strongest": [], "weaknesses": [], "gaps": [], "element_strategy": ""}
