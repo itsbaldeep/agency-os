@@ -91,7 +91,8 @@ def parse_verdict(content):
     final = m[-1].upper()
     if final == "CLEAN":
         return "CLEAN", ""
-    return "DEFECTS", (content or "").rstrip()[:1200]
+    # Keep the full review body — no truncation of the review text itself.
+    return "DEFECTS", (content or "").rstrip()
 
 
 def _review_model(prompt, model):
@@ -135,7 +136,7 @@ def review_diff(diff_text, description, problem=""):
             if note:
                 findings.append(f"[{m}] {note}")
         notes.append(f"[{m}:{verdict}]")
-    return clean, "\n\n".join(findings).strip(), tin, tout, round(cost, 8), " ".join(notes)
+    return clean, "\n\n".join(findings).strip()[:8000], tin, tout, round(cost, 8), " ".join(notes)
 
 
 def gh_api(path, method="GET", data=None, accept=None):

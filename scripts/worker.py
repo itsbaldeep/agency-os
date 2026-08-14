@@ -623,7 +623,7 @@ def handle_propose_fix(task):
                 f"OUTCOME={'CLEAN' if clean else 'DEFECTS'} files={n_files}")
             if clean or not findings:
                 break
-            problem = findings
+            problem = findings[:2500]
 
         set_task_progress(task["id"], 80, "pushing branch and opening PR")
         p = git("push", "origin", branch)
@@ -742,7 +742,7 @@ def handle_propose_fix(task):
             outcome = "failure"
             findings = str(e)[:200]
         _log = ("\n".join(all_log) + "\n") if all_log else ""
-        _tail = (f"{findings[:800]}\n" if outcome != "clean" and findings else "")
+        _tail = (f"{findings[:1500]}\n" if outcome != "clean" and findings else "")
         post_discord(f"🗂 PR #{review_pr} OUTCOME **{outcome.upper()}**\n{_log}{_tail}")
 
         try:
