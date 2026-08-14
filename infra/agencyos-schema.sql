@@ -599,7 +599,9 @@ CREATE TABLE public.content_research (
     competitors jsonb DEFAULT '[]'::jsonb NOT NULL,   -- [{url, extract_ok, error?}]
     elements jsonb NOT NULL,                           -- [{url, headings[], elements_used[], word_count, freshness}]
     strongest jsonb NOT NULL,                          -- [{element, from_url, why}] (3)
-    topic_gap text NOT NULL,                           -- biggest unmet topic, plain language
+    weaknesses jsonb NOT NULL,                         -- [string] 2-3 things competitors do poorly
+    gaps jsonb NOT NULL,                               -- [{gap, opportunity}] (2-4) unmet topics + how we win
+    element_strategy text NOT NULL,                    -- short instruction: which block types to lead with
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 

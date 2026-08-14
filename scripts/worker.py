@@ -2715,13 +2715,24 @@ def handle_content_research(task):
         "1. strongest: the THREE strongest elements you saw across ALL competitors "
         "(e.g. a table comparing pricing, a concrete stat, a step-by-step guide, a chart, an FAQ run). "
         "Each: {\"element\": string, \"from_url\": string, \"why\": string}.\n"
-        "2. topic_gap: the SINGLE biggest topic or question these competitors do NOT cover well, "
-        "in one plain-language sentence. This is what our article will beat them on.\n\n"
+        "2. weaknesses: 2-3 things these competitors do BADLY — outdated info, thin coverage, "
+        "no data, generic advice, poor structure, walls of prose. These are the weaknesses "
+        "our article will visibly do better than them.\n"
+        "3. gaps: 2-4 topics or questions the competitors cover poorly or not at all. "
+        "Each: {\"gap\": string, \"opportunity\": string} where opportunity states specifically "
+        "how our article beats them on it.\n"
+        "4. element_strategy: ONE short instruction that turns all of the above into a block "
+        "strategy the outliner will execute. It must make the 'if they use X, we use Y' decision "
+        "concretely — e.g. 'competitors rely on prose walls; we should lead with a comparison table "
+        "and a stat callout' or 'all three use the same generic FAQ; we differentiate with a steps "
+        "block and a chart'. Name the specific block types to lead with.\n\n"
         "Respond with ONLY a JSON object:\n"
         "{\"elements\": [{\"url\": string, \"headings\": [string], \"elements_used\": [string], "
         "\"word_count\": int, \"freshness\": string}], "
         "\"strongest\": [{\"element\": string, \"from_url\": string, \"why\": string}], "
-        "\"topic_gap\": string}\n"
+        "\"weaknesses\": [string], "
+        "\"gaps\": [{\"gap\": string, \"opportunity\": string}], "
+        "\"element_strategy\": string}\n"
         "JSON must include every successfully-fetched URL above. No prose outside the JSON."
     )
 
@@ -2731,10 +2742,12 @@ def handle_content_research(task):
         return result
     parsed = _parse_json_list(result.get("content") or "")
     if not parsed or not isinstance(parsed, dict):
-        # fall back to best-effort: one object with elements=[] rather than losing the run
-        parsed = {"elements": [], "strongest": [], "topic_gap": "analysis parse failed"}
-    if not parsed.get("topic_gap", "").strip():
-        parsed["topic_gap"] = "competitor analysis incomplete"
+        # fall back to best-effort rather than losing the run
+        parsed = {"elements": [], "strongest": [], "weaknesses": [], "gaps": [], "element_strategy": ""}
+    if not parsed.get("element_strategy", "").strip():
+        parsed["element_strategy"] = "lead with a strong hook and a comparison table, then detail"
+    if not parsed.get("gaps"):
+        parsed["gaps"] = [{"gap": "competitor analysis incomplete", "opportunity": "cover the fundamentals more thoroughly"}]
 
     set_task_progress(task["id"], 85, "research: storing result")
     conn = get_conn()
@@ -2742,31 +2755,202 @@ def handle_content_research(task):
         cur = conn.cursor()
         cur.execute(
             "INSERT INTO content_research "
-            "(task_id, keyword_id, target_keyword, competitors, elements, strongest, topic_gap) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+            "(task_id, keyword_id, target_keyword, competitors, elements, strongest, weaknesses, gaps, element_strategy) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
             (task["id"], params.get("keyword_id"), target,
              json.dumps([{k: f[k] for k in ("url", "extract_ok", "word_count", "error")} for f in fetched]),
              json.dumps([{k: e.get(k) for k in ("url", "headings", "elements_used", "word_count", "freshness")}
                          for e in parsed.get("elements", [])]),
              json.dumps(parsed.get("strongest", [])),
-             parsed["topic_gap"]))
+             json.dumps([str(w) for w in parsed.get("weaknesses", [])]),
+             json.dumps(parsed.get("gaps", [])),
+             parsed.get("element_strategy", "")))
         rid = cur.fetchone()[0]
         conn.commit()
     finally:
         conn.close()
 
     set_task_progress(task["id"], 100, "research complete")
-    content = json.dumps({"research_id": rid, "target_keyword": target, "topic_gap": parsed["topic_gap"]})
+    content = json.dumps({"research_id": rid, "target_keyword": target,
+                          "gaps": parsed.get("gaps", []), "element_strategy": parsed.get("element_strategy", "")})
     return {"ok": True, "content": content,
             "prompt_tokens": result.get("prompt_tokens", 0),
             "completion_tokens": result.get("completion_tokens", 0),
             "cost": result.get("cost", 0)}
 
 
+# ── Multi-stage content pipeline: Stage 2 content_outline ────────────
+def _content_outline_validate(blocks):
+    """Validates an outline's typed block array. No minimum per type — any
+    number/order of any block type is legal, so structure stays dynamic."""
+    if not isinstance(blocks, list):
+        return ["outline must be a JSON array of block objects"]
+    if not blocks:
+        return ["outline must contain at least one block"]
+    fails = []
+    seen_kw_slot = False
+    for i, b in enumerate(blocks):
+        if not isinstance(b, dict):
+            fails.append(f"block {i}: not an object")
+            continue
+        bt = b.get("type")
+        if bt not in CONTENT_BLOCK_TYPES:
+            fails.append(f"block {i}: unknown type '{bt}'")
+            continue
+        brief = (b.get("brief") or "").strip()
+        if not brief:
+            fails.append(f"block {i}: missing brief")
+        if bt == "intro":
+            if b.get("keyword_target") is not True:
+                b["keyword_target"] = True
+            seen_kw_slot = True  # intro guarantees the keyword lands in the hook
+        elif bt == "prose" and b.get("keyword_target") is True:
+            seen_kw_slot = True
+        if bt == "chart":
+            if b.get("chart_type") not in ("bar", "line", "pie"):
+                fails.append(f"block {i}: chart_type must be bar|line|pie")
+        if bt == "image_slot":
+            if not (b.get("alt") or "").strip():
+                fails.append(f"block {i}: image_slot needs alt")
+            if not (b.get("prompt") or "").strip():
+                fails.append(f"block {i}: image_slot needs prompt")
+        if bt == "faq":
+            if not (b.get("answer_pointer") or "").strip():
+                fails.append(f"block {i}: faq needs answer_pointer")
+    if not seen_kw_slot:
+        fails.append("no intro/prose block targets the keyword (keyword_target)")
+    return fails
+
+
+def handle_content_outline(task):
+    """Stage 2: read the full research row, then one call_zen translates the
+    competitive strategy into a typed block array. Explicitly chromium:
+    act on element_strategy, lead with gap coverage, beat the named weaknesses."""
+    params = task["params"] or {}
+    research_id = params.get("research_id")
+    if not research_id:
+        return {"ok": False, "error": "content_outline: research_id is required"}
+
+    conn = get_conn()
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT * FROM content_research WHERE id=%s", (research_id,))
+        r = cur.fetchone()
+        # resolve brand: explicit param > the keyword's owning brand
+        brand_id = params.get("brand_id")
+        if not brand_id and r:
+            cur.execute("SELECT brand_id FROM keywords WHERE id=%s", (r["keyword_id"],))
+            row = cur.fetchone()
+            if row:
+                brand_id = row["brand_id"]
+    finally:
+        conn.close()
+    if not r:
+        return {"ok": False, "error": f"content_outline: research id {research_id} not found"}
+    if not brand_id:
+        return {"ok": False, "error": "content_outline: brand_id required (and research has no keyword_id)"}
+
+    set_task_progress(task["id"], 10, "outline: reading research")
+    research_blob = json.dumps({
+        "target_keyword": r["target_keyword"],
+        "elements": r["elements"],
+        "strongest": r["strongest"],
+        "weaknesses": r["weaknesses"],
+        "gaps": r["gaps"],
+        "element_strategy": r["element_strategy"],
+    }, indent=2, default=str)
+
+    types_spec = "\n".join(
+        "  - {t}: {d}".format(t=t, d={
+            "intro": "opening hook (keyword_target must be true) — never a generic opener",
+            "heading": "section heading (H2/H3)",
+            "prose": "a prose section (optionally keyword_target: true)",
+            "key_takeaways": "scannable summary box near the top — great for featured snippets",
+            "steps": "a numbered how-to list",
+            "table": "a comparison/explainer table",
+            "chart": "a data visualization — chart_type bar|line|pie",
+            "callout": "a single stat + label callout",
+            "image_slot": "an image placeholder (alt + prompt)",
+            "faq": "a FAQ question (answer_pointer)",
+        }[t]) for t in sorted(CONTENT_BLOCK_TYPES))
+
+    prompt = (
+        "You are a senior content strategist. Your job: turn a completed competitor-analysis "
+        "into a typed, dynamic content outline. You are NOT inventing structure from the keyword "
+        "alone — you are translating a competitive strategy into blocks.\n\n"
+        "== COMPETITOR RESEARCH ==\n{research}\n\n"
+        "== YOUR INSTRUCTIONS ==\n"
+        "1. ACT on element_strategy verbatim: lead with the block types it recommends (e.g. if it "
+        "says 'lead with comparison table + stat callout', your first substantive blocks must be a "
+        "table and a callout, not prose).\n"
+        "2. Cover the gaps: the topic(s) competitors miss must get prominent placement early.\n"
+        "3. Beat the weaknesses: structure explicitly to outperform the named weaknesses "
+        "(e.g. no wall of prose if that's a weakness — use steps/tables/charts instead).\n"
+        "4. Open with an intro block whose brief is a genuinely strong hook — front-loaded answer, "
+        "specific, never 'In today's world'.\n"
+        "5. Include a key_takeaways block near the top.\n"
+        "6. Ordering and count are fully free: use any number of any block type, repeat and "
+        "interleave as the strategy demands. There is NO rigid template and NO minimum per type.\n\n"
+        "Return ONLY a JSON array of block objects. Each object:\n"
+        "{{\"type\": string, \"brief\": string, ...}}\n"
+        "\"brief\" must be 1-2 sentences telling the compose stage exactly what this block must say "
+        "or show (columns for tables, the single datapoint for charts, the question for faqs).\n"
+        "Allowed types with any extra required fields:\n{types_spec}\n\n"
+        "EXAMPLE: [{{\"type\": \"intro\", \"brief\": \"Open with a 45-second mental model of the cost "
+        "of waiting; deliverable in one paragraph\", \"keyword_target\": true}}, "
+        "{{\"type\": \"key_takeaways\", \"brief\": \"3 bullet answers someone skimming needs\"}}, "
+        "{{\"type\": \"table\", \"brief\": \"columns: approach | time to value | cost; compare 3 ways\"}}]\n\n"
+        "CRITICAL: Respond with ONLY the JSON array — no prose, no code fences. "
+        "First output character must be [ , last must be ]."
+    ).format(research=research_blob, types_spec=types_spec)
+
+    set_task_progress(task["id"], 20, "outline: generating blocks")
+    result = call_zen(prompt, model=params.get("model") or MODEL_CONFIG["quality"], max_tokens=4000,
+                      temperature=MODEL_CONFIG["temp_structured"], timeout=120)
+    if not result["ok"]:
+        return result
+    blocks = _parse_json_list(result.get("content") or "")
+    if not isinstance(blocks, list):
+        return {"ok": False, "error": "outline: output was not a JSON array",
+                "prompt_tokens": result.get("prompt_tokens", 0),
+                "completion_tokens": result.get("completion_tokens", 0),
+                "cost": result.get("cost", 0)}
+    fails = _content_outline_validate(blocks)
+    if fails:
+        return {"ok": False,
+                "error": "outline failed validation: " + "; ".join(fails) + " | raw: " + (result.get("content") or "")[:400],
+                "prompt_tokens": result.get("prompt_tokens", 0),
+                "completion_tokens": result.get("completion_tokens", 0),
+                "cost": result.get("cost", 0)}
+
+    set_task_progress(task["id"], 85, "outline: storing blocks")
+    conn = get_conn()
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            "INSERT INTO content_items (brand_id, title, content_type, body, status, structured) "
+            "VALUES (%s, %s, 'article', NULL, 'outline', %s) RETURNING id",
+            (brand_id,
+             params.get("title") or r["target_keyword"].capitalize(), json.dumps({"blocks": blocks})))
+        ci_id = cur.fetchone()["id"]
+        conn.commit()
+    finally:
+        conn.close()
+
+    set_task_progress(task["id"], 100, "outline complete")
+    content = json.dumps({"content_item_id": ci_id, "blocks": blocks})
+    return {"ok": True, "content": content,
+            "prompt_tokens": result.get("prompt_tokens", 0),
+            "completion_tokens": result.get("completion_tokens", 0),
+            "cost": result.get("cost", 0),
+            "content_item_id": ci_id}
+
+
 DISPATCH = {
     "assistant_turn": handle_assistant_turn,
     "defend_audit": handle_defend_audit,
     "content_research": handle_content_research,
+    "content_outline": handle_content_outline,
     "generate_draft": handle_generate_draft,
     "propose_fix": handle_propose_fix,
     "agent_task": handle_agent_task,
