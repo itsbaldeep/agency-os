@@ -2,6 +2,7 @@
 """agency-worker — async task worker. Polls tasks table, dispatches by type."""
 import json, os, sys, time, urllib.request, urllib.error, base64, socket, psycopg2, psycopg2.extras
 from datetime import datetime, timezone
+import pr_review  # shared ensemble machine review (also used by auto-merge.sh)
 
 ENV_PATH = "/home/agency/agency-os/.env"
 
@@ -523,62 +524,95 @@ def handle_propose_fix(task):
         git("checkout", "-b", branch)
 
     try:
-        # Step 2: run opencode headless -- capture full NDJSON output
-        # Prefix with ponytail philosophy: YAGNI, simplest solution, no over-engineering
-        ponytail_prefix = "[PONYTAIL full] Apply lazy senior dev principles: question whether this needs to exist (YAGNI), prefer standard library over custom code, native features over dependencies, one line over fifty. "
-        ponytail_description = ponytail_prefix + description
+        # ── Iterative agentic fix loop ───────────────────────────────────
+        # opencode produces a change; a multi-model ensemble critiques it;
+        # findings are fed back and opencode re-runs until CLEAN or the
+        # round cap is hit. Everything happens BEFORE the PR is opened so
+        # we never burn PR round-trips on a poor first pass.
+        ponytail_prefix = ("[PONYTAIL full] Apply lazy senior dev principles: "
+                           "question whether this needs to exist (YAGNI), prefer standard "
+                           "library over custom code, native features over dependencies, "
+                           "one line over fifty. ")
         opencode_bin = "/home/agency/.opencode/bin/opencode"
-        oc_env = {**os.environ, "HOME": "/home/agency",
-                  "OPENAI_BASE_URL": ZEN_URL.rsplit("/chat", 1)[0],
-                  "OPENAI_API_KEY": ZEN_KEY}
-        if "PATH" not in oc_env:
-            oc_env["PATH"] = "/usr/local/bin:/usr/bin:/bin"
-        oc_proc = subprocess.run(
-            [opencode_bin, "run", "--dir", repo_path, ponytail_description,
-             "--dangerously-skip-permissions", "--format", "json",
-             "--model", model],
-            capture_output=True, text=True, timeout=timeout_s, env=oc_env,
-        )
-        if oc_proc.returncode != 0:
-            out_snip = oc_proc.stdout[:500]
-            err_snip = oc_proc.stderr[:500]
-            raise RuntimeError(f"opencode exited {oc_proc.returncode} | stderr:{err_snip} | stdout:{out_snip}")
 
-        # Parse NDJSON for token/cost data
-        total_in = 0
-        total_out = 0
-        for line in oc_proc.stdout.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                ev = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if ev.get("type") == "step_finish":
-                tokens = ev.get("part", {}).get("tokens", {})
-                if tokens:
-                    total_in += tokens.get("input", 0)
-                    total_out += tokens.get("output", 0)
+        def run_opencode(prompt):
+            oc_env = {**os.environ, "HOME": "/home/agency",
+                      "OPENAI_BASE_URL": ZEN_URL.rsplit("/chat", 1)[0],
+                      "OPENAI_API_KEY": ZEN_KEY}
+            oc_env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
+            oc = subprocess.run(
+                [opencode_bin, "run", "--dir", repo_path, prompt,
+                 "--dangerously-skip-permissions", "--format", "json",
+                 "--model", model],
+                capture_output=True, text=True, timeout=timeout_s, env=oc_env)
+            tin = tout = 0
+            for line in (oc.stdout or "").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    ev = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if ev.get("type") == "step_finish":
+                    t = ev.get("part", {}).get("tokens", {})
+                    tin += t.get("input", 0)
+                    tout += t.get("output", 0)
+            return oc.returncode, oc.stdout or "", tin, tout
 
         prices = MODEL_PRICING.get(model, {"in": INPUT_COST_PER_TOKEN, "out": OUTPUT_COST_PER_TOKEN})
-        cost = total_in * prices["in"] + total_out * prices["out"]
+        total_in = 0
+        total_out = 0
+        cost = 0.0
+        max_rounds = int(params.get("rounds") or 4)
+        problem = ""
+        all_log = []
+        produced = False
+        for round_i in range(1, max_rounds + 1):
+            prompt = ponytail_prefix + description
+            if problem:
+                prompt += ("\n\nYour earlier attempt was reviewed and flagged these "
+                           "issues. Address them; keep what already works:\n" + problem)
+            rc, out, tin, tout = run_opencode(prompt)
+            total_in += tin
+            total_out += tout
+            cost = total_in * prices["in"] + total_out * prices["out"]
+            if rc != 0:
+                if not produced:
+                    raise RuntimeError(f"opencode exited {rc} | {out[:400]}")
+                break
+            status = git("status", "--porcelain")
+            if not status.stdout.strip():
+                if not produced:
+                    raise RuntimeError("no changes produced by opencode")
+                break
+            git("add", "-A")
+            c = git("commit", "--no-verify", "-m",
+                    f"fix: {description[:60]} (round {round_i})")
+            if c.returncode != 0:
+                raise RuntimeError(f"git commit failed: {(c.stderr or c.stdout)[:300]}")
+            produced = True
+            diff_text = git("diff", f"{base_branch}..{branch}").stdout
+            if not diff_text.strip():
+                break
+            clean, findings, ri, ro, rcost, rev_notes = pr_review.review_diff(
+                diff_text, description, problem)
+            total_in += ri
+            total_out += ro
+            cost += rcost
+            n_files = len(git("diff", "--name-only", f"{base_branch}..{branch}").stdout.splitlines())
+            all_log.append(
+                f"round {round_i}: {rev_notes} "
+                f"OUTCOME={'CLEAN' if clean else 'DEFECTS'} files={n_files}")
+            if clean or not findings:
+                break
+            problem = findings
 
-        # Step 3: check if anything changed
-        status = git("status", "--porcelain")
-        if not status.stdout.strip():
-            raise RuntimeError("no changes produced by opencode")
-        
-        # Step 4: commit and push
-        git("add", "-A")
-        c = git("commit", "--no-verify", "-m", f"fix: {description[:60]}")
-        if c.returncode != 0:
-            raise RuntimeError(f"git commit failed: {(c.stderr or c.stdout)[:300]}")
         p = git("push", "origin", branch)
         if p.returncode != 0:
             raise RuntimeError(f"git push failed: {(p.stderr or p.stdout)[:300]}")
 
-        # Step 5: capture diff for dashboard
+        # Final diff for dashboard + PR body
         diff_proc = git("diff", f"{base_branch}..{branch}")
         diff_text = diff_proc.stdout
         names_proc = git("diff", "--name-status", f"{base_branch}..{branch}")
@@ -654,52 +688,43 @@ def handle_propose_fix(task):
             "changed_files": names_text,
         })
 
-        # Step 7: machine review of the diff before auto-merge
+        # ── post-PR ensemble review: safety net + universal merge gate ──
         review_pr = pr_number if pr_number else pr_data["number"]
-        review_model = "deepseek-v4-flash"
         outcome = "failure"
-        note = "review did not produce a verdict"
+        findings = rev_notes = ""
         try:
-            if not diff_text.strip():
-                raise RuntimeError("empty diff, skipping review")
-            review_prompt = (
-                "You are reviewing a code diff before auto-merge. "
-                "List ONLY merge-blocking defects: crashes, wrong logic, security issues, "
-                "invalid syntax, broken invocations. Ignore style. "
-                "You may think briefly, but your reply MUST end with a final line that is exactly VERDICT: CLEAN or exactly VERDICT: DEFECTS (with a short numbered defect list above it). "
-                f"Task description: {description}\nDiff: {diff_text[:9000]}")
-            rev = call_zen(review_prompt, model=review_model, max_tokens=6000)
-            verdict = (rev.get("content") or "").strip() if rev.get("ok") else ""
-            if not (rev.get("ok") and verdict):
-                raise RuntimeError("review produced no verdict")
-            total_in += rev.get("prompt_tokens", 0)
-            total_out += rev.get("completion_tokens", 0)
-            cost = total_in * prices["in"] + total_out * prices["out"]
-            token = os.environ.get("GITHUB_TOKEN", "")
-            gh_headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
-                          "User-Agent": "AgencyOS-Worker/1.0"}
-            last_line = next((l.strip() for l in reversed(verdict.splitlines()) if l.strip()), "")
-            if last_line == "VERDICT: CLEAN":
-                outcome = "clean"
+            if diff_text.strip():
+                clean, findings, ri, ro, rcost, rev_notes = pr_review.review_diff(
+                    diff_text, f"PR #{review_pr} (task {task['id']})\n{description}", problem)
+                total_in += ri
+                total_out += ro
+                cost += rcost
+                token = os.environ.get("GITHUB_TOKEN", "")
+                gh_headers = {"Authorization": f"Bearer {token}",
+                              "Accept": "application/vnd.github+json",
+                              "User-Agent": "AgencyOS-Worker/1.0"}
+                if clean:
+                    outcome = "clean"
+                else:
+                    outcome = "hold"
+                    ureq = urllib.request.Request(
+                        f"https://api.github.com/repos/{proj['github_owner']}/{repo}/issues/{review_pr}/comments",
+                        data=json.dumps({"body": f"🔍 Ensemble machine review:\n\n{findings or rev_notes}"}).encode(),
+                        headers={**gh_headers, "Content-Type": "application/json"})
+                    urllib.request.urlopen(ureq, timeout=30)
+                    lreq = urllib.request.Request(
+                        f"https://api.github.com/repos/{proj['github_owner']}/{repo}/issues/{review_pr}/labels",
+                        data=json.dumps({"labels": ["hold"]}).encode(),
+                        headers={**gh_headers, "Content-Type": "application/json"})
+                    urllib.request.urlopen(lreq, timeout=30)
             else:
-                outcome = "hold"
-                d = verdict.lower().find("defect")
-                from_defect = verdict[d:] if d != -1 else verdict
-                note = from_defect if len(from_defect) <= 1200 else verdict[-1200:]
-                ureq = urllib.request.Request(
-                    f"https://api.github.com/repos/{proj['github_owner']}/{repo}/issues/{review_pr}/comments",
-                    data=json.dumps({"body": f"🔍 Machine review ({review_model}):\n\n{note}"}).encode(),
-                    headers={**gh_headers, "Content-Type": "application/json"})
-                urllib.request.urlopen(ureq, timeout=30)
-                lreq = urllib.request.Request(
-                    f"https://api.github.com/repos/{proj['github_owner']}/{repo}/issues/{review_pr}/labels",
-                    data=json.dumps({"labels": ["hold"]}).encode(),
-                    headers={**gh_headers, "Content-Type": "application/json"})
-                urllib.request.urlopen(lreq, timeout=30)
+                outcome = "skipped"
         except Exception as e:
             outcome = "failure"
-            note = str(e)[:200]
-        post_discord(f"🗂 PR #{review_pr} review ({review_model}): OUTCOME **{outcome.upper()}**\n```\n{note}\n```")
+            findings = str(e)[:200]
+        _log = ("\n".join(all_log) + "\n") if all_log else ""
+        _tail = (f"{findings[:800]}\n" if outcome != "clean" and findings else "")
+        post_discord(f"🗂 PR #{review_pr} OUTCOME **{outcome.upper()}**\n{_log}{_tail}")
 
         try:
             _tu = get_conn()
@@ -771,6 +796,20 @@ def handle_agent_task(task):
         out = f"(opencode exited {proc.returncode}, no output)"
     if proc.returncode != 0:
         return {"ok": False, "error": out[-500:]}
+
+    # Ensemble review of any working-tree changes the run produced.
+    try:
+        gd = subprocess.run(["git", "diff"], capture_output=True, text=True,
+                            cwd=repo_path, timeout=30)
+        if gd.stdout.strip():
+            clean, findings, _ri, _ro, _rc, rev_notes = pr_review.review_diff(
+                gd.stdout, prompt[:4000])
+            verdict = "CLEAN" if clean else "DEFECTS"
+            review_txt = f"\n\n── Ensemble review: OUTCOME **{verdict}** {rev_notes}\n{findings[:900]}"
+            out = out + review_txt
+    except Exception:
+        pass
+
     return {"ok": True, "content": out[-1500:], "prompt_tokens": 0, "completion_tokens": 0, "cost": 0}
 
 
