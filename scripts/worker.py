@@ -3282,8 +3282,11 @@ def handle_content_compose(task):
             parsed = _draft_parse_json(result.get("content") or "")
             parsed_content, parsed_summary = {}, ""
             if isinstance(parsed, dict):
-                parsed_content = parsed.get("content") or {}
+                parsed_content = parsed.get("content")
                 parsed_summary = parsed.get("summary") or ""
+            if isinstance(parsed_content, str):
+                # model sometimes returns {"content":"<text>"} — treat as prose markdown
+                parsed_content = {"markdown": parsed_content}
             if not isinstance(parsed_content, dict):
                 parsed_content = {"_error": "composed output was not a JSON object"}
             filled.append({**carry, **parsed_content})
