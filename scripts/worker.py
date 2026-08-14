@@ -2817,7 +2817,8 @@ def _content_outline_validate(blocks):
     if not blocks:
         return ["outline must contain at least one block"]
     fails = []
-    seen_kw_slot = False
+    has_intro = False
+    has_kw_prose = False
     for i, b in enumerate(blocks):
         if not isinstance(b, dict):
             fails.append(f"block {i}: not an object")
@@ -2830,11 +2831,10 @@ def _content_outline_validate(blocks):
         if not brief:
             fails.append(f"block {i}: missing brief")
         if bt == "intro":
-            if b.get("keyword_target") is not True:
-                b["keyword_target"] = True
-            seen_kw_slot = True  # intro guarantees the keyword lands in the hook
+            b["keyword_target"] = True
+            has_intro = True
         elif bt == "prose" and b.get("keyword_target") is True:
-            seen_kw_slot = True
+            has_kw_prose = True
         if bt == "chart":
             if b.get("chart_type") not in ("bar", "line", "pie"):
                 fails.append(f"block {i}: chart_type must be bar|line|pie")
@@ -2846,8 +2846,12 @@ def _content_outline_validate(blocks):
         if bt == "faq":
             if not (b.get("answer_pointer") or "").strip():
                 fails.append(f"block {i}: faq needs answer_pointer")
-    if not seen_kw_slot:
-        fails.append("no intro/prose block targets the keyword (keyword_target)")
+    if not has_intro:
+        fails.append("outline must contain an intro block")
+    # Compose contract: keyword lands in the intro AND one prose block.
+    # Require a prose block flagged to carry it, so compose validation holds.
+    if not has_kw_prose:
+        fails.append("at least one prose block must be flagged keyword_target: true")
     return fails
 
 
@@ -2926,7 +2930,10 @@ def handle_content_outline(task):
         "bloated 25-block one.\n"
         "8. Use image_slot SPARINGLY — at most 2-3 across the whole article, only where a visual "
         "genuinely aids understanding (a diagram, a real screenshot concept). Prefer chart and table "
-        "blocks to convey data, since those carry real information; images are decoration.\n\n"
+        "blocks to convey data, since those carry real information; images are decoration.\n"
+        "9. Mark EXACTLY ONE prose block with \"keyword_target\": true (in addition to intro) — "
+        "that block must place the target keyword verbatim, naturally, later in the article. "
+        "Other prose blocks stay unflagged so they read naturally without stuffing.\n\n"
         "Return ONLY a JSON array of block objects. Each object:\n"
         "{{\"type\": string, \"brief\": string, ...}}\n"
         "\"brief\" must be 1-2 sentences telling the compose stage exactly what this block must say "
