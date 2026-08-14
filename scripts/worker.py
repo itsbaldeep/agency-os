@@ -3206,101 +3206,113 @@ def handle_content_compose(task):
     # Only content-bearing blocks get an LLM call. heading/image_slot are pure carries:
     # the outline already fully specifies them (brief IS the heading; alt+prompt required).
     LLM_BLOCK_TYPES = {"intro", "prose", "key_takeaways", "steps", "table", "chart", "callout", "faq"}
-    filled = []          # final content_blocks
-    running = []         # rolling 2-3 sentence digest of prior sections
+    n = len(outline)
     total_cost = 0.0
     total_pt = 0
     total_ct = 0
-    n = len(outline)
+    fails = []
 
-    for idx, block in enumerate(outline, 1):
-        bt = block.get("type")
-        set_task_progress(task["id"], int(15 + 80 * (idx - 1) / n),
-                          f"compose: {bt} {idx}/{n}")
-        if bt not in CONTENT_BLOCK_TYPES:
-            filled.append({**block})
-            running.append(f"[{bt} carried as outlined]")
+    def _pass(warn=""):
+        nonlocal total_cost, total_pt, total_ct
+        filled = []
+        running = []
+        for idx, block in enumerate(outline, 1):
+            bt = block.get("type")
+            set_task_progress(task["id"], int(15 + 80 * (idx - 1) / n),
+                              f"compose: {bt} {idx}/{n}")
+            if bt not in CONTENT_BLOCK_TYPES:
+                filled.append({**block})
+                running.append(f"[{bt} carried as outlined]")
+                continue
+            carry = {"type": bt, "brief": block.get("brief", ""),
+                     "keyword_target": block.get("keyword_target", False),
+                     "chart_type": block.get("chart_type")}
+            if bt == "heading":
+                carry["heading"] = block.get("brief") or "Untitled section"
+                filled.append(carry)
+                running.append(f"Section heading: {carry['heading']}")
+                continue
+            if bt == "image_slot":
+                carry["alt"] = block.get("alt", "")
+                carry["prompt"] = block.get("prompt", "")
+                filled.append(carry)
+                running.append(f"Image slot: {carry['alt']}")
+                continue
+            spec = _content_block_spec(bt)
+            digest = " ".join(running[-2:]) if running else "This is the first content block — no prior sections yet."
+            digest = digest[:2000]
+            voice = _CONTENT_VOICE_RULES if bt in ("intro", "prose", "faq") else ""
+            kw_line = (
+                f"TARGET KEYWORD: \"{keyword}\". This block's keyword_target "
+                f"flag is {block.get('keyword_target', False)}. If true, the keyword must appear "
+                "verbatim, naturally — no stuffing. If false, write naturally without forcing it."
+            )
+            prompt = (
+                "You are composing ONE block of an article.\n\n"
+                "ARTICLE TOPIC / TARGET KEYWORD: {keyword}\n"
+                "FULL ARTICLE OUTLINE (your position in it): blocks {idx} of {n}\n"
+                "{outline_all}\n\n"
+                "WHAT PRIOR SECTIONS ALREADY SAID (write THIS block to flow from and not repeat this):\n"
+                "{digest}\n\n"
+                "YOUR BLOCK (compose exactly this, in full — nothing else, no padding):\n"
+                "type={bt}, brief=\"{brief}\"\n"
+                "{spec}\n\n"
+                "{kw_line}\n"
+                "{voice}\n"
+                "{warn}\n"
+                "CRITICAL: Respond with ONLY a JSON object of the filled block's content and a "
+                "\"summary\" key:\n"
+                "{{\"content\": {{...filled fields per type as specified above...}}, "
+                "\"summary\": \"2-3 sentence digest of THIS block, written solely as context for the "
+                "next composer so the article stays one coherent piece\"}}\n"
+                "No prose outside the JSON, no code fences."
+            ).format(keyword=keyword, idx=idx, n=n,
+                     outline_all=json.dumps(outline, indent=1)[:4000],
+                     digest=digest, bt=bt, brief=(block.get("brief") or ""),
+                     spec=spec or "", kw_line=kw_line, voice=voice, warn=warn)
+            result = call_zen(prompt, model=params.get("model") or MODEL_CONFIG["quality"], max_tokens=1500,
+                              temperature=MODEL_CONFIG["temp_structured"], timeout=120)
+            if not result["ok"]:
+                return result, None
+            total_pt += result.get("prompt_tokens", 0)
+            total_ct += result.get("completion_tokens", 0)
+            total_cost += result.get("cost", 0)
+            # Object parser, NOT _parse_json_list: the model returns {"content":{...},"summary":...}
+            # and the list-parser would grab the inner points/steps array and drop the block.
+            parsed = _draft_parse_json(result.get("content") or "")
+            parsed_content, parsed_summary = {}, ""
+            if isinstance(parsed, dict):
+                parsed_content = parsed.get("content") or {}
+                parsed_summary = parsed.get("summary") or ""
+            if not isinstance(parsed_content, dict):
+                parsed_content = {"_error": "composed output was not a JSON object"}
+            filled.append({**carry, **parsed_content})
+            running.append(parsed_summary if parsed_summary else f"[{bt} block composed]")
+        return {"ok": True, "filled": filled}, None
+
+    warn = ""
+    final_filled = None
+    for attempt in range(2):
+        res, _ = _pass(warn)
+        if not res["ok"]:
+            return {"ok": False, "error": res.get("error", "compose call failed"),
+                    "prompt_tokens": total_pt, "completion_tokens": total_ct,
+                    "cost": round(total_cost, 8)}
+        final_filled = res["filled"]
+        fails = _content_compose_validate(final_filled, keyword)
+        if not fails:
+            break
+        if attempt == 0:
+            warn = ("NOTE — the previous full pass failed these checks: " + "; ".join(fails)
+                    + f". Re-compose EVERY block. Blocks with keyword_target=true MUST place the "
+                    f"exact phrase \"{keyword}\" verbatim and naturally.")
             continue
-
-        carry = {"type": bt, "brief": block.get("brief", ""), "keyword_target": block.get("keyword_target", False),
-                 "chart_type": block.get("chart_type")}
-        if bt == "heading":
-            carry["heading"] = block.get("brief") or "Untitled section"
-            filled.append(carry)
-            running.append(f"Section heading: {carry['heading']}")
-            continue
-        if bt == "image_slot":
-            carry["alt"] = block.get("alt", "")
-            carry["prompt"] = block.get("prompt", "")
-            filled.append(carry)
-            running.append(f"Image slot: {carry['alt']}")
-            continue
-
-        spec = _content_block_spec(bt)
-        digest = " ".join(running[-2:]) if running else "This is the first content block — no prior sections yet."
-        digest = digest[:2000]
-        voice = _CONTENT_VOICE_RULES if bt in ("intro", "prose", "faq") else ""
-        kw_line = (
-            f"TARGET KEYWORD: \"{keyword}\". This block's keyword_target "
-            f"flag is {block.get('keyword_target', False)}. If true, the keyword must appear "
-            "verbatim, naturally — no stuffing. If false, write naturally without forcing it."
-        )
-        prompt = (
-            "You are composing ONE block of an article.\n\n"
-            "ARTICLE TOPIC / TARGET KEYWORD: {keyword}\n"
-            "FULL ARTICLE OUTLINE (your position in it): blocks {idx} of {n}\n"
-            "{outline_all}\n\n"
-            "WHAT PRIOR SECTIONS ALREADY SAID (write THIS block to flow from and not repeat this):\n"
-            "{digest}\n\n"
-            "YOUR BLOCK (compose exactly this, in full — nothing else, no padding):\n"
-            "type={bt}, brief=\"{brief}\"\n"
-            "{spec}\n\n"
-            "{kw_line}\n"
-            "{voice}\n"
-            "CRITICAL: Respond with ONLY a JSON object of the filled block's content and a "
-            "\"summary\" key:\n"
-            "{{\"content\": {{...filled fields per type as specified above...}}, "
-            "\"summary\": \"2-3 sentence digest of THIS block, written solely as context for the "
-            "next composer so the article stays one coherent piece\"}}\n"
-            "No prose outside the JSON, no code fences."
-        ).format(keyword=keyword, idx=idx, n=n,
-                 outline_all=json.dumps(outline, indent=1)[:4000],
-                 digest=digest, bt=bt, brief=(block.get("brief") or ""),
-                 spec=spec or "", kw_line=kw_line, voice=voice)
-
-        result = call_zen(prompt, model=params.get("model") or MODEL_CONFIG["quality"], max_tokens=1500,
-                          temperature=MODEL_CONFIG["temp_structured"], timeout=120)
-        if not result["ok"]:
-            return result
-        total_pt += result.get("prompt_tokens", 0)
-        total_ct += result.get("completion_tokens", 0)
-        total_cost += result.get("cost", 0)
-
-        # Object parser, NOT _parse_json_list: the model returns {"content":{...},"summary":...}
-        # and the list-parser would grab the inner points/steps array and drop the block.
-        parsed = _draft_parse_json(result.get("content") or "")
-        parsed_content = {}
-        parsed_summary = ""
-        if isinstance(parsed, dict):
-            parsed_content = parsed.get("content")
-            parsed_summary = parsed.get("summary") or ""
-        if not isinstance(parsed_content, dict):
-            # best-effort: keep the block but mark it uncomposed so validation can flag it
-            parsed_content = {"_error": "composed output was not a JSON object"}
-        blocksum = {**carry, **parsed_content}
-        filled.append(blocksum)
-        if parsed_summary:
-            running.append(parsed_summary)
-        else:
-            running.append(f"[{bt} block composed; topic: {digest[:120]}]")
-
-    set_task_progress(task["id"], 96, "compose: validating")
-    fails = _content_compose_validate(filled, keyword)
-    if fails:
         return {"ok": False,
                 "error": "compose failed validation: " + "; ".join(fails),
                 "prompt_tokens": total_pt, "completion_tokens": total_ct, "cost": round(total_cost, 8)}
 
+    filled = final_filled
+    set_task_progress(task["id"], 96, "compose: validating")
     body = _content_assemble_plain(filled)
     conn = get_conn()
     try:
