@@ -3276,7 +3276,9 @@ def handle_content_compose(task):
         total_ct += result.get("completion_tokens", 0)
         total_cost += result.get("cost", 0)
 
-        parsed = _parse_json_list(result.get("content") or "")
+        # Object parser, NOT _parse_json_list: the model returns {"content":{...},"summary":...}
+        # and the list-parser would grab the inner points/steps array and drop the block.
+        parsed = _draft_parse_json(result.get("content") or "")
         parsed_content = {}
         parsed_summary = ""
         if isinstance(parsed, dict):
