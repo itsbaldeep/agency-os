@@ -109,17 +109,22 @@ def _review_model(prompt, model):
     return verdict, note, i, o, i * p["in"] + o * p["out"]
 
 
-def review_diff(diff_text, description, problem=""):
+DIFF_BUDGET = 60000  # chars of unified diff fed to reviewers (avoids 9000-char false holds)
+
+
+def review_diff(diff_text, description, problem="", diff_names=""):
     """Ensemble review. Returns (clean, findings, tokens_in, tokens_out, cost, notes).
 
     clean: True unless any model explicitly returned VERDICT: DEFECTS.
     findings: consolidated DEFECTS feedback to feed back into the fixer.
     notes: per-model verdict lines for humans. UNCLEAR counts as non-blocking.
     """
+    manifest = f"\nChanged files:\n{diff_names or '(unknown)'}" if diff_names else ""
     prompt = REVIEW_PROMPT + (
         f"\nTask: {description}"
         + (f"\nEarlier reviewer feedback the author must address:\n{problem}" if problem else "")
-        + f"\nDiff:\n{diff_text[:9000]}"
+        + manifest
+        + f"\nDiff:\n{diff_text[:DIFF_BUDGET]}"
     )
     clean = True
     findings = []
@@ -174,8 +179,10 @@ def main():
     if not diff:
         sys.stderr.write(f"empty diff for {repo}#{pr}\n")
         return 2
+    files = gh_api(f"/repos/{owner}/{repo}/pulls/{pr}/files")
+    names = "\n".join(str(f.get("filename", "")) for f in files) if isinstance(files, list) else ""
     description = f"{pull.get('title','')}\n{(pull.get('body') or '')[:2000]}"
-    clean, findings, tin, tout, cost, notes = review_diff(diff, description)
+    clean, findings, tin, tout, cost, notes = review_diff(diff, description, diff_names=names)
     if clean:
         print(f"PR #{pr} {notes} OUTCOME CLEAN (${cost:.6f})")
         return 0

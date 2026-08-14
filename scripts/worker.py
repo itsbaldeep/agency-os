@@ -647,12 +647,13 @@ def handle_propose_fix(task):
             diff_text = git("diff", f"{base_branch}..{branch}").stdout
             if not diff_text.strip():
                 break
+            names_for_rev = git("diff", "--name-only", f"{base_branch}..{branch}").stdout
             clean, findings, ri, ro, rcost, rev_notes = pr_review.review_diff(
-                diff_text, description, problem)
+                diff_text, description, problem, diff_names=names_for_rev)
             total_in += ri
             total_out += ro
             cost += rcost
-            n_files = len(git("diff", "--name-only", f"{base_branch}..{branch}").stdout.splitlines())
+            n_files = len(names_for_rev.splitlines())
             all_log.append(
                 f"round {round_i}: {rev_notes} "
                 f"OUTCOME={'CLEAN' if clean else 'DEFECTS'} files={n_files}")
@@ -748,7 +749,8 @@ def handle_propose_fix(task):
         try:
             if diff_text.strip():
                 clean, findings, ri, ro, rcost, rev_notes = pr_review.review_diff(
-                    diff_text, f"PR #{review_pr} (task {task['id']})\n{description}", problem)
+                    diff_text, f"PR #{review_pr} (task {task['id']})\n{description}", problem,
+                    diff_names=names_text)
                 total_in += ri
                 total_out += ro
                 cost += rcost
@@ -855,9 +857,11 @@ def handle_agent_task(task):
     try:
         gd = subprocess.run(["git", "diff"], capture_output=True, text=True,
                             cwd=repo_path, timeout=30)
+        gn = subprocess.run(["git", "diff", "--name-only"], capture_output=True, text=True,
+                            cwd=repo_path, timeout=30)
         if gd.stdout.strip():
             clean, findings, _ri, _ro, _rc, rev_notes = pr_review.review_diff(
-                gd.stdout, prompt[:4000])
+                gd.stdout, prompt[:4000], diff_names=gn.stdout)
             verdict = "CLEAN" if clean else "DEFECTS"
             review_txt = f"\n\n── Ensemble review: OUTCOME **{verdict}** {rev_notes}\n{findings[:900]}"
             out = out + review_txt
@@ -2890,7 +2894,14 @@ def handle_content_outline(task):
         "specific, never 'In today's world'.\n"
         "5. Include a key_takeaways block near the top.\n"
         "6. Ordering and count are fully free: use any number of any block type, repeat and "
-        "interleave as the strategy demands. There is NO rigid template and NO minimum per type.\n\n"
+        "interleave as the strategy demands. There is NO rigid template and NO minimum per type.\n"
+        "7. Aim for a block count that produces an article meaningfully MORE thorough than the "
+        "competitors' average word count shown in the research — depth is a ranking advantage, but "
+        "every block must earn its place; no filler blocks. Neither a thin 5-block article nor a "
+        "bloated 25-block one.\n"
+        "8. Use image_slot SPARINGLY — at most 2-3 across the whole article, only where a visual "
+        "genuinely aids understanding (a diagram, a real screenshot concept). Prefer chart and table "
+        "blocks to convey data, since those carry real information; images are decoration.\n\n"
         "Return ONLY a JSON array of block objects. Each object:\n"
         "{{\"type\": string, \"brief\": string, ...}}\n"
         "\"brief\" must be 1-2 sentences telling the compose stage exactly what this block must say "
