@@ -491,7 +491,7 @@ def handle_propose_fix(task):
     repo = params.get("repo", "")
     description = params.get("description", "")
     model = params.get("model") or "opencode/deepseek-v4-flash"
-    timeout_s = int(params.get("timeout") or 180)
+    timeout_s = int(params.get("timeout") or 600)
 
     proj = get_project(repo)
     if not proj:
