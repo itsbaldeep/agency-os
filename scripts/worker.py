@@ -2849,9 +2849,17 @@ def _content_outline_validate(blocks):
     if not has_intro:
         fails.append("outline must contain an intro block")
     # Compose contract: keyword lands in the intro AND one prose block.
-    # Require a prose block flagged to carry it, so compose validation holds.
+    # Models are unreliable at flagging it, so assign deterministically: the
+    # first unflagged prose block becomes the keyword carrier. This is the
+    # correct place for the decision — the compose validator just enforces it.
     if not has_kw_prose:
-        fails.append("at least one prose block must be flagged keyword_target: true")
+        for b in blocks:
+            if isinstance(b, dict) and b.get("type") == "prose":
+                b["keyword_target"] = True
+                has_kw_prose = True
+                break
+    if not has_kw_prose:
+        fails.append("outline needs at least one prose block to carry the keyword")
     return fails
 
 
