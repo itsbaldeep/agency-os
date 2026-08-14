@@ -2948,28 +2948,46 @@ def handle_content_outline(task):
     ).format(research=research_blob, types_spec=types_spec)
 
     set_task_progress(task["id"], 20, "outline: generating blocks")
-    result = call_zen(prompt, model=params.get("model") or MODEL_CONFIG["quality"], max_tokens=6000,
-                      temperature=MODEL_CONFIG["temp_structured"], timeout=120)
-    if not result["ok"]:
-        return result
-    raw_out = result.get("content") or ""
-    print(f"[worker] outline raw output ({len(raw_out)} chars): {raw_out[:1500]}", flush=True)
-    blocks = _parse_json_list(raw_out)
-    if not isinstance(blocks, list):
-        return {"ok": False,
-                "error": "outline: output was not a JSON array | raw: " + raw_out[:400],
-                "prompt_tokens": result.get("prompt_tokens", 0),
-                "completion_tokens": result.get("completion_tokens", 0),
-                "cost": result.get("cost", 0)}
-    fails = _content_outline_validate(blocks)
-    if fails:
-        return {"ok": False,
-                "error": "outline failed validation: " + "; ".join(fails) + " | raw: " + (result.get("content") or "")[:400],
-                "prompt_tokens": result.get("prompt_tokens", 0),
-                "completion_tokens": result.get("completion_tokens", 0),
-                "cost": result.get("cost", 0)}
+    # Retry-with-feedback: single-shot outline is flaky (omits faq.answer_pointer,
+    # image_slot.alt/prompt). Feed validation failures back for a corrected pass.
+    total_pt = total_ct = 0
+    total_cost = 0.0
+    blocks = None
+    attempt_reasons = []
+    for attempt in range(2):
+        result = call_zen(prompt, model=params.get("model") or MODEL_CONFIG["quality"], max_tokens=6000,
+                          temperature=MODEL_CONFIG["temp_structured"], timeout=120)
+        if not result["ok"]:
+            return result
+        total_pt += result.get("prompt_tokens", 0)
+        total_ct += result.get("completion_tokens", 0)
+        total_cost += result.get("cost", 0)
+        raw_out = result.get("content") or ""
+        print(f"[worker] outline attempt {attempt+1} raw ({len(raw_out)} chars): {raw_out[:800]}", flush=True)
+        blocks = _parse_json_list(raw_out)
+        if not isinstance(blocks, list):
+            attempt_reasons.append("output was not a JSON array")
+            if attempt == 0:
+                prompt += ("\n\nYour previous output was not a parseable JSON array. Return ONLY the "
+                           f"JSON array.\nPrevious: {raw_out[:1200]}")
+                continue
+            return {"ok": False,
+                    "error": "outline: output was not a JSON array | raw: " + raw_out[:400],
+                    "prompt_tokens": total_pt, "completion_tokens": total_ct, "cost": round(total_cost, 8)}
+        fails = _content_outline_validate(blocks)
+        if fails:
+            attempt_reasons.append("; ".join(fails))
+            if attempt == 0:
+                prompt += ("\n\nYour previous outline failed these checks: " + "; ".join(fails)
+                           + "\nFix your JSON and resend the full corrected array only.\nPrevious: "
+                           + raw_out[:2000])
+                continue
+            return {"ok": False,
+                    "error": "outline failed validation: " + "; ".join(fails) + " | raw: " + raw_out[:400],
+                    "prompt_tokens": total_pt, "completion_tokens": total_ct, "cost": round(total_cost, 8)}
 
     set_task_progress(task["id"], 85, "outline: storing blocks")
+    _ = attempt_reasons
     conn = get_conn()
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -2987,9 +3005,8 @@ def handle_content_outline(task):
     set_task_progress(task["id"], 100, "outline complete")
     content = json.dumps({"content_item_id": ci_id, "blocks": blocks})
     return {"ok": True, "content": content,
-            "prompt_tokens": result.get("prompt_tokens", 0),
-            "completion_tokens": result.get("completion_tokens", 0),
-            "cost": result.get("cost", 0),
+            "prompt_tokens": total_pt, "completion_tokens": total_ct,
+            "cost": round(total_cost, 8),
             "content_item_id": ci_id}
 
 
