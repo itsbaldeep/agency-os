@@ -2941,13 +2941,16 @@ def handle_content_outline(task):
     ).format(research=research_blob, types_spec=types_spec)
 
     set_task_progress(task["id"], 20, "outline: generating blocks")
-    result = call_zen(prompt, model=params.get("model") or MODEL_CONFIG["quality"], max_tokens=4000,
+    result = call_zen(prompt, model=params.get("model") or MODEL_CONFIG["quality"], max_tokens=6000,
                       temperature=MODEL_CONFIG["temp_structured"], timeout=120)
     if not result["ok"]:
         return result
-    blocks = _parse_json_list(result.get("content") or "")
+    raw_out = result.get("content") or ""
+    print(f"[worker] outline raw output ({len(raw_out)} chars): {raw_out[:1500]}", flush=True)
+    blocks = _parse_json_list(raw_out)
     if not isinstance(blocks, list):
-        return {"ok": False, "error": "outline: output was not a JSON array",
+        return {"ok": False,
+                "error": "outline: output was not a JSON array | raw: " + raw_out[:400],
                 "prompt_tokens": result.get("prompt_tokens", 0),
                 "completion_tokens": result.get("completion_tokens", 0),
                 "cost": result.get("cost", 0)}
