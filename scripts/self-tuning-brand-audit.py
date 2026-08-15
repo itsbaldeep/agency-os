@@ -72,11 +72,23 @@ def crawl_homepage(domain):
                     print(f"    {url}: empty response", flush=True)
                     break
                 html = result.stdout
-                # Strip scripts, styles, SVGs, noscript before extracting text
-                clean_html = re.sub(r'<(script|style|svg|noscript)[^>]*>.*?</\1>', '', html, flags=re.DOTALL)
+                # Strip scripts, styles, SVGs, noscript, head before extracting text
+                clean_html = re.sub(r'<head[^>]*>.*?</head>', '', html, flags=re.DOTALL | re.IGNORECASE)
+                clean_html = re.sub(r'<(script|style|svg|noscript|template)[^>]*>.*?</\1>', '', clean_html, flags=re.DOTALL | re.IGNORECASE)
+                # Strip remaining inline style attributes and CSS-like content
+                clean_html = re.sub(r'\sstyle="[^"]*"', '', clean_html)
+                clean_html = re.sub(r'<!--.*?-->', '', clean_html, flags=re.DOTALL)
                 text = re.sub(r'<[^>]+>', ' ', clean_html)
                 text = re.sub(r'&[a-z]+;', ' ', text)
-                text = re.sub(r'\s+', ' ', text)[:3000]
+                text = re.sub(r'\s+', ' ', text).strip()
+                # If text is mostly CSS-like garbage (lots of colons/braces), try extracting just visible text
+                if text.count('{') > 10 or text.count(':') > len(text) * 0.05:
+                    # Fallback: extract text from common content tags only
+                    content_tags = re.findall(r'<(?:p|h[1-6]|li|a|span|div|td|strong|em)[^>]*>(.*?)</(?:p|h[1-6]|li|a|span|div|td|strong|em)>', html, flags=re.DOTALL | re.IGNORECASE)
+                    if content_tags:
+                        text = ' '.join(re.sub(r'<[^>]+>', ' ', ct) for ct in content_tags)
+                        text = re.sub(r'\s+', ' ', text).strip()
+                text = text[:3000]
                 return {"ok": True, "text": text, "html_len": len(html), "url": url}
             except Exception as e:
                 print(f"    {url}: {str(e)[:80]}", flush=True)

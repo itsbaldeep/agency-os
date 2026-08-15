@@ -992,13 +992,16 @@ Homepage:
 {crawl['text'][:2000]}"""
         biz_info = None
         biz_last = ""
-        for biz_attempt in range(2):
+        for biz_attempt in range(3):
             biz_r = call_zen(biz_prompt, model=MODEL_CONFIG["cheap"], max_tokens=800, temperature=MODEL_CONFIG["temp_structured"])
             budget_ok()
             acc(biz_r)
             if not biz_r["ok"]:
                 continue
             biz_last = biz_r["content"].strip()
+            if not biz_last:
+                print(f"  [biz] Attempt {biz_attempt+1}: empty response, retrying...", flush=True)
+                continue
             for trim in [biz_last, biz_last[biz_last.find('{'):biz_last.rfind('}')+1] if '{' in biz_last else '']:
                 trim = trim.strip()
                 if not trim:
@@ -1012,10 +1015,27 @@ Homepage:
                     continue
             if biz_info:
                 break
-            if biz_attempt < 1:
-                biz_prompt += "\n\nSTRICT: Return ONLY a JSON object with { } brackets. No other text."
+            if biz_attempt < 2:
+                biz_prompt = f"""Return ONLY a JSON object (no other text) describing this company.
+Fields: category, positioning, flagship_product, primary_sales_channel, business_stage, confidence.
+
+Homepage excerpt: {crawl['text'][:1000]}"""
         if not biz_info:
-            return {"ok": False, "error": f"Could not parse business understanding as JSON after 2 attempts. Raw: {biz_last[:300]}"}
+            # Fallback: extract basic info from title/meta and crawl text heuristics
+            print("  [biz] LLM parsing failed, using heuristic fallback...", flush=True)
+            crawl_text = crawl['text']
+            # Try to extract from page title or first meaningful sentence
+            title_match = re.search(r'^([^|.]{5,60})\s*[-|]', crawl_text)
+            biz_name = title_match.group(1).strip() if title_match else domain.split('.')[0].capitalize()
+            first_sentence = crawl_text.split('.')[0][:200] if crawl_text else ""
+            biz_info = {
+                "category": "unknown",
+                "positioning": first_sentence,
+                "flagship_product": "",
+                "primary_sales_channel": "wholesale / B2B",
+                "business_stage": "growth",
+                "confidence": "low"
+            }
 
         category = biz_info.get("category") or "unknown"
         positioning = biz_info.get("positioning") or ""
