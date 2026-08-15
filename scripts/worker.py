@@ -1092,13 +1092,17 @@ Homepage excerpt: {crawl['text'][:1000]}"""
                         "VALUES (%s, %s, %s, true) ON CONFLICT DO NOTHING",
                         (brand_id_val, ptype, str(pval)))
 
-        # Write competitors
+        # Write competitors (dedupe by brand_id+domain, validate domain format)
         for c in competitors:
-            cdomain = c.get("domain", "")
-            cname = c.get("name", cdomain)
-            if cdomain:
-                cur.execute("INSERT INTO competitors (brand_id, domain, name) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
-                            (brand_id_val, cdomain, cname))
+            cdomain = c.get("domain", "").strip().lower()
+            cname = c.get("name", cdomain).strip()
+            if not cdomain or "." not in cdomain:
+                continue  # skip hallucinated domains without TLD
+            # Basic domain format validation
+            if not re.match(r'^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z]{2,})+$', cdomain):
+                continue
+            cur.execute("INSERT INTO competitors (brand_id, domain, name) VALUES (%s, %s, %s) "
+                        "ON CONFLICT DO NOTHING", (brand_id_val, cdomain, cname))
 
         conn.commit()
 
@@ -2412,15 +2416,45 @@ def _audit_fetch(url, timeout=20):
 
 
 def handle_defend_audit(task):
-    """Deterministic SEO/identity audit of a public website. No opencode; one Zen summary at the end."""
+    """Deterministic SEO/identity audit of a public website. No opencode; one Zen summary at the end.
+    Accepts project_id+url OR brand_id (resolves domain from brand_properties, auto-creates project if needed)."""
     import re
     params = task["params"] or {}
     project_id = params.get("project_id")
     url = (params.get("url") or "").strip().rstrip("/")
+    brand_id = params.get("brand_id")
+
+    # If no project_id but brand_id given, resolve from brand
+    if not project_id and brand_id:
+        conn = get_conn()
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("SELECT project_id, name FROM brands WHERE id=%s", (brand_id,))
+            brand = cur.fetchone()
+            if not brand:
+                return {"ok": False, "error": f"brand_id {brand_id} not found"}
+            project_id = brand["project_id"]
+            if not project_id:
+                # Auto-create a lightweight project for this black-box brand
+                cur.execute(
+                    "INSERT INTO projects (name, repo_url, state, agent_allowed) "
+                    "VALUES (%s, %s, 'idea', false) RETURNING id",
+                    (brand["name"], url or f"brand-{brand_id}"))
+                project_id = cur.fetchone()["id"]
+                cur.execute("UPDATE brands SET project_id=%s WHERE id=%s", (project_id, brand_id))
+                conn.commit()
+            if not url:
+                cur.execute("SELECT value FROM brand_properties WHERE brand_id=%s AND property_type='domain' LIMIT 1", (brand_id,))
+                prop = cur.fetchone()
+                if prop and prop["value"]:
+                    url = f"https://{prop['value'].rstrip('/')}"
+        finally:
+            conn.close()
+
     if not project_id or not url:
-        return {"ok": False, "error": "project_id and url are required"}
+        return {"ok": False, "error": "project_id (or brand_id) and url are required"}
     if not url.startswith(("http://", "https://")):
-        return {"ok": False, "error": "url must start with http:// or https://"}
+        url = "https://" + url
 
     homepage = {"status": "unknown", "evidence": {}}
     robots = {"status": "unknown", "evidence": {}}

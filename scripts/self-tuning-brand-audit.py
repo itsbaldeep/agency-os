@@ -187,13 +187,13 @@ Example format for "email marketing":
 def run_audit(domain, brand_id, category, competitors, prompts, market_tier=None, brand_name="Brand", crawl_text=None):
     brand_lower = brand_name.lower()
     print(f"\n  Running {len(prompts)} visibility queries...", flush=True)
-    try:
-        req = urllib.request.Request(f"{CH_HOST}/", data=b"ALTER TABLE default.ai_visibility_checks DELETE WHERE brand_id=%d" % brand_id,
-            headers={"Authorization": f"Basic {CH_AUTH}"})
-        urllib.request.urlopen(req, timeout=5)
-    except: pass
+    # NOTE: do NOT pre-DELETE rows — ClickHouse mutations are expensive and can
+    # stack up under memory pressure, blocking all subsequent INSERTs. Instead,
+    # we just insert new rows with the current timestamp. The report page shows
+    # the latest audit's rows by joining on audit_id (future) or by timestamp.
     
     results = []
+    ch_failures = 0
     for i, prompt in enumerate(prompts):
         print(f"    [{i+1}/{len(prompts)}] Querying...", end=" ", flush=True)
         r = zen(prompt)
@@ -205,17 +205,20 @@ def run_audit(domain, brand_id, category, competitors, prompts, market_tier=None
         brands_cited = []
         for comp in competitors:
             cn = comp.get("name","").lower()
-            if cn and cn in content:
+            if cn and len(cn) >= 3 and cn in content:
                 brands_cited.append(comp.get("name","?"))
         cited_comps = ",".join(brands_cited) if brands_cited else "none"
         print(f"cited={int(b)} others={cited_comps}", flush=True)
         results.append({"prompt": prompt, "cited": int(b), "competitors": cited_comps, "content": r["content"][:200]})
         detail = r["content"][:200].replace('\t',' ').replace('\n',' ')
-        sql = f"INSERT INTO default.ai_visibility_checks (brand_id, engine, prompt, cited, position, competitors_cited, detail) FORMAT TabSeparated\n{brand_id}\tzen/deepseek-v4-flash\t{prompt}\t{int(b)}\t{i+1}\t{cited_comps}\t{detail}"
+        prompt_escaped = prompt.replace('\t',' ').replace('\n',' ')
+        sql = f"INSERT INTO default.ai_visibility_checks (brand_id, engine, prompt, cited, position, competitors_cited, detail) FORMAT TabSeparated\n{brand_id}\tzen/deepseek-v4-flash\t{prompt_escaped}\t{int(b)}\t{i+1}\t{cited_comps}\t{detail}"
         try:
             req = urllib.request.Request(f"{CH_HOST}/", data=sql.encode(), headers={"Authorization": f"Basic {CH_AUTH}"})
-            urllib.request.urlopen(req, timeout=5)
-        except: pass
+            urllib.request.urlopen(req, timeout=10)
+        except Exception as che:
+            ch_failures += 1
+            print(f"    [CH INSERT FAILED: {str(che)[:100]}]", flush=True)
         time.sleep(0.3)
     
     total = len(results)
@@ -247,7 +250,8 @@ def run_audit(domain, brand_id, category, competitors, prompts, market_tier=None
             "brand_share_of_voice_pct":round(brand_cited/total*100) if total else 0,
             "competitor_citation_counts":comp_citation_data,
             "all_competitors_total_citations":sum(comp_cited_counts.values()),
-            "note":"Training-knowledge proxy — not live web AI-visibility. All prompts brand-neutral (no brand names in prompts). Competitors auto-proposed — verify before relying on."
+            "note":"Training-knowledge proxy — not live web AI-visibility. All prompts brand-neutral (no brand names in prompts). Competitors auto-proposed — verify before relying on.",
+            "ch_insert_failures": ch_failures
         })
         sources = json.dumps([{"type":"self_tuning_audit","domain":domain,"category":category,"methodology":"auto-detect category → auto-propose competitors → auto-generate prompts → run queries"}])
         cur.execute("INSERT INTO audits (brand_id, audit_type, summary, sources, crawl_text) VALUES (%s, 'ai_visibility', %s, %s, %s) RETURNING id", (brand_id, summary, sources, crawl_text))
