@@ -1091,11 +1091,7 @@ Homepage:
         summary = visibility_result.get("summary", {})
         budget_ok()
 
-        # Update audit record with crawl_text for generate_draft to consume
-        cur2.execute("UPDATE audits SET crawl_text = %s WHERE id = %s",
-                     (crawl['text'], audit_id))
-
-        # Step 5a: Confidence gate
+        # Update audit record with crawl_text + confidence gate
         brand_cited = summary.get("brand_cited_count", 0)
         competitor_cited_total = summary.get("all_competitors_total_citations", 0)
         total_citations = brand_cited + competitor_cited_total
@@ -1105,14 +1101,13 @@ Homepage:
             confidence = "low"
             gate_blocked = True
 
-        # Update audit record with confidence
         summary["confidence"] = confidence
         summary["visibility_gate_blocked"] = gate_blocked
         summary["competitor_gap"] = competitor_gap
         conn = get_conn()
         cur2 = conn.cursor()
-        cur2.execute("UPDATE audits SET summary = %s WHERE id = %s",
-                     (json.dumps(summary), audit_id))
+        cur2.execute("UPDATE audits SET crawl_text = %s, summary = %s WHERE id = %s",
+                     (crawl['text'], json.dumps(summary), audit_id))
         conn.commit()
         conn.close()
 
@@ -3945,17 +3940,20 @@ DISPATCH = {
     "client_new_project": handle_client_new_project,
     "ask": handle_ask,
     "design_page": handle_design_page,
-    "search_jobs": handle_search_jobs,
     "onboard_project": handle_onboard_project,
-    "generate_resume": handle_generate_resume,
-    "generate_cover_letter": handle_generate_cover_letter,
-    "find_contacts": handle_find_contacts,
-    "generate_linkedin_note": handle_generate_linkedin_note,
-    "send_application_email": handle_send_application_email,
-    "run_job_campaign": handle_run_job_campaign,
     "self_review": handle_self_review,
     "competitor_scan": handle_competitor_scan,
-    "aetheria_work_block": handle_aetheria_work_block,
+    # Archived 2026-08-15 (CEO directive): job-application automation + aetheria
+    # autonomous dev loop are unrelated to the digital-marketing agency mission.
+    # Handlers + tables kept in git for retrieval; removed from active dispatch.
+    # "search_jobs": handle_search_jobs,
+    # "generate_resume": handle_generate_resume,
+    # "generate_cover_letter": handle_generate_cover_letter,
+    # "find_contacts": handle_find_contacts,
+    # "generate_linkedin_note": handle_generate_linkedin_note,
+    # "send_application_email": handle_send_application_email,
+    # "run_job_campaign": handle_run_job_campaign,
+    # "aetheria_work_block": handle_aetheria_work_block,
 }
 
 def poll():
