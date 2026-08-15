@@ -77,6 +77,8 @@ OUTPUT_COST_PER_TOKEN = 0.60 / 1_000_000
 
 MODEL_PRICING = {
     "opencode/deepseek-v4-flash": {"in": INPUT_COST_PER_TOKEN, "out": OUTPUT_COST_PER_TOKEN},
+    # GLM-5.2 (Aetheria UI/shader/arch + ask) — $1.40/M in, $4.40/M out.
+    "opencode/glm-5.2": {"in": 1.40 / 1_000_000, "out": 4.40 / 1_000_000},
 }
 
 # ── multi-stage content pipeline block schema ─────────────────────────
@@ -3748,6 +3750,187 @@ def _persist_hash_and_scan(comp_id, new_hash, sm_source):
         conn.close()
 
 
+def handle_aetheria_work_block(task):
+    """Run ONE Aetheria dev work block as a headless `opencode run` session
+    (session-per-task), then trust-but-verify the result before pushing.
+    See docs/AGENCY_INTEGRATION.md §1.2 (aetheria repo)."""
+    import subprocess, os as _os, re
+
+    params = task["params"] or {}
+    repo = params.get("repo", "aetheria")
+    model = params.get("model") or "opencode/deepseek-v4-flash"
+    timeout_s = int(params.get("timeout") or 2400)
+
+    proj = get_project(repo)
+    if not proj:
+        return {"ok": False, "error": f"Repo '{repo}' is not authorized for aetheria_work_block"}
+    repo_path = proj["local_path"]
+
+    def git(*args):
+        return subprocess.run(["git"] + list(args), capture_output=True, text=True,
+                              cwd=repo_path, timeout=60, env={**_os.environ, "GIT_TERMINAL_PROMPT": "0"})
+
+    # 1. Pull latest (single writer, direct-to-main per brief §12.5). The tree
+    #    is expected clean — every block commits its own work. Never force-reset
+    #    here; that would nuke uncommitted human edits.
+    set_task_progress(task["id"], 5, "pulling latest")
+    git("fetch", "origin")
+    pull = git("pull", "--ff-only", "origin", proj["base_branch"])
+    if pull.returncode != 0:
+        return {"ok": False, "error": f"git pull --ff-only failed (tree not clean?): {(pull.stderr or pull.stdout)[:300]}"}
+    before = git("rev-parse", "HEAD").stdout.strip()
+
+    # 2. Read STATE.md "Next action" for the block goal + detect HUMAN park.
+    next_goal = ""
+    failure_ctx = ""
+    try:
+        with open(f"{repo_path}/docs/STATE.md") as f:
+            state = f.read()
+        m = re.search(r"## Next action\n(.+)", state)
+        if m:
+            next_goal = m.group(1).strip()
+        if next_goal.startswith("HUMAN:"):
+            return {"ok": False, "error": f"loop parked by agent: {next_goal[:200]}"}
+    except Exception:
+        pass
+
+    # Inject the previous red block's failure context (§2). Find the most
+    # recent failed aetheria_work_block task before this one.
+    try:
+        _fc = get_conn()
+        _fcc = _fc.cursor()
+        _fcc.execute("SELECT error FROM tasks WHERE type='aetheria_work_block' AND id<%s AND status='failed' ORDER BY id DESC LIMIT 1", (task["id"],))
+        _row = _fcc.fetchone()
+        _fc.close()
+        if _row and _row[0]:
+            failure_ctx = ("\n\nPREVIOUS BLOCK FAILED — address this before continuing:\n"
+                           + str(_row[0])[:1500] + "\n")
+    except Exception:
+        pass
+
+    # 3. Compose the block prompt (docs/BLOCK_PROMPT.md + failure context).
+    try:
+        with open(f"{repo_path}/docs/BLOCK_PROMPT.md") as f:
+            block_prompt = f.read().strip()
+    except Exception:
+        block_prompt = ("You are the Aetheria dev agent running ONE autonomous work block. "
+                        "Read AGENTS.md and docs/STATE.md, do ONE checklist item, test, update "
+                        "STATE.md + CHANGELOG, commit.")
+    prompt = block_prompt + failure_ctx
+
+    set_task_progress(task["id"], 10, next_goal[:200] or "running opencode work block")
+
+    # 4. Run opencode headless, parsing step_finish tokens for cost.
+    oc_env = {**_os.environ, "HOME": "/home/agency", "NO_COLOR": "1"}
+    oc_env["PATH"] = oc_env.get("PATH", "/usr/local/bin:/usr/bin:/bin")
+    # Source the toolchain so `make test`/`make screenshots` find go + godot.
+    toolchain = _os.path.expanduser("~/.toolchain.env")
+    if _os.path.isfile(toolchain):
+        oc_env["PATH"] = f"{_os.path.expanduser('~/.local/go/bin')}:{_os.path.expanduser('~/.local/bin')}:{oc_env['PATH']}"
+        oc_env["GOPATH"] = _os.path.expanduser("~/go")
+
+    prices = MODEL_PRICING.get(model, {"in": INPUT_COST_PER_TOKEN, "out": OUTPUT_COST_PER_TOKEN})
+    opencode_bin = "/home/agency/.opencode/bin/opencode"
+    try:
+        oc = subprocess.run(
+            [opencode_bin, "run", "--dir", repo_path, prompt,
+             "--dangerously-skip-permissions", "--format", "json", "--model", model],
+            capture_output=True, text=True, timeout=timeout_s, env=oc_env)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": f"opencode timed out after {timeout_s}s"}
+
+    total_in = total_out = 0
+    for line in (oc.stdout or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if ev.get("type") == "step_finish":
+            t = ev.get("part", {}).get("tokens", {})
+            total_in += t.get("input", 0)
+            total_out += t.get("output", 0)
+    cost = total_in * prices["in"] + total_out * prices["out"]
+
+    set_task_progress(task["id"], 70, "opencode done; verifying")
+
+    # 5. Trust-but-verify: what did the block touch, and does it build/test?
+    diff_names = git("diff", "--name-only", f"{before}..HEAD").stdout.strip()
+    touched_server = any(p.startswith("server/") for p in diff_names.splitlines())
+    touched_client = any(p.startswith("client/") for p in diff_names.splitlines())
+
+    def make(target):
+        return subprocess.run(["make", target], capture_output=True, text=True,
+                              cwd=repo_path, timeout=900, env=oc_env)
+
+    verify_fail = None
+    set_task_progress(task["id"], 80, "verifying: make test")
+    t = make("test")
+    if t.returncode != 0:
+        verify_fail = f"make test FAILED (rc={t.returncode}):\n{(t.stdout+t.stderr)[-1500:]}"
+    if verify_fail is None and touched_server:
+        bt = make("bottest")
+        if bt.returncode != 0:
+            verify_fail = f"make bottest FAILED (rc={bt.returncode}):\n{(bt.stdout+bt.stderr)[-1500:]}"
+    if verify_fail is None and touched_client:
+        ss = make("screenshots")
+        if ss.returncode != 0:
+            verify_fail = f"make screenshots FAILED (rc={ss.returncode}):\n{(ss.stdout+ss.stderr)[-1500:]}"
+
+    after = git("rev-parse", "HEAD").stdout.strip()
+    commit_range = f"{before[:7]}..{after[:7]}"
+
+    if verify_fail:
+        # Red: discard the work, never push, trace the failure.
+        git("reset", "--hard", f"origin/{proj['base_branch']}")
+        ch_trace({"project": "aetheria", "actor": "worker", "action": "work_block_red",
+                  "detail": f"{commit_range} verify failed: {verify_fail[:300]}", "gate": "green",
+                  "decision": "halt", "ok": 0})
+        post_discord(f"aetheria ▸ {next_goal[:80]} ▸ RED ▸ ${cost:.4f} ▸ discarded {commit_range}")
+        return {"ok": False, "error": verify_fail[:500],
+                "prompt_tokens": total_in, "completion_tokens": total_out, "cost": round(cost, 8)}
+
+    # 6. Green: push + trace.
+    if after != before:
+        p = git("push", "origin", proj["base_branch"])
+        if p.returncode != 0:
+            return {"ok": False, "error": f"git push failed: {(p.stderr or p.stdout)[:300]}",
+                    "prompt_tokens": total_in, "completion_tokens": total_out, "cost": round(cost, 8)}
+
+    new_next = ""
+    try:
+        with open(f"{repo_path}/docs/STATE.md") as f:
+            _s = f.read()
+        _m = re.search(r"## Next action\n(.+)", _s)
+        if _m:
+            new_next = _m.group(1).strip()
+    except Exception:
+        pass
+
+    ch_trace({"project": "aetheria", "actor": "agent", "action": "work_block_done",
+              "detail": f"{commit_range} | next: {new_next[:200]} | {total_in} in / {total_out} out",
+              "gate": "green", "decision": "proceed", "ok": 1})
+    if touched_client:
+        ch_trace({"project": "aetheria", "actor": "agent", "action": "screens_published",
+                  "detail": f"client touched in {commit_range}", "gate": "green", "decision": "proceed", "ok": 1})
+    post_discord(f"aetheria ▸ {next_goal[:80]} ▸ green ▸ ${cost:.4f} ▸ {commit_range}")
+
+    try:
+        _tu = get_conn(); _tuc = _tu.cursor()
+        _tuc.execute("INSERT INTO token_usage (model, tokens_in, tokens_out, cost_usd) VALUES (%s,%s,%s,%s)",
+                     (model, total_in, total_out, round(cost, 8)))
+        _tu.commit(); _tu.close()
+    except Exception:
+        pass
+
+    set_task_progress(task["id"], 100, "done")
+    return {"ok": True, "content": json.dumps({"commit_range": commit_range, "next": new_next[:300],
+                                               "changed": diff_names[:2000]}),
+            "prompt_tokens": total_in, "completion_tokens": total_out, "cost": round(cost, 8)}
+
+
 DISPATCH = {
     "assistant_turn": handle_assistant_turn,
     "defend_audit": handle_defend_audit,
@@ -3772,6 +3955,7 @@ DISPATCH = {
     "run_job_campaign": handle_run_job_campaign,
     "self_review": handle_self_review,
     "competitor_scan": handle_competitor_scan,
+    "aetheria_work_block": handle_aetheria_work_block,
 }
 
 def poll():
