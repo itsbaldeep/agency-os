@@ -102,6 +102,85 @@ def ensure_slot_images(ci_id, blocks):
     return blocks
 
 
+# ── Pexels stock image sourcing for image_slot blocks ───────────────────
+PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "")
+PEXELS_SEARCH_URL = "https://api.pexels.com/v1/search"
+
+
+def _pexels_search(query, per_page=5):
+    """Query Pexels for landscape photos. Returns list of {id, url, alt} or []."""
+    if not PEXELS_API_KEY:
+        return []
+    try:
+        import urllib.request, urllib.parse
+        params = urllib.parse.urlencode({"query": query, "per_page": per_page,
+                                         "orientation": "landscape"})
+        req = urllib.request.Request(
+            f"{PEXELS_SEARCH_URL}?{params}",
+            headers={"Authorization": PEXELS_API_KEY, "User-Agent": "AgencyOS/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+        results = []
+        for photo in (data.get("photos") or []):
+            results.append({
+                "id": photo.get("id"),
+                "url": photo.get("src", {}).get("large2x") or photo.get("src", {}).get("large"),
+                "alt": photo.get("alt") or query,
+            })
+        return results
+    except Exception:
+        return []
+
+
+def _pexels_download(url):
+    """Download image bytes from a URL. Returns (data, content_type) or (None, None)."""
+    try:
+        import urllib.request
+        req = urllib.request.Request(url, headers={"User-Agent": "AgencyOS/1.0"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = resp.read()
+            ct = resp.headers.get("Content-Type", "image/jpeg")
+            return data, ct
+    except Exception:
+        return None, None
+
+
+def source_slot_images(ci_id, blocks):
+    """For each image_slot without an image_url, query Pexels using the block's
+    prompt text, download the top landscape result, upload to MinIO, and store
+    the resulting public URL on the block as image_url. Falls back to SVG
+    placeholder if Pexels fails. Returns updated blocks."""
+    if not ensure_bucket():
+        return blocks
+    changed = False
+    for idx, b in enumerate(blocks):
+        if not isinstance(b, dict) or b.get("type") != "image_slot":
+            continue
+        if b.get("image_url"):
+            continue
+        query = (b.get("prompt") or b.get("alt") or "").strip()
+        if not query:
+            continue
+        results = _pexels_search(query)
+        if not results:
+            continue
+        img_data, ct = _pexels_download(results[0]["url"])
+        if not img_data:
+            continue
+        ext = "jpg"
+        if "png" in (ct or ""):
+            ext = "png"
+        key = f"content/{ci_id}/image-{idx}.{ext}"
+        url = store_bytes(key, img_data, ct or "image/jpeg")
+        if url:
+            b["image_url"] = url
+            b["url"] = url
+            b["photo_alt"] = results[0].get("alt", "")
+            changed = True
+    return blocks
+
+
 # ── Render typed content_blocks to HTML ─────────────────────────────────
 def esc(x):
     return _html.escape(str(x or ""))
@@ -146,8 +225,9 @@ def render_content_blocks(blocks, title="Untitled"):
                 parts.append(f"<div class='callout'><div class='stat'>{esc(b.get('stat'))}</div><div class='label'>{esc(b.get('label',''))}</div></div>")
         elif t == "image_slot":
             alt = b.get("alt", "")
-            if b.get("url"):
-                parts.append(f"<figure><img src='{esc(b['url'])}' alt='{esc(alt)}' loading='lazy'/><figcaption>{esc(alt)}</figcaption></figure>")
+            img_src = b.get("image_url") or b.get("url")
+            if img_src:
+                parts.append(f"<figure><img src='{esc(img_src)}' alt='{esc(alt)}' loading='lazy'/><figcaption>{esc(alt)}</figcaption></figure>")
             else:
                 parts.append(f"<figure><div class='imgph'>{esc(alt)}</div><figcaption>{esc(alt)}</figcaption></figure>")
         elif t == "faq":
