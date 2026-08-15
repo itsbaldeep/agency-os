@@ -2941,19 +2941,31 @@ def handle_content_outline(task):
         "blocks to convey data, since those carry real information; images are decoration.\n"
         "9. Mark EXACTLY ONE prose block with \"keyword_target\": true (in addition to intro) — "
         "that block must place the target keyword verbatim, naturally, later in the article. "
-        "Other prose blocks stay unflagged so they read naturally without stuffing.\n\n"
-        "Return ONLY a JSON array of block objects. Each object:\n"
+        "Other prose blocks stay unflagged so they read naturally without stuffing.\n"
+        "10. Return a top-level \"title\" field: a single compelling article title (max 90 chars) "
+        "containing the target keyword naturally. "
+        "{title_instr}\n\n"
+        "Return ONLY a JSON object with two keys: \"title\" (string) and \"blocks\" (array). Each block:\n"
         "{{\"type\": string, \"brief\": string, ...}}\n"
         "\"brief\" must be 1-2 sentences telling the compose stage exactly what this block must say "
         "or show (columns for tables, the single datapoint for charts, the question for faqs).\n"
         "Allowed types with any extra required fields:\n{types_spec}\n\n"
-        "EXAMPLE: [{{\"type\": \"intro\", \"brief\": \"Open with a 45-second mental model of the cost "
+        "EXAMPLE: {{\"title\": \"The Real Cost of Waiting: A Practical Guide\", \"blocks\": ["
+        "{{\"type\": \"intro\", \"brief\": \"Open with a 45-second mental model of the cost "
         "of waiting; deliverable in one paragraph\", \"keyword_target\": true}}, "
         "{{\"type\": \"key_takeaways\", \"brief\": \"3 bullet answers someone skimming needs\"}}, "
-        "{{\"type\": \"table\", \"brief\": \"columns: approach | time to value | cost; compare 3 ways\"}}]\n\n"
-        "CRITICAL: Respond with ONLY the JSON array — no prose, no code fences. "
-        "First output character must be [ , last must be ]."
-    ).format(research=research_blob, types_spec=types_spec)
+        "{{\"type\": \"table\", \"brief\": \"columns: approach | time to value | cost; compare 3 ways\"}}]}}\n\n"
+        "CRITICAL: Respond with ONLY the JSON object — no prose, no code fences. "
+        "First output character must be {{ , last must be }}."
+    ).format(research=research_blob, types_spec=types_spec,
+             title_instr=(
+                 "The user provided a draft title: use it as-is if it is already grammatically "
+                 "correct and reads well. If it has clear grammatical errors (e.g. broken word "
+                 "order, nonsensical phrases), fix ONLY the errors while preserving the wording "
+                 "and intent as closely as possible. Do not rewrite a provided title freely."
+                 if params.get("title")
+                 else "No title was provided — generate a fresh, compelling one from the "
+                      "keyword and competitive strategy."))
 
     set_task_progress(task["id"], 20, "outline: generating blocks")
     # Retry-with-feedback: single-shot outline is flaky (omits faq.answer_pointer,
@@ -2961,6 +2973,7 @@ def handle_content_outline(task):
     total_pt = total_ct = 0
     total_cost = 0.0
     blocks = None
+    gen_title = None
     attempt_reasons = []
     for attempt in range(2):
         result = call_zen(prompt, model=params.get("model") or MODEL_CONFIG["quality"], max_tokens=6000,
@@ -2972,22 +2985,24 @@ def handle_content_outline(task):
         total_cost += result.get("cost", 0)
         raw_out = result.get("content") or ""
         print(f"[worker] outline attempt {attempt+1} raw ({len(raw_out)} chars): {raw_out[:800]}", flush=True)
-        blocks = _parse_json_list(raw_out)
-        if not isinstance(blocks, list):
-            attempt_reasons.append("output was not a JSON array")
+        parsed_obj = _draft_parse_json(raw_out)
+        if not isinstance(parsed_obj, dict) or not isinstance(parsed_obj.get("blocks"), list):
+            attempt_reasons.append("output was not a JSON object with 'blocks' array")
             if attempt == 0:
-                prompt += ("\n\nYour previous output was not a parseable JSON array. Return ONLY the "
-                           f"JSON array.\nPrevious: {raw_out[:1200]}")
+                prompt += ("\n\nYour previous output was not a valid JSON object with 'title' and "
+                           f"'blocks' keys. Return ONLY the JSON object.\nPrevious: {raw_out[:1200]}")
                 continue
             return {"ok": False,
-                    "error": "outline: output was not a JSON array | raw: " + raw_out[:400],
+                    "error": "outline: output was not a JSON object with blocks | raw: " + raw_out[:400],
                     "prompt_tokens": total_pt, "completion_tokens": total_ct, "cost": round(total_cost, 8)}
+        blocks = parsed_obj["blocks"]
+        gen_title = (parsed_obj.get("title") or "").strip()
         fails = _content_outline_validate(blocks)
         if fails:
             attempt_reasons.append("; ".join(fails))
             if attempt == 0:
                 prompt += ("\n\nYour previous outline failed these checks: " + "; ".join(fails)
-                           + "\nFix your JSON and resend the full corrected array only.\nPrevious: "
+                           + "\nFix your JSON and resend the full corrected object only.\nPrevious: "
                            + raw_out[:2000])
                 continue
             return {"ok": False,
@@ -2996,6 +3011,8 @@ def handle_content_outline(task):
 
     set_task_progress(task["id"], 85, "outline: storing blocks")
     _ = attempt_reasons
+    # Prefer the LLM-generated/refined title; fall back to user-provided title, then keyword.
+    final_title = gen_title or params.get("title") or r["target_keyword"].capitalize()
     conn = get_conn()
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -3003,7 +3020,7 @@ def handle_content_outline(task):
             "INSERT INTO content_items (brand_id, title, content_type, body, status, structured) "
             "VALUES (%s, %s, 'article', NULL, 'outline', %s) RETURNING id",
             (brand_id,
-             params.get("title") or r["target_keyword"].capitalize(),
+             final_title[:200],
              json.dumps({"blocks": blocks, "target_keyword": r["target_keyword"]})))
         ci_id = cur.fetchone()["id"]
         conn.commit()
@@ -3335,6 +3352,402 @@ def handle_content_compose(task):
             "cost": round(total_cost, 8), "content_item_id": ci_id}
 
 
+
+# ── Competitor scan (deterministic sitemap crawl, zero LLM) ────────────
+
+_UA = "Mozilla/5.0 (AgencyOS Competitor Scan; +deployden.tech)"
+
+
+def _sm_fetch(url, timeout=20, cap=2_000_000):
+    """Fetch raw text with standard UA. Returns (ok, text_or_err)."""
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": _UA, "Accept": "application/xml,text/xml,*/*"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = resp.read(cap)
+            return True, data.decode("utf-8", errors="replace")
+    except Exception as e:
+        return False, f"fetch failed: {str(e)[:200]}"
+
+
+def _sm_get_ns(root):
+    """Extract namespace prefix from root tag if namespaced."""
+    tag = root.tag
+    if tag.startswith("{"):
+        return tag.split("}")[0] + "}"
+    return ""
+
+
+def _sm_parse_urls(xml_text):
+    """Parse a sitemap urlset for <url><loc> pairs. Returns list of (loc, lastmod)."""
+    import xml.etree.ElementTree as ET
+    urls = []
+    try:
+        root = ET.fromstring(xml_text.strip())
+    except ET.ParseError:
+        return urls
+    ns = _sm_get_ns(root)
+    for url_el in root.iter(f"{ns}url"):
+        loc = None
+        lastmod = None
+        for child in url_el:
+            if child.tag == f"{ns}loc":
+                loc = (child.text or "").strip()
+            elif child.tag == f"{ns}lastmod":
+                lastmod = (child.text or "").strip()
+        if loc:
+            urls.append((loc, lastmod))
+    return urls
+
+
+def _sm_parse_index(xml_text):
+    """Parse a sitemap index for <sitemap><loc> children. Returns list of loc strings."""
+    import xml.etree.ElementTree as ET
+    locs = []
+    try:
+        root = ET.fromstring(xml_text.strip())
+    except ET.ParseError:
+        return locs
+    ns = _sm_get_ns(root)
+    for sm_el in root.iter(f"{ns}sitemap"):
+        for child in sm_el:
+            if child.tag == f"{ns}loc":
+                loc = (child.text or "").strip()
+                if loc:
+                    locs.append(loc)
+    return locs
+
+
+def _sm_is_index(xml_text):
+    """Heuristic: root tag contains 'sitemapindex'."""
+    import xml.etree.ElementTree as ET
+    try:
+        root = ET.fromstring(xml_text.strip())
+        return "sitemapindex" in root.tag.lower()
+    except ET.ParseError:
+        return False
+
+
+def _parse_rss(xml_text):
+    """Degraded source: parse RSS <item><link>/<pubDate>. Returns list of (loc, pubdate)."""
+    import xml.etree.ElementTree as ET
+    items = []
+    try:
+        root = ET.fromstring(xml_text.strip())
+    except ET.ParseError:
+        return items
+    for item in root.iter("item"):
+        link = None
+        pub = None
+        for child in item:
+            if child.tag == "link":
+                link = (child.text or "").strip()
+            elif child.tag == "pubDate":
+                pub = (child.text or "").strip()
+        if link:
+            items.append((link, pub))
+    return items
+
+
+def _robots_sitemaps(domain):
+    """Fetch robots.txt, extract Sitemap: lines. Returns list of URLs."""
+    sitemaps = []
+    for scheme in ("https", "http"):
+        ok, text = _sm_fetch(f"{scheme}://{domain}/robots.txt", timeout=20)
+        if not ok:
+            continue
+        for line in text.splitlines():
+            line = line.strip()
+            if line.lower().startswith("sitemap:"):
+                s = line.split(":", 1)[1].strip()
+                if s:
+                    sitemaps.append(s)
+        if sitemaps:
+            break
+    return sitemaps
+
+
+def _filter_urls(all_urls, domain, path_filter):
+    """Keep same-host URLs; apply path_filter regex or exclude non-content paths."""
+    import re as _re
+    from urllib.parse import urlparse
+    filtered = []
+    for loc, lastmod in all_urls:
+        try:
+            parsed = urlparse(loc)
+        except Exception:
+            continue
+        host = parsed.hostname or ""
+        if host != domain and not host.endswith(f".{domain}"):
+            continue
+        path = parsed.path or "/"
+        if path_filter:
+            if not _re.search(path_filter, path):
+                continue
+        else:
+            if path in ("", "/"):
+                continue
+            if _re.search(r"^/(tag|category|author|page|wp-content|wp-admin|wp-includes)/", path, _re.I):
+                continue
+            if _re.search(r"\.(xml|pdf|jpg|jpeg|png|gif|svg|css|js)$", path, _re.I):
+                continue
+        filtered.append((loc, lastmod))
+    return filtered
+
+
+def _upsert_pages(comp_id, filtered):
+    """Upsert URLs into competitor_pages. Returns list of newly inserted (url, lastmod)."""
+    from datetime import datetime, timezone
+    newly = []
+    conn = get_conn()
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        for url, lastmod in filtered:
+            lastmod_dt = None
+            if lastmod:
+                try:
+                    lastmod_dt = datetime.fromisoformat(lastmod.replace("Z", "+00:00"))
+                except Exception:
+                    lastmod_dt = None
+            cur.execute(
+                "INSERT INTO competitor_pages (competitor_id, url, lastmod) VALUES (%s, %s, %s) "
+                "ON CONFLICT (competitor_id, url) DO UPDATE SET last_seen_at=now(), lastmod=EXCLUDED.lastmod "
+                "RETURNING (xmax = 0) AS was_inserted",
+                (comp_id, url, lastmod_dt))
+            row = cur.fetchone()
+            if row and row["was_inserted"]:
+                newly.append((url, lastmod))
+        conn.commit()
+    finally:
+        conn.close()
+    return newly
+
+
+def _extract_title(html_text):
+    """Extract <title> from HTML, strip trailing ' - Site' / ' | Site' suffix."""
+    import re as _re
+    m = _re.search(r"<title[^>]*>(.*?)</title>", html_text, _re.I | _re.S)
+    if not m:
+        return None
+    title = _re.sub(r"<[^>]+>", "", m.group(1)).strip()
+    title = _re.split(r"\s+[-|]\s+", title)[0].strip()
+    return title[:300] if title else None
+
+
+def _fetch_titles_and_build(comp_id, newly_inserted, was_baseline):
+    """Fetch up to 10 new pages, extract titles, store them. Return new list for result."""
+    new_list = []
+    if was_baseline or not newly_inserted:
+        return new_list
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        for i, (url, lastmod) in enumerate(newly_inserted[:10]):
+            ok, text = _sm_fetch(url, timeout=20, cap=300_000)
+            title = None
+            if ok:
+                title = _extract_title(text)
+            if title:
+                cur.execute("UPDATE competitor_pages SET title=%s WHERE competitor_id=%s AND url=%s",
+                            (title, comp_id, url))
+            new_list.append({"url": url, "title": title or "", "lastmod": lastmod or ""})
+            if i < len(newly_inserted[:10]) - 1:
+                time.sleep(1)
+        conn.commit()
+    finally:
+        conn.close()
+    return new_list
+
+
+def handle_competitor_scan(task):
+    """Deterministic competitor sitemap scan. Zero LLM calls.
+    Fetches the competitor's sitemap, extracts URLs, upserts into competitor_pages,
+    and reports newly discovered pages. Opt-in via competitors.scan_enabled."""
+    import hashlib
+    from urllib.parse import urlparse
+
+    params = task["params"] or {}
+    comp_id = params.get("competitor_id")
+    if not comp_id:
+        return {"ok": False, "error": "competitor_scan: competitor_id is required"}
+
+    set_task_progress(task["id"], 5, "scan: loading competitor")
+
+    conn = get_conn()
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT * FROM competitors WHERE id=%s", (comp_id,))
+        comp = cur.fetchone()
+    finally:
+        conn.close()
+    if not comp:
+        return {"ok": False, "error": f"competitor_scan: competitor {comp_id} not found"}
+    if not comp.get("scan_enabled"):
+        return {"ok": False, "error": f"competitor_scan: competitor {comp_id} ({comp['domain']}) has scan_enabled=false -- scans are explicit opt-in"}
+
+    domain = comp["domain"].strip()
+    was_baseline = comp.get("last_scanned_at") is None
+    path_filter = comp.get("path_filter")
+    existing_hash = comp.get("sitemap_hash")
+    stored_sitemap_url = comp.get("sitemap_url")
+    stored_feed_url = comp.get("feed_url")
+
+    # ── Resolve sitemap ──
+    set_task_progress(task["id"], 10, "scan: resolving sitemap")
+
+    sm_text = None
+    sm_source = None
+
+    if stored_sitemap_url:
+        ok, text = _sm_fetch(stored_sitemap_url)
+        if ok and ("<urlset" in text[:500] or "<sitemapindex" in text[:500]):
+            sm_text = text
+            sm_source = stored_sitemap_url
+
+    if not sm_text:
+        for cand in (f"https://{domain}/sitemap_index.xml",
+                     f"https://{domain}/wp-sitemap.xml",
+                     f"https://{domain}/sitemap.xml"):
+            ok, text = _sm_fetch(cand)
+            if ok and ("<urlset" in text[:500] or "<sitemapindex" in text[:500]):
+                sm_text = text
+                sm_source = cand
+                break
+
+    if not sm_text:
+        for sm_url in _robots_sitemaps(domain):
+            ok, text = _sm_fetch(sm_url)
+            if ok and ("<urlset" in text[:500] or "<sitemapindex" in text[:500]):
+                sm_text = text
+                sm_source = sm_url
+                break
+
+    # ── Degraded: RSS feed ──
+    if not sm_text:
+        feed_url = stored_feed_url or f"https://{domain}/feed/"
+        ok, text = _sm_fetch(feed_url)
+        if ok and ("<rss" in text[:500] or "<feed" in text[:500]):
+            rss_items = _parse_rss(text)
+            if rss_items:
+                all_urls = [(loc, pub) for loc, pub in rss_items][:2000]
+                _persist_sitemap_url(comp_id, feed_url)
+                new_hash = hashlib.sha256(
+                    "\n".join(sorted(u for u, _ in all_urls)).encode()).hexdigest()
+                if new_hash == existing_hash:
+                    _touch_last_scanned(comp_id)
+                    set_task_progress(task["id"], 100, "scan: unchanged (rss)")
+                    return {"ok": True, "content": json.dumps({"unchanged": True}),
+                            "prompt_tokens": 0, "completion_tokens": 0, "cost": 0}
+                filtered = _filter_urls(all_urls, domain, path_filter)
+                newly = _upsert_pages(comp_id, filtered)
+                _persist_hash_and_scan(comp_id, new_hash, feed_url)
+                new_list = _fetch_titles_and_build(comp_id, newly, was_baseline)
+                result = {"competitor_id": comp_id, "domain": domain,
+                          "urls_seen": len(all_urls), "new": new_list,
+                          "baseline": was_baseline, "source": "rss"}
+                set_task_progress(task["id"], 100, "scan: complete (rss)")
+                return {"ok": True, "content": json.dumps(result)[:4000],
+                        "prompt_tokens": 0, "completion_tokens": 0, "cost": 0}
+        return {"ok": False, "error": f"competitor_scan: no sitemap or feed found for {domain}"}
+
+    # Persist resolved sitemap URL
+    if sm_source and sm_source != stored_sitemap_url:
+        _persist_sitemap_url(comp_id, sm_source)
+
+    # ── Parse sitemap ──
+    set_task_progress(task["id"], 30, "scan: parsing sitemap")
+
+    all_urls = []
+    if _sm_is_index(sm_text):
+        import re as _re
+        child_locs = _sm_parse_index(sm_text)
+        child_locs = [u for u in child_locs
+                      if not _re.search(r"-image|-video|image-sitemap|video-sitemap", u, _re.I)]
+        wp_post = [u for u in child_locs if "post" in u.lower()]
+        if wp_post:
+            child_locs = wp_post
+        for child_url in child_locs[:10]:
+            ok, child_text = _sm_fetch(child_url)
+            if not ok:
+                continue
+            all_urls.extend(_sm_parse_urls(child_text))
+            if len(all_urls) >= 2000:
+                all_urls = all_urls[:2000]
+                break
+    else:
+        all_urls = _sm_parse_urls(sm_text)[:2000]
+
+    if not all_urls:
+        return {"ok": False, "error": f"competitor_scan: sitemap at {sm_source} yielded 0 URLs"}
+
+    # ── Hash check ──
+    set_task_progress(task["id"], 50, "scan: hashing")
+    new_hash = hashlib.sha256(
+        "\n".join(sorted(u for u, _ in all_urls)).encode()).hexdigest()
+    if new_hash == existing_hash:
+        _touch_last_scanned(comp_id)
+        set_task_progress(task["id"], 100, "scan: unchanged")
+        return {"ok": True, "content": json.dumps({"unchanged": True}),
+                "prompt_tokens": 0, "completion_tokens": 0, "cost": 0}
+
+    # ── Filter ──
+    set_task_progress(task["id"], 60, "scan: filtering URLs")
+    filtered = _filter_urls(all_urls, domain, path_filter)
+
+    # ── Upsert ──
+    set_task_progress(task["id"], 70, "scan: upserting pages")
+    newly = _upsert_pages(comp_id, filtered)
+
+    # ── Baseline / titles ──
+    if was_baseline:
+        new_list = []
+    else:
+        set_task_progress(task["id"], 80, "scan: fetching titles")
+        new_list = _fetch_titles_and_build(comp_id, newly, was_baseline)
+
+    # ── Finalize ──
+    set_task_progress(task["id"], 90, "scan: finalizing")
+    _persist_hash_and_scan(comp_id, new_hash, sm_source)
+
+    result = {"competitor_id": comp_id, "domain": domain,
+              "urls_seen": len(all_urls), "new": new_list,
+              "baseline": was_baseline}
+    set_task_progress(task["id"], 100, "scan: complete")
+    return {"ok": True, "content": json.dumps(result)[:4000],
+            "prompt_tokens": 0, "completion_tokens": 0, "cost": 0}
+
+
+def _persist_sitemap_url(comp_id, url):
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE competitors SET sitemap_url=%s WHERE id=%s", (url, comp_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _touch_last_scanned(comp_id):
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE competitors SET last_scanned_at=now() WHERE id=%s", (comp_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _persist_hash_and_scan(comp_id, new_hash, sm_source):
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE competitors SET sitemap_hash=%s, sitemap_url=%s, last_scanned_at=now() WHERE id=%s",
+            (new_hash, sm_source, comp_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 DISPATCH = {
     "assistant_turn": handle_assistant_turn,
     "defend_audit": handle_defend_audit,
@@ -3358,6 +3771,7 @@ DISPATCH = {
     "send_application_email": handle_send_application_email,
     "run_job_campaign": handle_run_job_campaign,
     "self_review": handle_self_review,
+    "competitor_scan": handle_competitor_scan,
 }
 
 def poll():
