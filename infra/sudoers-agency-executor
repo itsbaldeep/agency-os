@@ -1,2 +1,0 @@
-agency ALL=(ALL) NOPASSWD: /usr/bin/systemctl reload caddy
-agency ALL=(ALL) NOPASSWD: /sbin/iptables, /sbin/iptables-save, /sbin/iptables-restore

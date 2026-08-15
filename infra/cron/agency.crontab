@@ -17,6 +17,8 @@
 */3 * * * * /home/agency/agency-os/scripts/run-job.sh 9 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
 0 4 * * 1 /home/agency/agency-os/scripts/run-job.sh 10 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
 */3 * * * * /home/agency/agency-os/scripts/run-job.sh 11 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
+# Aetheria autonomous dev loop — every 30 min, one bounded iteration
+*/30 * * * * /home/agency/agency-os/scripts/run-job.sh 12 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
 # Competitor scan enqueue — Mondays 08:00 IST (02:30 UTC)
 30 2 * * 1 /home/agency/agency-os/scripts/run-job.sh 13 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
 # Competitor digest — Mondays 09:35 IST (04:05 UTC)

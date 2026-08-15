@@ -1,4 +1,10 @@
+aetheria-adminserver	deploy-adminserver
 agency-dashboard	agency-dashboard-dashboard
+aetheria-portal	deploy-portal
+aetheria-gameserver	deploy-gameserver
+aetheria-authserver	deploy-authserver
+aetheria-postgres	postgres:16-alpine
+aetheria-redis	redis:7-alpine
 agency-adminer	adminer:latest
 hearth-web-admin	hearth-web-dev:latest
 hearth-web-b2b	hearth-web-dev:latest

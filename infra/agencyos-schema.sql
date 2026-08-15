@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict dxWAlzudjfiZUS4ohyGwvUq6EPiY6hegD9MkFM2Aw0ihpayptI4aC0neQmiPTOU
+\restrict JcyLCLAHB4GlY6cvWd8jXFTSRcJD0HgCyCYoACZTQjfEcac15rMSNxuPl3jrKQM
 
 -- Dumped from database version 16.14
 -- Dumped by pg_dump version 18.4 (Ubuntu 18.4-0ubuntu0.26.04.1)
@@ -59,7 +59,10 @@ CREATE TYPE public.approval_type AS ENUM (
     'schema',
     'dependency',
     'other',
-    'apex-deploy'
+    'apex-deploy',
+    'aetheria_screens',
+    'aetheria_gate',
+    'aetheria_human_todo'
 );
 
 
@@ -142,6 +145,43 @@ ALTER SEQUENCE public.approvals_id_seq OWNER TO agency;
 --
 
 ALTER SEQUENCE public.approvals_id_seq OWNED BY public.approvals.id;
+
+
+--
+-- Name: assistant_messages; Type: TABLE; Schema: public; Owner: agency
+--
+
+CREATE TABLE public.assistant_messages (
+    id integer NOT NULL,
+    role text NOT NULL,
+    content text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    channel_id bigint DEFAULT 0
+);
+
+
+ALTER TABLE public.assistant_messages OWNER TO agency;
+
+--
+-- Name: assistant_messages_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
+--
+
+CREATE SEQUENCE public.assistant_messages_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.assistant_messages_id_seq OWNER TO agency;
+
+--
+-- Name: assistant_messages_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
+--
+
+ALTER SEQUENCE public.assistant_messages_id_seq OWNED BY public.assistant_messages.id;
 
 
 --
@@ -460,6 +500,45 @@ ALTER SEQUENCE public.clients_id_seq OWNED BY public.clients.id;
 
 
 --
+-- Name: competitor_pages; Type: TABLE; Schema: public; Owner: agency
+--
+
+CREATE TABLE public.competitor_pages (
+    id integer NOT NULL,
+    competitor_id integer NOT NULL,
+    url text NOT NULL,
+    lastmod timestamp with time zone,
+    title text,
+    first_seen_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_seen_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+ALTER TABLE public.competitor_pages OWNER TO agency;
+
+--
+-- Name: competitor_pages_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
+--
+
+CREATE SEQUENCE public.competitor_pages_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.competitor_pages_id_seq OWNER TO agency;
+
+--
+-- Name: competitor_pages_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
+--
+
+ALTER SEQUENCE public.competitor_pages_id_seq OWNED BY public.competitor_pages.id;
+
+
+--
 -- Name: competitors; Type: TABLE; Schema: public; Owner: agency
 --
 
@@ -468,7 +547,13 @@ CREATE TABLE public.competitors (
     brand_id integer NOT NULL,
     domain text NOT NULL,
     name text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    scan_enabled boolean DEFAULT false NOT NULL,
+    sitemap_url text,
+    feed_url text,
+    path_filter text,
+    sitemap_hash text,
+    last_scanned_at timestamp with time zone
 );
 
 
@@ -556,7 +641,8 @@ CREATE TABLE public.content_items (
     suggestion_id integer,
     task_id integer,
     compliance_flags jsonb DEFAULT '[]'::jsonb NOT NULL,
-    structured jsonb
+    structured jsonb,
+    content_blocks jsonb
 );
 
 
@@ -583,9 +669,6 @@ ALTER SEQUENCE public.content_items_id_seq OWNER TO agency;
 
 ALTER SEQUENCE public.content_items_id_seq OWNED BY public.content_items.id;
 
--- content_blocks: composed, per-block output of the multi-stage pipeline.
--- Outline text is carried in content_items.structured; composed blocks here.
-ALTER TABLE public.content_items ADD COLUMN IF NOT EXISTS content_blocks jsonb;
 
 --
 -- Name: content_research; Type: TABLE; Schema: public; Owner: agency
@@ -596,13 +679,13 @@ CREATE TABLE public.content_research (
     task_id integer,
     keyword_id integer,
     target_keyword text NOT NULL,
-    competitors jsonb DEFAULT '[]'::jsonb NOT NULL,   -- [{url, extract_ok, error?}]
-    elements jsonb NOT NULL,                           -- [{url, headings[], elements_used[], word_count, freshness}]
-    strongest jsonb NOT NULL,                          -- [{element, from_url, why}] (3)
-    weaknesses jsonb NOT NULL,                         -- [string] 2-3 things competitors do poorly
-    gaps jsonb NOT NULL,                               -- [{gap, opportunity}] (2-4) unmet topics + how we win
-    element_strategy text NOT NULL,                    -- short instruction: which block types to lead with
-    created_at timestamp with time zone DEFAULT now() NOT NULL
+    competitors jsonb DEFAULT '[]'::jsonb NOT NULL,
+    elements jsonb NOT NULL,
+    strongest jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    weaknesses jsonb DEFAULT '[]'::jsonb NOT NULL,
+    gaps jsonb DEFAULT '[]'::jsonb NOT NULL,
+    element_strategy text DEFAULT ''::text NOT NULL
 );
 
 
@@ -628,19 +711,6 @@ ALTER SEQUENCE public.content_research_id_seq OWNER TO agency;
 --
 
 ALTER SEQUENCE public.content_research_id_seq OWNED BY public.content_research.id;
-
---
--- Name: content_research id; Type: DEFAULT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.content_research ALTER COLUMN id SET DEFAULT nextval('public.content_research_id_seq'::regclass);
-
---
--- Name: content_research content_research_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.content_research
-    ADD CONSTRAINT content_research_pkey PRIMARY KEY (id);
 
 
 --
@@ -1413,7 +1483,9 @@ CREATE TABLE public.tasks (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     started_at timestamp with time zone,
     finished_at timestamp with time zone,
-    announced_at timestamp with time zone
+    announced_at timestamp with time zone,
+    progress integer,
+    progress_text text
 );
 
 
@@ -1487,6 +1559,13 @@ ALTER TABLE ONLY public.approvals ALTER COLUMN id SET DEFAULT nextval('public.ap
 
 
 --
+-- Name: assistant_messages id; Type: DEFAULT; Schema: public; Owner: agency
+--
+
+ALTER TABLE ONLY public.assistant_messages ALTER COLUMN id SET DEFAULT nextval('public.assistant_messages_id_seq'::regclass);
+
+
+--
 -- Name: audits id; Type: DEFAULT; Schema: public; Owner: agency
 --
 
@@ -1543,6 +1622,13 @@ ALTER TABLE ONLY public.clients ALTER COLUMN id SET DEFAULT nextval('public.clie
 
 
 --
+-- Name: competitor_pages id; Type: DEFAULT; Schema: public; Owner: agency
+--
+
+ALTER TABLE ONLY public.competitor_pages ALTER COLUMN id SET DEFAULT nextval('public.competitor_pages_id_seq'::regclass);
+
+
+--
 -- Name: competitors id; Type: DEFAULT; Schema: public; Owner: agency
 --
 
@@ -1561,6 +1647,13 @@ ALTER TABLE ONLY public.concept_variations ALTER COLUMN id SET DEFAULT nextval('
 --
 
 ALTER TABLE ONLY public.content_items ALTER COLUMN id SET DEFAULT nextval('public.content_items_id_seq'::regclass);
+
+
+--
+-- Name: content_research id; Type: DEFAULT; Schema: public; Owner: agency
+--
+
+ALTER TABLE ONLY public.content_research ALTER COLUMN id SET DEFAULT nextval('public.content_research_id_seq'::regclass);
 
 
 --
@@ -1705,6 +1798,14 @@ ALTER TABLE ONLY public.approvals
 
 
 --
+-- Name: assistant_messages assistant_messages_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+--
+
+ALTER TABLE ONLY public.assistant_messages
+    ADD CONSTRAINT assistant_messages_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: audits audits_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
 --
 
@@ -1793,6 +1894,22 @@ ALTER TABLE ONLY public.clients
 
 
 --
+-- Name: competitor_pages competitor_pages_competitor_id_url_key; Type: CONSTRAINT; Schema: public; Owner: agency
+--
+
+ALTER TABLE ONLY public.competitor_pages
+    ADD CONSTRAINT competitor_pages_competitor_id_url_key UNIQUE (competitor_id, url);
+
+
+--
+-- Name: competitor_pages competitor_pages_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+--
+
+ALTER TABLE ONLY public.competitor_pages
+    ADD CONSTRAINT competitor_pages_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: competitors competitors_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
 --
 
@@ -1814,6 +1931,14 @@ ALTER TABLE ONLY public.concept_variations
 
 ALTER TABLE ONLY public.content_items
     ADD CONSTRAINT content_items_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: content_research content_research_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+--
+
+ALTER TABLE ONLY public.content_research
+    ADD CONSTRAINT content_research_pkey PRIMARY KEY (id);
 
 
 --
@@ -2017,6 +2142,13 @@ ALTER TABLE ONLY public.job_applications
 
 
 --
+-- Name: competitor_pages_first_seen_idx; Type: INDEX; Schema: public; Owner: agency
+--
+
+CREATE INDEX competitor_pages_first_seen_idx ON public.competitor_pages USING btree (competitor_id, first_seen_at DESC);
+
+
+--
 -- Name: idx_email_threads_campaign; Type: INDEX; Schema: public; Owner: agency
 --
 
@@ -2138,6 +2270,14 @@ ALTER TABLE ONLY public.clients
 
 
 --
+-- Name: competitor_pages competitor_pages_competitor_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+--
+
+ALTER TABLE ONLY public.competitor_pages
+    ADD CONSTRAINT competitor_pages_competitor_id_fkey FOREIGN KEY (competitor_id) REFERENCES public.competitors(id) ON DELETE CASCADE;
+
+
+--
 -- Name: competitors competitors_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
 --
 
@@ -2199,6 +2339,22 @@ ALTER TABLE ONLY public.content_items
 
 ALTER TABLE ONLY public.content_items
     ADD CONSTRAINT content_items_task_id_fkey FOREIGN KEY (task_id) REFERENCES public.tasks(id);
+
+
+--
+-- Name: content_research content_research_keyword_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+--
+
+ALTER TABLE ONLY public.content_research
+    ADD CONSTRAINT content_research_keyword_id_fkey FOREIGN KEY (keyword_id) REFERENCES public.keywords(id);
+
+
+--
+-- Name: content_research content_research_task_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+--
+
+ALTER TABLE ONLY public.content_research
+    ADD CONSTRAINT content_research_task_id_fkey FOREIGN KEY (task_id) REFERENCES public.tasks(id);
 
 
 --
@@ -2445,5 +2601,5 @@ ALTER TABLE ONLY public.token_usage
 -- PostgreSQL database dump complete
 --
 
-\unrestrict dxWAlzudjfiZUS4ohyGwvUq6EPiY6hegD9MkFM2Aw0ihpayptI4aC0neQmiPTOU
+\unrestrict JcyLCLAHB4GlY6cvWd8jXFTSRcJD0HgCyCYoACZTQjfEcac15rMSNxuPl3jrKQM
 
