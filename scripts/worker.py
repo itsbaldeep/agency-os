@@ -2941,19 +2941,31 @@ def handle_content_outline(task):
         "blocks to convey data, since those carry real information; images are decoration.\n"
         "9. Mark EXACTLY ONE prose block with \"keyword_target\": true (in addition to intro) — "
         "that block must place the target keyword verbatim, naturally, later in the article. "
-        "Other prose blocks stay unflagged so they read naturally without stuffing.\n\n"
-        "Return ONLY a JSON array of block objects. Each object:\n"
+        "Other prose blocks stay unflagged so they read naturally without stuffing.\n"
+        "10. Return a top-level \"title\" field: a single compelling article title (max 90 chars) "
+        "containing the target keyword naturally. "
+        "{title_instr}\n\n"
+        "Return ONLY a JSON object with two keys: \"title\" (string) and \"blocks\" (array). Each block:\n"
         "{{\"type\": string, \"brief\": string, ...}}\n"
         "\"brief\" must be 1-2 sentences telling the compose stage exactly what this block must say "
         "or show (columns for tables, the single datapoint for charts, the question for faqs).\n"
         "Allowed types with any extra required fields:\n{types_spec}\n\n"
-        "EXAMPLE: [{{\"type\": \"intro\", \"brief\": \"Open with a 45-second mental model of the cost "
+        "EXAMPLE: {{\"title\": \"The Real Cost of Waiting: A Practical Guide\", \"blocks\": ["
+        "{{\"type\": \"intro\", \"brief\": \"Open with a 45-second mental model of the cost "
         "of waiting; deliverable in one paragraph\", \"keyword_target\": true}}, "
         "{{\"type\": \"key_takeaways\", \"brief\": \"3 bullet answers someone skimming needs\"}}, "
-        "{{\"type\": \"table\", \"brief\": \"columns: approach | time to value | cost; compare 3 ways\"}}]\n\n"
-        "CRITICAL: Respond with ONLY the JSON array — no prose, no code fences. "
-        "First output character must be [ , last must be ]."
-    ).format(research=research_blob, types_spec=types_spec)
+        "{{\"type\": \"table\", \"brief\": \"columns: approach | time to value | cost; compare 3 ways\"}}]}}\n\n"
+        "CRITICAL: Respond with ONLY the JSON object — no prose, no code fences. "
+        "First output character must be {{ , last must be }}."
+    ).format(research=research_blob, types_spec=types_spec,
+             title_instr=(
+                 "The user provided a draft title: use it as-is if it is already grammatically "
+                 "correct and reads well. If it has clear grammatical errors (e.g. broken word "
+                 "order, nonsensical phrases), fix ONLY the errors while preserving the wording "
+                 "and intent as closely as possible. Do not rewrite a provided title freely."
+                 if params.get("title")
+                 else "No title was provided — generate a fresh, compelling one from the "
+                      "keyword and competitive strategy."))
 
     set_task_progress(task["id"], 20, "outline: generating blocks")
     # Retry-with-feedback: single-shot outline is flaky (omits faq.answer_pointer,
@@ -2961,6 +2973,7 @@ def handle_content_outline(task):
     total_pt = total_ct = 0
     total_cost = 0.0
     blocks = None
+    gen_title = None
     attempt_reasons = []
     for attempt in range(2):
         result = call_zen(prompt, model=params.get("model") or MODEL_CONFIG["quality"], max_tokens=6000,
@@ -2972,22 +2985,24 @@ def handle_content_outline(task):
         total_cost += result.get("cost", 0)
         raw_out = result.get("content") or ""
         print(f"[worker] outline attempt {attempt+1} raw ({len(raw_out)} chars): {raw_out[:800]}", flush=True)
-        blocks = _parse_json_list(raw_out)
-        if not isinstance(blocks, list):
-            attempt_reasons.append("output was not a JSON array")
+        parsed_obj = _draft_parse_json(raw_out)
+        if not isinstance(parsed_obj, dict) or not isinstance(parsed_obj.get("blocks"), list):
+            attempt_reasons.append("output was not a JSON object with 'blocks' array")
             if attempt == 0:
-                prompt += ("\n\nYour previous output was not a parseable JSON array. Return ONLY the "
-                           f"JSON array.\nPrevious: {raw_out[:1200]}")
+                prompt += ("\n\nYour previous output was not a valid JSON object with 'title' and "
+                           f"'blocks' keys. Return ONLY the JSON object.\nPrevious: {raw_out[:1200]}")
                 continue
             return {"ok": False,
-                    "error": "outline: output was not a JSON array | raw: " + raw_out[:400],
+                    "error": "outline: output was not a JSON object with blocks | raw: " + raw_out[:400],
                     "prompt_tokens": total_pt, "completion_tokens": total_ct, "cost": round(total_cost, 8)}
+        blocks = parsed_obj["blocks"]
+        gen_title = (parsed_obj.get("title") or "").strip()
         fails = _content_outline_validate(blocks)
         if fails:
             attempt_reasons.append("; ".join(fails))
             if attempt == 0:
                 prompt += ("\n\nYour previous outline failed these checks: " + "; ".join(fails)
-                           + "\nFix your JSON and resend the full corrected array only.\nPrevious: "
+                           + "\nFix your JSON and resend the full corrected object only.\nPrevious: "
                            + raw_out[:2000])
                 continue
             return {"ok": False,
@@ -2996,6 +3011,8 @@ def handle_content_outline(task):
 
     set_task_progress(task["id"], 85, "outline: storing blocks")
     _ = attempt_reasons
+    # Prefer the LLM-generated/refined title; fall back to user-provided title, then keyword.
+    final_title = gen_title or params.get("title") or r["target_keyword"].capitalize()
     conn = get_conn()
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -3003,7 +3020,7 @@ def handle_content_outline(task):
             "INSERT INTO content_items (brand_id, title, content_type, body, status, structured) "
             "VALUES (%s, %s, 'article', NULL, 'outline', %s) RETURNING id",
             (brand_id,
-             params.get("title") or r["target_keyword"].capitalize(),
+             final_title[:200],
              json.dumps({"blocks": blocks, "target_keyword": r["target_keyword"]})))
         ci_id = cur.fetchone()["id"]
         conn.commit()
