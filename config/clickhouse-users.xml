@@ -3,6 +3,8 @@
     <profiles>
         <default>
             <max_threads>2</max_threads>
+            <max_memory_usage>1500000000</max_memory_usage>
+            <max_memory_usage_for_user>1500000000</max_memory_usage_for_user>
         </default>
     </profiles>
 </clickhouse>
