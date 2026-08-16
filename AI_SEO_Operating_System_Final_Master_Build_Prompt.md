@@ -1,5 +1,12 @@
 # FINAL MASTER BUILD PROMPT
 
+> **HISTORICAL ARTIFACT (2026-08-16).** This is the original one-shot build
+> spec used to create the system. It describes the intended SaaS as designed,
+> NOT the current state. The live system has diverged (black-box marketing
+> agency pivot, parasites killed, credits fallback). For current strategy read
+> `CEO_DIRECTIVE.md`; for state and open items read `ROADMAP.md`. Do not treat
+> anything in this file as an authoritative spec to build toward.
+
 # AI SEO OPERATING SYSTEM --- AUTONOMOUS SEO SaaS
 
 ## Deep Research → Product Intelligence → Architecture → Documentation → Development → QA → Production

@@ -1,6 +1,13 @@
 # Agency OS — User Manual
 *deployden.tech · Baldeep Singh*
 
+> **SUPERSEDED (2026-08-16).** This manual describes the legacy software-agency
+> flow (scaffold client POCs → preview → public deploy). That flow still works
+> but is parked. The **current mission** is an AI digital-marketing agency for
+> black-box brands. Read `CEO_DIRECTIVE.md` (strategy) and `ROADMAP.md`
+> (state + open items) first. The rest of this file is kept for infra
+> reference (access, ports, DNS, deploy mechanics).
+
 ---
 
 ## What you built (plain English)

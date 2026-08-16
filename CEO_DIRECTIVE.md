@@ -1,4 +1,4 @@
-# Agency OS — CEO Directive (2026-08-15)
+# Agency OS — CEO Directive (2026-08-16, state locked for fresh-context handoff)
 
 Authority: human co-CEO + AI co-CEO (OpenCode). This file is the persistent
 strategic context — read it on every session start. It supersedes informal
@@ -39,56 +39,93 @@ content briefs → drafts → publish. **Attack lives in `run_brand_audit` +
 The loop: **defend → attack → prioritize → approve → execute → verify →
 report → repeat.** Every step visible on the dashboard.
 
-## 3. Honest assessment — where we actually are (2026-08-15)
+## 3. Honest assessment — where we actually are (2026-08-16)
 
-The user challenged the AI co-CEO's confidence. The challenge was correct.
-After running a real audit and reading the code end-to-end:
+Progress since 2026-08-15: the report surface, capability rendering, ClickHouse
+stability, and the engagement cockpit are all live. What follows is the
+current truth, not the previous state.
 
-### What works
+### What works (verified live)
 - Control plane: Postgres ledger, ClickHouse traces, approval gates, cron,
   Discord bot, dashboard, OpenCode brain. Solid.
 - `defend_audit`: thin but functional — checks robots/sitemap/blog/feed/
   WP REST/meta/OG/JSON-LD presence/image alt. Writes `capabilities` rows.
+  Accepts brand_id (auto-resolves domain, auto-creates project for black-box).
+  Ran for both active brands (10 capabilities each).
 - `run_brand_audit`: crawls homepage, LLM infers category/competitors/prompts,
   queries LLM with brand-neutral prompts, substring-matches brand name for
-  "AI visibility." Writes `audits` + `competitors` + ClickHouse rows + (now
-  fixed) `suggestions`.
-- Content pipeline: research → outline → compose with typed GEO blocks.
-  Works but not visible on the brand page.
+  "AI visibility." Writes `audits` + `competitors` + ClickHouse rows +
+  `suggestions`. cur2 bug fixed 2026-08-15; confidence gate + suggestion
+  engine now reachable. Fresh audit ran on localfermentco.in (audit 29,
+  7 suggestions).
+- **Report page** `/engagements/brand/<id>/report` — the pitchable surface:
+  executive summary (visibility %, confidence, gate alerts), capabilities
+  checklist with severity colors + per-capability metrics (URL counts,
+  lastmod dates, alt-text stats), gated capabilities (GSC/WP/Code locked
+  badges), per-prompt AI visibility table from ClickHouse, competitor
+  analysis (page counts, freshness), suggestions with capability gates +
+  implementation instructions + linked content/tasks, content & drafts,
+  audit history, recent activity, methodology + raw JSON. All surfaces
+  interlinked (report ↔ content ↔ tasks ↔ competitors ↔ engagements).
+- **Engagement cockpit** `/engagements`: unified clients/projects/brands,
+  hot-first sort by last activity, Black-box/Code/Scaffolded badges, pending
+  action counts, audit/content/capability badges, View Report buttons,
+  onboarding wizard (name+URL minimum, optional: industry, target market,
+  audience, competitors, stage, channel, notes). Deduped (Localfermentco x4 →
+  x1); junk removed (brand 22 "system", project 22, 8 junk clients, archived
+  infra projects excluded from list).
+- **Content pipeline**: research → outline → compose with typed GEO blocks;
+  content list rows clickable → preview page with sticky action bar
+  (Download/Approve/Regenerate/Compose Full Draft); outline rows get
+  "Continue to Draft"; content_blocks rendered as formatted HTML.
+- **Suggestion semantics**: black-box brands — no approve/reject buttons,
+  "Requires Code Access" locked badges, step-by-step how-to instructions,
+  "Generate Content" → /content/new?brand_id=&suggestion_id=, linked content
+  + task badges. Code-access brands — "Implement Now" creates a dev task.
 - `competitor_scan`: fetches competitor sitemaps, diffs against last snapshot.
-  Works but competitors from `run_brand_audit` are inert stubs (scan_enabled
-  = false, no sitemap_url).
+  paperboat.com (brand 4) baseline done (9 pages, 2022-10-31 lastmod).
+  Competitors page now links back to engagement+report, shows "why" text,
+  explains baseline-vs-delta status, flags unverified auto-proposed domains.
+- **Free-model fallback (2026-08-16):** credits exhausted on the opencode
+  workspace (HTTP 401 CreditsError killed every AI task). Added fallback
+  chain to all three LLM call sites (worker.py call_zen, self-tuning-brand-
+  audit.py zen, suggestion-engine.py zen): hy3-free → laguna-s-2.1-free →
+  nemotron-3-ultra-free → deepseek-v4-flash-free → mimo-v2.5-free, all $0.
+  Triggers on CreditsError / Insufficient balance / FreeUsageLimitError /
+  429. Verified: content_compose task 270 (17 blocks) ran entirely on
+  hy3-free at $0.0; content item 19 (Technoflavour, "physical therapy
+  benefits") is now draft. Free models report cost=0 and echo model name.
+- **ClickHouse fixed**: memory 307MB→1.5GB (max_memory_usage 1500000000),
+  stuck DELETE mutations killed, pre-DELETE removed from audit script
+  (insert-only). ai_visibility_checks rows: brand 1=60, 2=60, 4=15.
 
 ### What's broken or missing (the real gap)
-1. **`run_brand_audit` had a fatal bug** (`cur2` used before definition at
-   worker.py:1095) — confidence gate + suggestion engine never ran. **Fixed
-   2026-08-15.** Prior DB suggestions came from older code or manual inserts.
-2. **No real SEO data sources.** No GSC, no GA4, no Ahrefs, no PageSpeed, no
-   real SERP, no backlinks, no site crawl, no schema validation. The "audit"
-   is a homepage curl + LLM imagination. A senior SEO specialist would call
-   it a rough triage sketch, not an audit.
-3. **Dashboard shows almost nothing.** One visibility %, inert competitor
-   badges, suggestions with a no-op approve button (no task created), no
-   audit report page, no charts, no trend, no competitor comparison, no
-   client-facing report. `audits.summary` has rich data (prompts, competitor
-   reasoning, market tier, methodology) that is **never rendered.**
+1. **No real SEO data sources.** No GSC property connected (key exists at
+   `gcs-api-key.json` but no property shared for any brand), no GA4, no
+   Ahrefs, no PageSpeed, no real SERP, no backlinks, no site crawl, no
+   schema validation. The "audit" is still homepage curl + LLM + sitemap
+   presence. A senior SEO specialist would call it a triage sketch.
+2. **Suggestion Approve is still a no-op status flip** for black-box brands
+   (buttons hidden on report; API endpoint exists but creates no task).
+3. **Activity timeline query** traces events with project="brands" not brand
+   name — brand activity may be sparse on brand pages.
 4. **No ads/campaigns/email/WhatsApp/social** — zero. SearchAtlas's tagline
    ("runs your SEO, AEO, Google Ads, Meta Ads, content, and site health")
-   beats us 10-fold in scope.
-5. **No pitchable report.** No webpage/PDF/doc a human could show a client.
-6. **Two audit types on unlinked pages** — brand AI-visibility on
-   `/engagements/brand/<id>`, tech audit on `/projects/<id>`. No unified view.
-7. **AI-visibility is a training-knowledge proxy** — single LLM (DeepSeek),
-  substring match, no real ChatGPT/Perplexity/Gemini/Copilot citation data.
-8. **Visibility history is wiped on re-run** (DELETE per brand_id in
-   ClickHouse before insert).
-9. **Citation detection has no word boundaries** — "Apple" matches any fruit.
-10. **Competitors are inert stubs** — scan_enabled=false, no sitemap_url.
+   beats us ~10-fold in scope.
+5. **Credits exhausted** — paid model down; free fallback works but free
+   models are rate-limited and lower quality. Top-up restores quality.
+6. **AI-visibility is a training-knowledge proxy** — single LLM (DeepSeek),
+   substring match, no real ChatGPT/Perplexity/Gemini/Copilot citation data.
+   Citation matching has no word boundaries ("Apple" matches any fruit).
+7. **Competitors mostly inert stubs** — only paperboat.com scanned;
+   run_brand_audit competitors not yet wired to competitor_scan
+   (scan_enabled=false, no sitemap_url for the rest).
 
 ### The honest bottom line
-We are doing **maybe 5-10%** of what competitors do. The infrastructure is
-good. The product surface is not there yet. The user is right to demand we
-build more before shipping a real client.
+We went from 5-10% to maybe 20-25% of what competitors do, on the surfaces
+that matter most for pitching (report + cockpit + content). The product
+surface is real now. The next leap requires real data (GSC/PageSpeed/crawl)
+and one real client to iterate against.
 
 ## 4. Competitive position (vs SearchAtlas, Synscribe, Alli AI)
 
@@ -108,130 +145,128 @@ marketplace restrictions) are a feature none of them show.
 
 ## 5. Grounded roadmap — black-box SEO first, then expand
 
-### Phase 0 — Fix what's broken (NOW, 1-2 days)
+### Phase 0 — Fix what's broken (DONE except 2 items)
 - [x] Fix `cur2` bug in `handle_run_brand_audit` (DONE 2026-08-15)
 - [x] Kill parasites: Aetheria loop, job-application stack, dead projects (DONE)
-- [ ] **Dashboard: brand audit report page** — render `audits.summary` fully:
-      visibility %, per-prompt table (from ClickHouse), competitor reasoning,
-      market tier, methodology, crawl text excerpt, confidence/gate status.
-      This is the "pitchable report" surface. Route: `/engagements/brand/<id>/report`
-      or a report tab on the engagement page.
-- [ ] **Dashboard: wire suggestion Approve → creates a task** (not a no-op)
-- [ ] **Dashboard: render `defend_audit` results on the brand page** (not just
-      project page) — capabilities as a checklist with status badges
-- [ ] **Stop wiping visibility history** — remove the DELETE in
-      `self-tuning-brand-audit.py:179`, use INSERT-only with audit_id
+- [x] Dashboard: brand audit report page (DONE 2026-08-15 — the pitchable surface)
+- [x] Render `defend_audit` results on brand report page (capability chips) (DONE)
+- [x] Stop wiping visibility history — pre-DELETE removed, insert-only (DONE)
+- [x] ClickHouse memory fix + mutation cleanup (DONE 2026-08-15)
+- [x] Competitor domain validation + dedupe (DONE)
+- [x] Suggestion semantics: black-box instructions vs code implement vs content
+      links, capability-gated (DONE 2026-08-15)
+- [x] Content list/preview UI + engagements cockpit + onboarding wizard (DONE)
+- [x] Free-model fallback for exhausted credits (DONE 2026-08-16)
+- [ ] Wire suggestion Approve → creates a task (still a no-op status flip;
+      buttons hidden for black-box)
+- [ ] Fix activity timeline query (project="brands" vs brand name)
 
 ### Phase 1 — Real SEO data (1-2 weeks, needs user-provided keys)
 - [ ] **Google Search Console connector** — service-account OAuth per brand.
       Nightly collector: queries, impressions, clicks, CTR, position → `signals`
-      table. This replaces Ahrefs estimates with real data. **REQUIRES: user
-      to create a GCP project + service account + share GSC property.**
+      table. **STATUS: key file exists (gcs-api-key.json, gitignored) but NO
+      GSC property shared for any brand. technoflavour is not addable by us;
+      localfermentco property unknown. Connector code not started — report
+      shows "Requires DNS TXT verification" gate until a property exists.**
 - [ ] **PageSpeed Insights API** — free, no auth. Add to `defend_audit`:
-      LCP/CLS/INP, mobile score, lab data. Write to `capabilities` or `signals`.
-- [ ] **Rich Results / Schema validation** — use Google's Rich Results Test
-      API (free) to validate JSON-LD, not just check presence.
-- [ ] **Real site crawl** — not just homepage. Crawl up to N pages (polite,
-      respect robots). Detect broken links, redirect chains, orphan pages,
-      title/meta length issues, canonical issues.
-- [ ] **Keyword table + tracking** — populate `keywords` table from GSC
-      queries, track positions over time.
+      LCP/CLS/INP, mobile score, lab data. Best unblocked next step.
+- [ ] **Rich Results / Schema validation** — Google's Rich Results Test API.
+- [ ] **Real site crawl** — not just homepage; broken links, redirect chains,
+      orphans, title/meta length, canonical issues.
+- [ ] **Keyword table + tracking** — from GSC queries, positions over time.
 
-### Phase 2 — Dashboard as the cockpit (1-2 weeks)
-- [ ] **Unified brand page** — merge brand AI-visibility + project tech audit
-      into one view. Defend checklist + attack findings + suggestions queue +
-      content drafts in tabs.
-- [ ] **Competitor comparison view** — side-by-side: AI-visibility, keyword
-      overlap, content gap, sitemap page count, blog freshness.
-- [ ] **Content pipeline on brand page** — not just project page. For
-      black-box brands with no project, draft → review → approve → download
-      (or publish if CMS connected).
-- [ ] **Charts** — visibility trend over time, ranking movement, spend per
-      brand. Chart.js or similar.
-- [ ] **Per-brand spend breakdown** from `token_usage`.
-- [ ] **Pipeline config UI** — `brand_pipelines` table (enabled_stages,
+### Phase 2 — Dashboard as the cockpit (partially DONE)
+- [x] Unified brand report page (audit + capabilities + competitors + suggestions
+      + content + history + activity) (DONE)
+- [x] Engagement list cockpit + onboarding wizard (DONE)
+- [x] Content pipeline visible on brand page + preview page (DONE)
+- [x] Competitor page linkage + scan-status explanation (DONE)
+- [ ] Charts: visibility trend, ranking movement, spend per brand (Chart.js)
+- [ ] Per-brand spend breakdown from `token_usage`
+- [ ] Pipeline config UI — `brand_pipelines` table (enabled_stages,
       schedule_cron, Run Now). Already in DB, not rendered.
 
 ### Phase 3 — Execution loop (2-4 weeks, needs client CMS access)
-- [ ] **WordPress publisher** — `publish_content` step in approval-executor
-      for brands with WP REST config. Status=draft first, trace to events.
-      **REQUIRES: user to get a WP Application Password from the client.**
-- [ ] **Content decay detection** — list pages older than N months as refresh
-      briefs into suggestions.
-- [ ] **Findings → suggestions bridge** — defend_audit defects auto-filed as
-      pending suggestions with plain-language rationale.
-- [ ] **Competitor content scan** — wire `run_brand_audit` competitors to
-      `competitor_scan` (set scan_enabled=true, populate sitemap_url).
-- [ ] **Draft variants** — generate N {title, angle, outline} concepts, pick
-      one, then full draft.
+- [ ] **WordPress publisher** — `publish_content` step in approval-executor.
+      Technoflavour has WP REST API available; missing only the Application
+      Password from the client.
+- [ ] **Content decay detection** — pages older than N months → refresh briefs.
+- [ ] **Findings → suggestions bridge** — defend_audit defects auto-filed.
+- [ ] **Competitor content scan** — wire run_brand_audit competitors to
+      competitor_scan (scan_enabled=true, populate sitemap_url). Only
+      paperboat.com scanned so far.
+- [ ] **Draft variants** — N {title, angle, outline} concepts → pick → draft.
 
 ### Phase 4 — AEO + multi-engine (4-8 weeks)
-- [ ] **Real AI-visibility** — query ChatGPT/Perplexity/Gemini/Copilot APIs
-      (not just DeepSeek), measure real citations with word-boundary matching.
-- [ ] **AEO-structured content** — front-loaded answers, FAQ schema, Q&A
-      format, llms.txt, entity optimization.
-- [ ] **Seasonal/event calendar** — Google Trends integration for demand
-      timing.
-- [ ] **Weekly marketing decision job** — reads signals + capabilities + gaps
-      + content inventory, files a prioritized plan into suggestions.
+- [ ] **Real AI-visibility** — ChatGPT/Perplexity/Gemini/Copilot APIs, real
+      citations with word-boundary matching.
+- [ ] **AEO-structured content** — front-loaded answers, FAQ schema, llms.txt.
+- [ ] **Seasonal/event calendar** — Google Trends integration.
+- [ ] **Weekly marketing decision job** — signals + capabilities + gaps +
+      content inventory → prioritized plan into suggestions.
 
 ### Parked (deliberate — not until 3+ paying clients)
 - Google/Meta ads automation, social media posting, email campaigns,
   WhatsApp/RCS, PR marketplace, local SEO/GBP, ecommerce SEO, image generation,
   multi-tenant SaaS, billing, RBAC, knowledge graph, learning engine.
+- Hearth/Streamwise/old scaffolded apps: archived, excluded from engagement
+  list. Do not revive.
 
 ## 6. What I need from the human co-CEO (checklist)
 
-These are the things only the human can do. Everything else is on me.
-
 ### Immediate (unblocks Phase 1)
-- [ ] **Google Cloud project + service account** for Search Console API.
-      Create a GCP project, enable Search Console API, create a service
-      account, download the JSON key, share the GSC property with the service
-      account email. Give me the JSON key path or contents. This is the
-      single highest-leverage integration — it replaces all estimates with
-      real data.
-- [ ] **Confirm technoflavour.com is a real client/prospect** — do we have
-      permission to audit it? Do they have a GSC property we can access?
+- [ ] **GSC property access** — key file exists (gcs-api-key.json). Now need:
+      (a) a GSC property that can be shared with the service account for ANY
+      brand (technoflavour can't be added by us — it's not your Google account;
+      localfermentco needs the client's verification), or (b) permission to
+      create/verify a property for a domain we control. Until then the GSC
+      connector stays gated. The service-account email must be given the
+      property; DNS TXT verification is the standard path.
+- [ ] **Confirm technoflavour.com status** — real client/prospect? Do they
+      have a GSC property we can access?
+- [ ] **Top up opencode workspace credits** (optional but recommended) —
+      paid deepseek-v4-flash is the primary model; free fallback works but
+      free models are rate-limited and lower quality.
 
 ### When we have a real client engagement
-- [ ] **WordPress Application Password** from the client (for Phase 3
-      publisher). URL + username + app password.
-- [ ] **3 real competitor names** for the client (to seed/validate the
-      LLM-proposed competitors).
-- [ ] **Ahrefs API key** (optional but high-value — $99+/mo). Enables real
-      backlink data, keyword difficulty, competitor content gap. Without this
-      we rely on GSC + public crawl + LLM.
-- [ ] **OpenAI API key** (optional — for real ChatGPT visibility measurement
-      in Phase 4). We currently use Zen/OpenRouter which is fine for now.
+- [ ] **WordPress Application Password** from the client (Phase 3 publisher).
+      URL + username + app password. Technoflavour is WP-ready.
+- [ ] **3 real competitor names** per client (seed/validate LLM-proposed ones).
+- [ ] **Ahrefs API key** (optional, $99+/mo) — real backlinks, KD, content gap.
+- [ ] **OpenAI API key** (optional — real ChatGPT visibility, Phase 4).
 
 ### Strategic decisions only the human can make
-- [ ] **Public domain for the marketing site** — deployden.tech is the infra
-      domain. Do we want a separate agency brand domain for the public site +
-      free audit lead magnet?
-- [ ] **Pricing model** — per-client monthly retainer? Per-project? Free audit
-      → paid execution? Decide before we build the public site.
-- [ ] **First real client** — technoflavour (your own product) as a case
-      study, or do you have a real prospect lined up?
+- [ ] **Public domain for the marketing site** — deployden.tech is infra.
+      Separate agency brand domain for public site + free audit lead magnet?
+- [ ] **Pricing model** — retainer vs per-project vs free-audit → paid execution?
+- [ ] **First real client** — technoflavour (your product) as case study, or a
+      real prospect?
 
 ## 7. Operating rules for the AI co-CEO
 
 1. **Challenge everything.** Don't assume code exists = works. Test it.
 2. **Use subagents for exploration** — keep the main context window for
    decisions, not file reading.
-3. **Push context to files** — AGENTS.md, CEO_DIRECTIVE.md, ROADMAP.md.
-   Never hold critical state only in chat.
+3. **Push context to files** — CEO_DIRECTIVE.md, ROADMAP.md. Never hold
+   critical state only in chat. On session start: read CEO_DIRECTIVE.md
+   then ROADMAP.md (ROADMAP has the system state block).
 4. **Deploy from time to time** — don't let work sit uncommitted. The
-   auto-deploy jobs (8, 9) will pick up merges.
+   auto-deploy jobs (8, 9) will pick up merges. **WARNING: pushing to
+   agency-os restarts the worker and orphans running tasks — re-queue
+   orphaned tasks after each push, or temporarily disable job 8 during
+   long audits.** Deploy scripts SKIP when /home/agency/agency-os has
+   uncommitted changes — commit config drift there first.
 5. **Everything visible on the dashboard** — if it's not on :5001, it doesn't
    exist for the human co-CEO.
-6. **Never assume a data source is available** — ask for keys/permissions
-   early.
+6. **Never assume a data source is available** — ask for keys/permissions early.
 7. **Be honest about gaps** — the user respects honesty over false confidence.
 8. **Determinism first, LLM second** — LLMs generate proposals; code validates
    and executes. Every LLM output passes a deterministic validator.
 9. **Black-box first** — every feature must work without repo/CMS access.
    Deeper access unlocks more, but the default path is public-web-only.
+10. **Credits may be zero** — the free fallback chain keeps the pipeline alive
+    (hy3-free etc.). Free models are slower/rate-limited; don't treat their
+    output as equal quality. Check for "model" key in call results.
 
 ## 8. Parasites killed (2026-08-15)
 
