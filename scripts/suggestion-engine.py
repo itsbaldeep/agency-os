@@ -18,8 +18,11 @@ MODEL_CONFIG = {
     "temp_structured": 0.1,                # low temperature for JSON output
 }
 
-def zen(prompt, max_tokens=1200, temperature=None):
-    body_dict = {"model": MODEL_CONFIG["quality"], "messages": [{"role": "user", "content": prompt}], "max_tokens": max_tokens}
+FREE_FALLBACK_MODELS = ["hy3-free", "laguna-s-2.1-free", "nemotron-3-ultra-free", "deepseek-v4-flash-free", "mimo-v2.5-free"]
+
+def zen(prompt, max_tokens=1200, temperature=None, _fb_index=0):
+    model = MODEL_CONFIG["quality"]
+    body_dict = {"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": max_tokens}
     if temperature is not None:
         body_dict["temperature"] = temperature
     body = json.dumps(body_dict).encode()
@@ -30,9 +33,32 @@ def zen(prompt, max_tokens=1200, temperature=None):
         data = json.loads(resp.read())
         c = data.get("choices", [{}])[0].get("message", {}).get("content", "")
         usage = data.get("usage", {})
-        return {"ok": True, "content": c, "prompt_tokens": usage.get("prompt_tokens", 0), "completion_tokens": usage.get("completion_tokens", 0)}
+        return {"ok": True, "content": c, "prompt_tokens": usage.get("prompt_tokens", 0), "completion_tokens": usage.get("completion_tokens", 0), "model": model}
     except Exception as e:
-        return {"ok": False, "error": str(e)[:300]}
+        emsg = str(e)[:300]
+        # Credits exhausted or free-model rate-limited → try the next fallback model
+        if _fb_index < len(FREE_FALLBACK_MODELS) and (
+            "CreditsError" in emsg or "Insufficient balance" in emsg
+            or "FreeUsageLimitError" in emsg or "Rate limit" in emsg
+            or "401" in emsg or "429" in emsg):
+            fb = FREE_FALLBACK_MODELS[_fb_index]
+            print(f"[sug-engine] LLM {model} blocked, falling back to {fb}", flush=True)
+            body_dict["model"] = fb
+            body = json.dumps(body_dict).encode()
+            req = urllib.request.Request(ZEN_URL, data=body,
+                headers={"Authorization": f"Bearer {ZEN_KEY}", "Content-Type": "application/json", "User-Agent": "AgencyOS-Suggestions/1.0"})
+            try:
+                resp = urllib.request.urlopen(req, timeout=60)
+                data = json.loads(resp.read())
+                c = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                usage = data.get("usage", {})
+                return {"ok": True, "content": c, "prompt_tokens": usage.get("prompt_tokens", 0), "completion_tokens": usage.get("completion_tokens", 0), "model": fb}
+            except Exception as e2:
+                emsg2 = str(e2)[:300]
+                if "Rate limit" in emsg2 or "FreeUsageLimitError" in emsg2:
+                    return zen(prompt, max_tokens=max_tokens, temperature=temperature, _fb_index=_fb_index + 1)
+                return {"ok": False, "error": emsg2, "model": fb}
+        return {"ok": False, "error": emsg, "model": model}
 
 SUPERLATIVE_PATTERNS = re.compile(r'\b(cleanest|best|greatest|number one|top rated|leading|most popular|the best)\b', re.IGNORECASE)
 HEALTH_CLAIM_PATTERNS = re.compile(r'\b(cure|heal|treat|prevent|reduce risk|boost immunity|detox|cleanse)\b', re.IGNORECASE)

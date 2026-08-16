@@ -68,6 +68,11 @@ MODEL_CONFIG = {
 # spend from OpenCode spend on the Zen dashboard. Falls back to OPENAI_API_KEY.
 WORKER_ZEN_KEY = os.environ.get("WORKER_ZEN_KEY") or os.environ.get("OPENAI_API_KEY", "")
 
+# Free-model fallback chain. When the primary model is blocked (CreditsError /
+# Insufficient balance / FreeUsageLimitError), retry with these at $0 cost.
+# Verified to return usable content: hy3-free, laguna-s-2.1-free, nemotron-3-ultra-free.
+FREE_FALLBACK_MODELS = ["hy3-free", "laguna-s-2.1-free", "nemotron-3-ultra-free", "deepseek-v4-flash-free", "mimo-v2.5-free"]
+
 # Hard token budget ceiling per task (run_brand_audit)
 TOKEN_BUDGET_TOTAL = 60_000  # abort if total prompt+completion exceeds this
 
@@ -419,7 +424,7 @@ Requirements:
 
     return result
 
-def call_zen(prompt, model="deepseek-v4-flash", max_tokens=1500, temperature=None, timeout=90):
+def call_zen(prompt, model="deepseek-v4-flash", max_tokens=1500, temperature=None, timeout=90, _fb_index=0):
     model = model.removeprefix("opencode/")
     body_dict = {"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": max_tokens}
     if temperature is not None:
@@ -435,15 +440,25 @@ def call_zen(prompt, model="deepseek-v4-flash", max_tokens=1500, temperature=Non
         usage = data.get("usage", {})
         pt = usage.get("prompt_tokens", 0)
         ct = usage.get("completion_tokens", 0)
-        cost = pt * INPUT_COST_PER_TOKEN + ct * OUTPUT_COST_PER_TOKEN
-        return {"ok": True, "content": content, "prompt_tokens": pt, "completion_tokens": ct, "cost": round(cost, 8)}
+        is_free = model in FREE_FALLBACK_MODELS
+        cost = 0.0 if is_free else pt * INPUT_COST_PER_TOKEN + ct * OUTPUT_COST_PER_TOKEN
+        return {"ok": True, "content": content, "prompt_tokens": pt, "completion_tokens": ct, "cost": round(cost, 8), "model": model}
     except urllib.error.HTTPError as e:
         body = e.read().decode()[:500] if hasattr(e, 'read') else str(e)
-        return {"ok": False, "error": f"HTTP {e.code}: {body}"}
+        # Credits exhausted or free-model rate-limited → try the next fallback model
+        if _fb_index < len(FREE_FALLBACK_MODELS) and (
+            "CreditsError" in body or "Insufficient balance" in body
+            or "FreeUsageLimitError" in body or "Rate limit" in body
+            or e.code in (401, 429)):
+            fb = FREE_FALLBACK_MODELS[_fb_index]
+            print(f"[worker] LLM {model} blocked ({e.code}), falling back to {fb}", flush=True)
+            return call_zen(prompt, model=fb, max_tokens=max_tokens, temperature=temperature,
+                            timeout=timeout, _fb_index=_fb_index + 1)
+        return {"ok": False, "error": f"HTTP {e.code}: {body}", "model": model}
     except (socket.timeout, urllib.error.URLError) as e:
-        return {"ok": False, "error": f"TIMEOUT: {str(e)[:200]}"}
+        return {"ok": False, "error": f"TIMEOUT: {str(e)[:200]}", "model": model}
     except Exception as e:
-        return {"ok": False, "error": str(e)[:500]}
+        return {"ok": False, "error": str(e)[:500], "model": model}
 
 def handle_onboard_project(task):
     """Deterministic repo onboarding. Never invokes opencode."""

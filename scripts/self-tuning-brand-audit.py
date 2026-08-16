@@ -43,7 +43,9 @@ import psycopg2, psycopg2.extras
 def db():
     return psycopg2.connect(host=DB_HOST, port=5432, dbname=DB_NAME, user=DB_USER, password=DB_PASS)
 
-def zen(prompt, model="deepseek-v4-flash", max_tokens=800):
+FREE_FALLBACK_MODELS = ["hy3-free", "laguna-s-2.1-free", "nemotron-3-ultra-free", "deepseek-v4-flash-free", "mimo-v2.5-free"]
+
+def zen(prompt, model="deepseek-v4-flash", max_tokens=800, _fb_index=0):
     body = json.dumps({"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": max_tokens}).encode()
     req = urllib.request.Request(ZEN_URL, data=body,
         headers={"Authorization": f"Bearer {ZEN_KEY}", "Content-Type": "application/json", "User-Agent": "AgencyOS-Audit/1.0"})
@@ -52,9 +54,18 @@ def zen(prompt, model="deepseek-v4-flash", max_tokens=800):
         data = json.loads(resp.read())
         c = data.get("choices", [{}])[0].get("message", {}).get("content", "")
         usage = data.get("usage", {})
-        return {"ok": True, "content": c, "prompt_tokens": usage.get("prompt_tokens", 0), "completion_tokens": usage.get("completion_tokens", 0)}
+        return {"ok": True, "content": c, "prompt_tokens": usage.get("prompt_tokens", 0), "completion_tokens": usage.get("completion_tokens", 0), "model": model}
     except Exception as e:
-        return {"ok": False, "error": str(e)[:300]}
+        emsg = str(e)[:300]
+        # Credits exhausted or free-model rate-limited → try the next fallback model
+        if _fb_index < len(FREE_FALLBACK_MODELS) and (
+            "CreditsError" in emsg or "Insufficient balance" in emsg
+            or "FreeUsageLimitError" in emsg or "Rate limit" in emsg
+            or "401" in emsg or "429" in emsg):
+            fb = FREE_FALLBACK_MODELS[_fb_index]
+            print(f"[audit] LLM {model} blocked, falling back to {fb}", flush=True)
+            return zen(prompt, model=fb, max_tokens=max_tokens, _fb_index=_fb_index + 1)
+        return {"ok": False, "error": emsg, "model": model}
 
 def crawl_homepage(domain):
     urls = [f"https://{domain}", f"https://www.{domain}"]
