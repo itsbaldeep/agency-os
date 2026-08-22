@@ -12,11 +12,13 @@
 0 */12 * * * /home/agency/agency-os/scripts/run-job.sh 6 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
 # Daily Discord digest — 09:00 IST (03:30 UTC)
 30 3 * * * /home/agency/agency-os/scripts/run-job.sh 7 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
-# Self-deploy agency-os — every 2 minutes
-*/2 * * * * /home/agency/agency-os/scripts/run-job.sh 8 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
-*/3 * * * * /home/agency/agency-os/scripts/run-job.sh 9 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
-0 4 * * 1 /home/agency/agency-os/scripts/run-job.sh 10 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
-*/3 * * * * /home/agency/agency-os/scripts/run-job.sh 11 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
+# Autonomous core-repo loops retired 2026-08-22 by CEO decision.
+# Core changes now use an explicit Codex/OpenCode edit -> test -> review -> deploy
+# workflow. Keep the rows disabled in background_jobs; Git history is rollback.
+# */2 * * * * /home/agency/agency-os/scripts/run-job.sh 8 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
+# */3 * * * * /home/agency/agency-os/scripts/run-job.sh 9 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
+# 0 4 * * 1 /home/agency/agency-os/scripts/run-job.sh 10 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
+# */3 * * * * /home/agency/agency-os/scripts/run-job.sh 11 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
 # Aetheria autonomous dev loop — FROZEN 2026-08-15 (CEO directive: reclaim focus
 # for client marketing work; game stays running, agent no longer grinds on it).
 # To resume: uncomment and set background_jobs.id=12 enabled=true.
