@@ -61,12 +61,21 @@ class WorkerWorkflowTests(unittest.TestCase):
 
     def test_raw_opencode_command_disables_tools(self):
         proc = SimpleNamespace(returncode=0, stdout='{"part":{"type":"text","text":"ok"}}\n', stderr="")
-        with mock.patch("subprocess.run", return_value=proc) as run:
+        with mock.patch("subprocess.run", return_value=proc) as run, \
+             mock.patch.dict(worker.os.environ, {
+                 "OPENAI_API_KEY": "raw-key", "OPENAI_BASE_URL": "https://api.deepseek.com",
+                 "DEEPSEEK_API_KEY": "deepseek-key",
+             }, clear=False):
             worker.run_opencode("answer", "/tmp", model="opencode/deepseek-v4-flash", allow_tools=False)
         cmd = run.call_args.args[0]
+        env = run.call_args.kwargs["env"]
         self.assertIn("--pure", cmd)
         self.assertNotIn("--auto", cmd)
         self.assertNotIn("--dangerously-skip-permissions", cmd)
+        self.assertNotIn("OPENAI_API_KEY", env)
+        self.assertNotIn("OPENAI_BASE_URL", env)
+        self.assertNotIn("DEEPSEEK_API_KEY", env)
+        self.assertEqual(env["HOME"], "/home/agency")
 
     def test_raw_fallback_skips_provider_error_then_uses_subscription(self):
         provider_error = json.dumps({

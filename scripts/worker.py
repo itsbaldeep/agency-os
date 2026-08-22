@@ -750,8 +750,15 @@ def run_opencode(prompt, workdir, model=None, timeout=300, allow_tools=True):
     if model:
         cmd.extend(["--model", model])
     cmd.append(prompt)
+    env = {**os.environ, "HOME": "/home/agency", "NO_COLOR": "1"}
+    # The worker's raw-provider variables belong to Agency OS completions.
+    # OpenCode owns separate credentials in ~/.local/share/opencode/auth.json;
+    # leaking the DeepSeek key/base into this process makes its OpenAI provider
+    # mistake that API credential for the retained ChatGPT OAuth session.
+    for key in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "DEEPSEEK_API_KEY"):
+        env.pop(key, None)
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env={**os.environ, "HOME": "/home/agency"})
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
     except subprocess.TimeoutExpired:
         return 124, "opencode timed out", 0, 0
     tokens_in = tokens_out = 0

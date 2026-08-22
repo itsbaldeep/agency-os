@@ -248,7 +248,16 @@ def run_audit(domain, brand_id, category, competitors, prompts, market_tier=None
     models_used = []
     for i, prompt in enumerate(prompts):
         print(f"    [{i+1}/{len(prompts)}] Querying...", end=" ", flush=True)
-        r = zen(prompt)
+        # Visibility sampling needs named recommendations, not an essay. The
+        # bounded answer both makes samples comparable and prevents a normal
+        # verbose completion from hitting the output ceiling and being rejected
+        # as incomplete by the central gateway.
+        sample_prompt = (
+            "Answer this buyer question in at most 120 words. Name specific "
+            "products when relevant, state uncertainty plainly, and use no preamble.\n\n"
+            f"Buyer question: {prompt}"
+        )
+        r = zen(sample_prompt, max_tokens=400)
         total_prompt_tokens += r.get("prompt_tokens", 0)
         total_completion_tokens += r.get("completion_tokens", 0)
         total_cost += r.get("cost", 0)
