@@ -3,7 +3,7 @@
 
 Single source of truth for the review rubric. Shared by:
   * worker.py  handle_propose_fix  (pre-PR refine loop and post-PR check)
-  * auto-merge.sh                  (universal review of any PR before merge)
+  * explicit proposal workflows   (bounded review before a human merge)
 
 Review axes: BLOCKERS (crashes/logic/security/syntax) + ACCURACY (fully solves
 the stated task) + CONVENTIONS (fits codebase style, no over-engineering).
@@ -43,7 +43,7 @@ _PRICES = {
 }
 
 REVIEW_PROMPT = (
-    "You are performing a code review of a diff before auto-merge. "
+    "You are performing a code review of a diff before human review. "
     "Judge against three axes:\n"
     "1. BLOCKERS: crashes, wrong logic, security issues, invalid syntax, broken invocations.\n"
     "2. ACCURACY: does the change fully and correctly solve the stated task? "
@@ -191,7 +191,7 @@ def main():
         gh_api(f"/repos/{owner}/{repo}/issues/{pr}/labels", method="POST",
                data={"labels": ["hold"]})
         gh_api(f"/repos/{owner}/{repo}/issues/{pr}/comments", method="POST",
-               data={"body": "🔍 Machine review flagged DEFECTS — held for auto-merge.\n\n"
+               data={"body": "🔍 Machine review flagged DEFECTS — human merge should remain blocked.\n\n"
                               f"{findings or 'see below'}"})
     print(f"PR #{pr} {notes} OUTCOME DEFECTS (${cost:.6f})\n{findings}")
     return 1

@@ -42,12 +42,12 @@ WHERE lower(name)='technoflavour';
 UPDATE projects SET repo_name=NULL, local_path=NULL, agent_allowed=false
 WHERE lower(name) IN ('hearth-repo','streamwise-repo');
 
-UPDATE projects SET repo_name='hearth', local_path='/home/agency/projects/hearth', agent_allowed=false,
+UPDATE projects SET repo_name='hearth', local_path='/home/agency/engagements/hearth', agent_allowed=false,
   recovery_ref='/home/agency/backups/engagements/hearth/2026-08-22-pre-park',
   ops_manifest='{"containers":["hearth-api","hearth-public-api","hearth-web-customer","hearth-web-b2b","hearth-web-admin","hearth-db","hearth-redis","hearth-clickhouse","hearth-storage"]}'::jsonb
 WHERE lower(name)='hearth';
 
-UPDATE projects SET repo_name='streamwise', local_path='/home/agency/projects/streamwise', agent_allowed=false,
+UPDATE projects SET repo_name='streamwise', local_path='/home/agency/engagements/streamwise', agent_allowed=false,
   recovery_ref='/home/agency/backups/engagements/streamwise/2026-08-22-pre-park',
   ops_manifest='{"containers":["streamwise-web","streamwise-admin","streamwise-blog"]}'::jsonb
 WHERE lower(name)='streamwise';
@@ -57,7 +57,7 @@ UPDATE projects SET local_path=NULL, agent_allowed=false,
   ops_manifest='{}'::jsonb
 WHERE lower(name)='aetheria';
 
-UPDATE projects SET local_path='/home/agency/projects/deployden', repo_name='deployden', agent_allowed=true
+UPDATE projects SET local_path='/home/agency/core/deployden', repo_name='deployden', agent_allowed=true
 WHERE lower(name)='deployden';
 
 INSERT INTO brands (name,slug,project_id,access_tier)

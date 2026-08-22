@@ -40,8 +40,8 @@ sudo visudo -cf /etc/sudoers.d/agency-executor   # refuse to continue if invalid
 echo "== 7. crontab =="
 crontab infra/cron/agency.crontab
 
-echo "== 8. project repos =="
-mkdir -p /home/agency/projects && cd /home/agency/projects
+echo "== 8. engagement repos =="
+mkdir -p /home/agency/core /home/agency/engagements && cd /home/agency/engagements
 for r in hearth streamwise; do
   [ -d "$r" ] || git clone "https://github.com/itsbaldeep/$r.git"
 done

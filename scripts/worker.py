@@ -2,7 +2,7 @@
 """agency-worker — async task worker. Polls tasks table, dispatches by type."""
 import json, os, sys, time, urllib.request, urllib.error, base64, socket, psycopg2, psycopg2.extras
 from datetime import datetime, timezone
-import pr_review  # shared ensemble machine review (also used by auto-merge.sh)
+import pr_review  # bounded machine review for explicitly requested proposal tasks
 
 ENV_PATH = "/home/agency/agency-os/.env"
 
@@ -779,7 +779,7 @@ def handle_onboard_project(task):
     finally:
         conn.close()
 
-    local_path = f"/home/agency/projects/{repo_name}"
+    local_path = f"/home/agency/engagements/{repo_name}"
     if not _os.path.isdir(local_path):
         clone = subprocess.run(["git", "clone", git_url, local_path],
                                capture_output=True, text=True, timeout=120,
@@ -806,7 +806,7 @@ def get_project(repo_name):
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute(
             "SELECT repo_name, github_owner, base_branch, "
-            "COALESCE(local_path, '/home/agency/projects/' || repo_name) AS local_path "
+            "COALESCE(local_path, '/home/agency/engagements/' || repo_name) AS local_path "
             "FROM projects WHERE repo_name=%s AND agent_allowed=true", (repo_name,))
         return cur.fetchone()
     finally:
@@ -1138,7 +1138,7 @@ def handle_ask(task):
     sys_ctx = ("You are the operations assistant for this VPS (Agency OS). Answer using LIVE data by "
                "running read-only commands: docker ps, systemctl list-units --type=service --state=running, "
                "ss -tlnp, df -h, free -h, crontab -l, reading files under /home/agency/agency-os and "
-               "/home/agency/projects, and read-only psql SELECT queries against the agencyos database at "
+               "/home/agency/core, /home/agency/engagements, and read-only psql SELECT queries against the agencyos database at "
                "100.64.0.1 using the POSTGRES_PASSWORD from /home/agency/agency-os/.env. STRICTLY READ-ONLY: "
                "never modify files, never run git commands that change state, never UPDATE/INSERT/DELETE in any "
                "database, never restart services. Answer the question directly and concisely, stating exact "
@@ -1472,7 +1472,7 @@ def handle_client_import_repo(task):
 
     project_slug = f"{org}-{repo_name}".lower()
     project_slug = _re.sub(r'[^a-z0-9_-]+', '-', project_slug).strip('-')
-    dest = f"/home/agency/projects/{project_slug}"
+    dest = f"/home/agency/engagements/{project_slug}"
 
     # ── Step 2: Shallow clone ──────────────────────────────────────
     if _os.path.exists(dest):
@@ -1768,7 +1768,7 @@ JSON with: slug (lowercase-kebab, 2-30 chars), purpose (10-80 chars), stack (one
         tmpl = _stack_templates[stack]
 
         # ── Step 2: Find unique slug ────────────────────────────────
-        dest = f"/home/agency/projects/{slug}"
+        dest = f"/home/agency/engagements/{slug}"
         for n in range(10):
             if not _os.path.exists(dest):
                 cur.execute("SELECT id FROM projects WHERE name=%s", (slug,))
@@ -1776,7 +1776,7 @@ JSON with: slug (lowercase-kebab, 2-30 chars), purpose (10-80 chars), stack (one
                     break
             slug = f"{slug_raw[:24]}-{n+1}"
             slug = _re.sub(r'[^a-z0-9-]+', '-', slug).strip('-')[:30] or f"project-{n+1}"
-            dest = f"/home/agency/projects/{slug}"
+            dest = f"/home/agency/engagements/{slug}"
         else:
             return {"ok": False, "error": "Could not find unique slug after 10 attempts"}
 
@@ -2096,7 +2096,7 @@ Output ONLY the <script> tag. No HTML, no markdown, no explanation. Start with <
             if _issues:
                 _error_msg = "; ".join(_issues)
                 # Write the broken file anyway so human can inspect, but fail the task
-                dest_dir = f"/home/agency/projects/{project_slug}/designs/{variation_id}"
+                dest_dir = f"/home/agency/engagements/{project_slug}/designs/{variation_id}"
                 _os.makedirs(dest_dir, exist_ok=True)
                 with open(f"{dest_dir}/index.html", "w") as f:
                     f.write(assembled)
@@ -2121,7 +2121,7 @@ Output ONLY the <script> tag. No HTML, no markdown, no explanation. Start with <
             tells_failed = 0
 
             # ── Write final file ───────────────────────────────────────
-            dest_dir = f"/home/agency/projects/{project_slug}/designs/{variation_id}"
+            dest_dir = f"/home/agency/engagements/{project_slug}/designs/{variation_id}"
             _os.makedirs(dest_dir, exist_ok=True)
             with open(f"{dest_dir}/index.html", "w") as f:
                 f.write(assembled)
@@ -3811,7 +3811,7 @@ def _project_env_value(project_path, name):
         return ""
     try:
         root = os.path.realpath(project_path)
-        allowed = ("/home/agency/projects/", "/home/agency/engagements/")
+        allowed = ("/home/agency/core/", "/home/agency/engagements/")
         if not any(root.startswith(prefix) for prefix in allowed):
             return ""
         with open(os.path.join(root, ".env")) as handle:
@@ -4064,7 +4064,6 @@ DISPATCH = {
     "ask": handle_ask,
     "design_page": handle_design_page,
     "onboard_project": handle_onboard_project,
-    "self_review": handle_self_review,
     "competitor_scan": handle_competitor_scan,
     "execute_suggestion": handle_execute_suggestion,
     "publish_content": handle_publish_content,
