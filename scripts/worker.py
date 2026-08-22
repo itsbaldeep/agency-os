@@ -2648,6 +2648,25 @@ def handle_defend_audit(task):
         model="deepseek-chat", max_tokens=800)
     if not result["ok"]:
         return result
+    # Keep the per-model spend ledger aligned with the task row. Most tasks
+    # report their token totals on `tasks`; this audit also needs its raw LLM
+    # call represented in `token_usage` for per-brand spend reporting.
+    try:
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO token_usage (project_id, model, tokens_in, tokens_out, cost_usd) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                (project_id, result.get("model", "deepseek-chat"),
+                 result.get("prompt_tokens", 0), result.get("completion_tokens", 0),
+                 result.get("cost", 0)),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"[worker] Failed to record defend_audit token_usage: {e}", flush=True)
     return {"ok": True, "content": result.get("content", ""),
             "prompt_tokens": result.get("prompt_tokens", 0),
             "completion_tokens": result.get("completion_tokens", 0),
