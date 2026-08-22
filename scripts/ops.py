@@ -198,11 +198,18 @@ def export_clickhouse(stage: Path) -> dict[str, bool]:
 
 def export_credentials(destination: Path) -> bool:
     files = [path for path in CREDENTIAL_DIR.iterdir() if path.is_file()]
-    if not files:
+    agent_auth = {
+        "codex-auth.json": AGENCY_HOME / ".codex/auth.json",
+        "opencode-auth.json": AGENCY_HOME / ".local/share/opencode/auth.json",
+    }
+    if not files and not any(path.exists() for path in agent_auth.values()):
         return False
     with tarfile.open(destination, "w:gz") as archive:
         for path in sorted(files):
             archive.add(path, arcname=path.name, recursive=False)
+        for arcname, path in agent_auth.items():
+            if path.exists():
+                archive.add(path, arcname=arcname, recursive=False)
     os.chmod(destination, 0o600)
     return True
 
@@ -210,9 +217,11 @@ def export_credentials(destination: Path) -> bool:
 def export_configs(destination: Path) -> dict[str, bool]:
     sources = {
         "root-agents": AGENCY_HOME / "AGENTS.md",
-        "agency-os-infra": AGENCY_HOME / "projects/agency-os/infra",
-        "agency-os-directive": AGENCY_HOME / "projects/agency-os/CEO_DIRECTIVE.md",
-        "agency-os-roadmap": AGENCY_HOME / "projects/agency-os/ROADMAP.md",
+        "agency-os-infra": AGENCY_HOME / "core/agency-os/infra",
+        "agency-os-directive": AGENCY_HOME / "core/agency-os/CEO_DIRECTIVE.md",
+        "agency-os-roadmap": AGENCY_HOME / "core/agency-os/ROADMAP.md",
+        "capability-registry": AGENCY_HOME / "core/agency-os/config",
+        "opencode-config": AGENCY_HOME / ".config/opencode/opencode.jsonc",
         "caddy": Path("/etc/caddy"),
         "headscale-config": Path("/etc/headscale/config.yaml"),
     }
@@ -221,6 +230,19 @@ def export_configs(destination: Path) -> dict[str, bool]:
         for name, path in sources.items():
             included[name] = add_tar_path(archive, path, name)
     return included
+
+
+def export_opencode_state(destination: Path) -> bool:
+    database = AGENCY_HOME / ".local/share/opencode/opencode.db"
+    if not database.exists():
+        return False
+    try:
+        run(["sqlite3", str(database), f".backup {destination}"], timeout=180)
+        os.chmod(destination, 0o600)
+        return destination.exists() and destination.stat().st_size > 0
+    except OpsError:
+        destination.unlink(missing_ok=True)
+        return False
 
 
 def request_root_backup(stage: Path) -> bool:
@@ -276,6 +298,7 @@ def create_backup() -> dict[str, Any]:
         clickhouse = export_clickhouse(stage)
         credentials = export_credentials(stage / "credentials.tar.gz")
         configs = export_configs(stage / "configs.tar.gz")
+        opencode_state = export_opencode_state(stage / "opencode.db")
         root_state = request_root_backup(stage)
 
         minio_data = AGENCY_HOME / "agency-os/data/minio"
@@ -292,12 +315,16 @@ def create_backup() -> dict[str, Any]:
                 "clickhouse": clickhouse,
                 "credentials": credentials,
                 "configs": configs,
+                "opencode_state": opencode_state,
                 "agency_minio": minio_included,
                 "root_state": root_state,
             },
             "repositories": [
-                repo_state(AGENCY_HOME / "projects/agency-os"),
-                repo_state(AGENCY_HOME / "projects/agency-dashboard"),
+                repo_state(AGENCY_HOME / "core/agency-os"),
+                repo_state(AGENCY_HOME / "core/agency-dashboard"),
+                repo_state(AGENCY_HOME / "core/deployden"),
+                repo_state(AGENCY_HOME / "engagements/hearth"),
+                repo_state(AGENCY_HOME / "engagements/streamwise"),
             ],
         }
         component_files = sorted(path for path in stage.iterdir() if path.is_file())

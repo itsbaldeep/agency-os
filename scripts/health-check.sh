@@ -6,21 +6,24 @@ PGCONN="host=100.64.0.1 port=5432 dbname=agencyos user=agency"
 export PGPASSWORD=$(grep POSTGRES_PASSWORD /home/agency/agency-os/.env | cut -d= -f2)
 
 services=$(psql "$PGCONN" -t -A -F'|' -c "
-  SELECT s.id,s.container
+  SELECT s.id,s.name,s.kind,COALESCE(s.container,'')
   FROM services s JOIN projects p ON p.id=s.project_id
-  WHERE p.lifecycle='active' AND s.status='running' AND s.container IS NOT NULL
+  WHERE p.lifecycle='active' AND s.status='running'
   ORDER BY s.id
 " 2>/dev/null)
 
 written=0
-while IFS='|' read -r service_id container; do
+while IFS='|' read -r service_id service_name kind container; do
     [ -z "$service_id" ] && continue
-    if [ "$(docker inspect --format='{{.State.Running}}' "$container" 2>/dev/null || true)" = "true" ]; then
+    if [ -n "$container" ] && [ "$(docker inspect --format='{{.State.Running}}' "$container" 2>/dev/null || true)" = "true" ]; then
         healthy=true
         detail="running"
+    elif [ "$kind" = "systemd" ] && [ "$(systemctl is-active "$service_name" 2>/dev/null || true)" = "active" ]; then
+        healthy=true
+        detail="active"
     else
         healthy=false
-        detail="expected active container is absent"
+        detail="expected active service is absent"
     fi
     inserted=$(psql "$PGCONN" -q -t -A -c "
       INSERT INTO health_checks (service_id,healthy,detail)
