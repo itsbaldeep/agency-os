@@ -2,15 +2,14 @@
 -- PostgreSQL database dump
 --
 
-\restrict 3VciH0ZSbf7g8vqVHHB7jUSjHueqnn4GepKb8THyylDBOSIHh8Zq7fZTrAx1BCz
+\restrict smlKcO3rTj3Yx25QohanGsHVdSku1oiewIEteV0QdBnCOFdSowKPtMvwDpi227N
 
 -- Dumped from database version 16.14
--- Dumped by pg_dump version 18.4 (Ubuntu 18.4-0ubuntu0.26.04.1)
+-- Dumped by pg_dump version 16.14
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
 SET idle_in_transaction_session_timeout = 0;
-SET transaction_timeout = 0;
 SET client_encoding = 'UTF8';
 SET standard_conforming_strings = on;
 SELECT pg_catalog.set_config('search_path', '', false);
@@ -27,14 +26,14 @@ CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
 
 
 --
--- Name: EXTENSION vector; Type: COMMENT; Schema: -; Owner: 
+-- Name: EXTENSION vector; Type: COMMENT; Schema: -; Owner: -
 --
 
 COMMENT ON EXTENSION vector IS 'vector data type';
 
 
 --
--- Name: approval_status; Type: TYPE; Schema: public; Owner: agency
+-- Name: approval_status; Type: TYPE; Schema: public; Owner: -
 --
 
 CREATE TYPE public.approval_status AS ENUM (
@@ -46,10 +45,8 @@ CREATE TYPE public.approval_status AS ENUM (
 );
 
 
-ALTER TYPE public.approval_status OWNER TO agency;
-
 --
--- Name: approval_type; Type: TYPE; Schema: public; Owner: agency
+-- Name: approval_type; Type: TYPE; Schema: public; Owner: -
 --
 
 CREATE TYPE public.approval_type AS ENUM (
@@ -66,10 +63,8 @@ CREATE TYPE public.approval_type AS ENUM (
 );
 
 
-ALTER TYPE public.approval_type OWNER TO agency;
-
 --
--- Name: dns_state; Type: TYPE; Schema: public; Owner: agency
+-- Name: dns_state; Type: TYPE; Schema: public; Owner: -
 --
 
 CREATE TYPE public.dns_state AS ENUM (
@@ -81,10 +76,8 @@ CREATE TYPE public.dns_state AS ENUM (
 );
 
 
-ALTER TYPE public.dns_state OWNER TO agency;
-
 --
--- Name: project_state; Type: TYPE; Schema: public; Owner: agency
+-- Name: project_state; Type: TYPE; Schema: public; Owner: -
 --
 
 CREATE TYPE public.project_state AS ENUM (
@@ -101,14 +94,12 @@ CREATE TYPE public.project_state AS ENUM (
 );
 
 
-ALTER TYPE public.project_state OWNER TO agency;
-
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
 
 --
--- Name: approvals; Type: TABLE; Schema: public; Owner: agency
+-- Name: approvals; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.approvals (
@@ -125,10 +116,8 @@ CREATE TABLE public.approvals (
 );
 
 
-ALTER TABLE public.approvals OWNER TO agency;
-
 --
--- Name: approvals_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
+-- Name: approvals_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
 CREATE SEQUENCE public.approvals_id_seq
@@ -139,17 +128,15 @@ CREATE SEQUENCE public.approvals_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.approvals_id_seq OWNER TO agency;
-
 --
--- Name: approvals_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
+-- Name: approvals_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
 ALTER SEQUENCE public.approvals_id_seq OWNED BY public.approvals.id;
 
 
 --
--- Name: assistant_messages; Type: TABLE; Schema: public; Owner: agency
+-- Name: assistant_messages; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.assistant_messages (
@@ -161,10 +148,8 @@ CREATE TABLE public.assistant_messages (
 );
 
 
-ALTER TABLE public.assistant_messages OWNER TO agency;
-
 --
--- Name: assistant_messages_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
+-- Name: assistant_messages_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
 CREATE SEQUENCE public.assistant_messages_id_seq
@@ -176,17 +161,15 @@ CREATE SEQUENCE public.assistant_messages_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.assistant_messages_id_seq OWNER TO agency;
-
 --
--- Name: assistant_messages_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
+-- Name: assistant_messages_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
 ALTER SEQUENCE public.assistant_messages_id_seq OWNED BY public.assistant_messages.id;
 
 
 --
--- Name: audits; Type: TABLE; Schema: public; Owner: agency
+-- Name: audits; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.audits (
@@ -201,10 +184,8 @@ CREATE TABLE public.audits (
 );
 
 
-ALTER TABLE public.audits OWNER TO agency;
-
 --
--- Name: audits_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
+-- Name: audits_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
 CREATE SEQUENCE public.audits_id_seq
@@ -216,17 +197,15 @@ CREATE SEQUENCE public.audits_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.audits_id_seq OWNER TO agency;
-
 --
--- Name: audits_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
+-- Name: audits_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
 ALTER SEQUENCE public.audits_id_seq OWNED BY public.audits.id;
 
 
 --
--- Name: background_jobs; Type: TABLE; Schema: public; Owner: agency
+-- Name: background_jobs; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.background_jobs (
@@ -241,10 +220,8 @@ CREATE TABLE public.background_jobs (
 );
 
 
-ALTER TABLE public.background_jobs OWNER TO agency;
-
 --
--- Name: background_jobs_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
+-- Name: background_jobs_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
 CREATE SEQUENCE public.background_jobs_id_seq
@@ -256,17 +233,15 @@ CREATE SEQUENCE public.background_jobs_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.background_jobs_id_seq OWNER TO agency;
-
 --
--- Name: background_jobs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
+-- Name: background_jobs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
 ALTER SEQUENCE public.background_jobs_id_seq OWNED BY public.background_jobs.id;
 
 
 --
--- Name: brand_embeddings; Type: TABLE; Schema: public; Owner: agency
+-- Name: brand_embeddings; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.brand_embeddings (
@@ -279,10 +254,8 @@ CREATE TABLE public.brand_embeddings (
 );
 
 
-ALTER TABLE public.brand_embeddings OWNER TO agency;
-
 --
--- Name: brand_embeddings_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
+-- Name: brand_embeddings_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
 CREATE SEQUENCE public.brand_embeddings_id_seq
@@ -294,17 +267,15 @@ CREATE SEQUENCE public.brand_embeddings_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.brand_embeddings_id_seq OWNER TO agency;
-
 --
--- Name: brand_embeddings_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
+-- Name: brand_embeddings_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
 ALTER SEQUENCE public.brand_embeddings_id_seq OWNED BY public.brand_embeddings.id;
 
 
 --
--- Name: brand_pipelines; Type: TABLE; Schema: public; Owner: agency
+-- Name: brand_pipelines; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.brand_pipelines (
@@ -319,10 +290,8 @@ CREATE TABLE public.brand_pipelines (
 );
 
 
-ALTER TABLE public.brand_pipelines OWNER TO agency;
-
 --
--- Name: brand_pipelines_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
+-- Name: brand_pipelines_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
 CREATE SEQUENCE public.brand_pipelines_id_seq
@@ -334,17 +303,15 @@ CREATE SEQUENCE public.brand_pipelines_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.brand_pipelines_id_seq OWNER TO agency;
-
 --
--- Name: brand_pipelines_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
+-- Name: brand_pipelines_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
 ALTER SEQUENCE public.brand_pipelines_id_seq OWNED BY public.brand_pipelines.id;
 
 
 --
--- Name: brand_properties; Type: TABLE; Schema: public; Owner: agency
+-- Name: brand_properties; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.brand_properties (
@@ -357,10 +324,8 @@ CREATE TABLE public.brand_properties (
 );
 
 
-ALTER TABLE public.brand_properties OWNER TO agency;
-
 --
--- Name: brand_properties_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
+-- Name: brand_properties_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
 CREATE SEQUENCE public.brand_properties_id_seq
@@ -372,17 +337,15 @@ CREATE SEQUENCE public.brand_properties_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.brand_properties_id_seq OWNER TO agency;
-
 --
--- Name: brand_properties_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
+-- Name: brand_properties_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
 ALTER SEQUENCE public.brand_properties_id_seq OWNED BY public.brand_properties.id;
 
 
 --
--- Name: brands; Type: TABLE; Schema: public; Owner: agency
+-- Name: brands; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.brands (
@@ -396,10 +359,8 @@ CREATE TABLE public.brands (
 );
 
 
-ALTER TABLE public.brands OWNER TO agency;
-
 --
--- Name: brands_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
+-- Name: brands_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
 CREATE SEQUENCE public.brands_id_seq
@@ -411,17 +372,15 @@ CREATE SEQUENCE public.brands_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.brands_id_seq OWNER TO agency;
-
 --
--- Name: brands_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
+-- Name: brands_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
 ALTER SEQUENCE public.brands_id_seq OWNED BY public.brands.id;
 
 
 --
--- Name: capabilities; Type: TABLE; Schema: public; Owner: agency
+-- Name: capabilities; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.capabilities (
@@ -434,10 +393,8 @@ CREATE TABLE public.capabilities (
 );
 
 
-ALTER TABLE public.capabilities OWNER TO agency;
-
 --
--- Name: capabilities_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
+-- Name: capabilities_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
 CREATE SEQUENCE public.capabilities_id_seq
@@ -449,17 +406,15 @@ CREATE SEQUENCE public.capabilities_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.capabilities_id_seq OWNER TO agency;
-
 --
--- Name: capabilities_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
+-- Name: capabilities_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
 ALTER SEQUENCE public.capabilities_id_seq OWNED BY public.capabilities.id;
 
 
 --
--- Name: clients; Type: TABLE; Schema: public; Owner: agency
+-- Name: clients; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.clients (
@@ -476,10 +431,8 @@ CREATE TABLE public.clients (
 );
 
 
-ALTER TABLE public.clients OWNER TO agency;
-
 --
--- Name: clients_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
+-- Name: clients_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
 CREATE SEQUENCE public.clients_id_seq
@@ -491,17 +444,15 @@ CREATE SEQUENCE public.clients_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.clients_id_seq OWNER TO agency;
-
 --
--- Name: clients_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
+-- Name: clients_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
 ALTER SEQUENCE public.clients_id_seq OWNED BY public.clients.id;
 
 
 --
--- Name: competitor_pages; Type: TABLE; Schema: public; Owner: agency
+-- Name: competitor_pages; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.competitor_pages (
@@ -515,10 +466,8 @@ CREATE TABLE public.competitor_pages (
 );
 
 
-ALTER TABLE public.competitor_pages OWNER TO agency;
-
 --
--- Name: competitor_pages_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
+-- Name: competitor_pages_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
 CREATE SEQUENCE public.competitor_pages_id_seq
@@ -530,17 +479,15 @@ CREATE SEQUENCE public.competitor_pages_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.competitor_pages_id_seq OWNER TO agency;
-
 --
--- Name: competitor_pages_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
+-- Name: competitor_pages_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
 ALTER SEQUENCE public.competitor_pages_id_seq OWNED BY public.competitor_pages.id;
 
 
 --
--- Name: competitors; Type: TABLE; Schema: public; Owner: agency
+-- Name: competitors; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.competitors (
@@ -558,10 +505,8 @@ CREATE TABLE public.competitors (
 );
 
 
-ALTER TABLE public.competitors OWNER TO agency;
-
 --
--- Name: competitors_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
+-- Name: competitors_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
 CREATE SEQUENCE public.competitors_id_seq
@@ -573,17 +518,15 @@ CREATE SEQUENCE public.competitors_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.competitors_id_seq OWNER TO agency;
-
 --
--- Name: competitors_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
+-- Name: competitors_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
 ALTER SEQUENCE public.competitors_id_seq OWNED BY public.competitors.id;
 
 
 --
--- Name: concept_variations; Type: TABLE; Schema: public; Owner: agency
+-- Name: concept_variations; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.concept_variations (
@@ -601,10 +544,8 @@ CREATE TABLE public.concept_variations (
 );
 
 
-ALTER TABLE public.concept_variations OWNER TO agency;
-
 --
--- Name: concept_variations_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
+-- Name: concept_variations_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
 CREATE SEQUENCE public.concept_variations_id_seq
@@ -616,17 +557,15 @@ CREATE SEQUENCE public.concept_variations_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.concept_variations_id_seq OWNER TO agency;
-
 --
--- Name: concept_variations_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
+-- Name: concept_variations_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
 ALTER SEQUENCE public.concept_variations_id_seq OWNED BY public.concept_variations.id;
 
 
 --
--- Name: content_items; Type: TABLE; Schema: public; Owner: agency
+-- Name: content_items; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.content_items (
@@ -648,10 +587,8 @@ CREATE TABLE public.content_items (
 );
 
 
-ALTER TABLE public.content_items OWNER TO agency;
-
 --
--- Name: content_items_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
+-- Name: content_items_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
 CREATE SEQUENCE public.content_items_id_seq
@@ -663,17 +600,15 @@ CREATE SEQUENCE public.content_items_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.content_items_id_seq OWNER TO agency;
-
 --
--- Name: content_items_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
+-- Name: content_items_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
 ALTER SEQUENCE public.content_items_id_seq OWNED BY public.content_items.id;
 
 
 --
--- Name: content_research; Type: TABLE; Schema: public; Owner: agency
+-- Name: content_research; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.content_research (
@@ -691,10 +626,8 @@ CREATE TABLE public.content_research (
 );
 
 
-ALTER TABLE public.content_research OWNER TO agency;
-
 --
--- Name: content_research_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
+-- Name: content_research_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
 CREATE SEQUENCE public.content_research_id_seq
@@ -706,58 +639,15 @@ CREATE SEQUENCE public.content_research_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.content_research_id_seq OWNER TO agency;
-
 --
--- Name: content_research_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
+-- Name: content_research_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
 ALTER SEQUENCE public.content_research_id_seq OWNED BY public.content_research.id;
 
 
 --
--- Name: cover_letters; Type: TABLE; Schema: public; Owner: agency
---
-
-CREATE TABLE public.cover_letters (
-    id integer NOT NULL,
-    listing_id integer,
-    campaign_id integer,
-    content text,
-    recipient_name text,
-    recipient_title text,
-    company text,
-    status text DEFAULT 'draft'::text,
-    created_at timestamp without time zone DEFAULT now()
-);
-
-
-ALTER TABLE public.cover_letters OWNER TO agency;
-
---
--- Name: cover_letters_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
---
-
-CREATE SEQUENCE public.cover_letters_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.cover_letters_id_seq OWNER TO agency;
-
---
--- Name: cover_letters_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
---
-
-ALTER SEQUENCE public.cover_letters_id_seq OWNED BY public.cover_letters.id;
-
-
---
--- Name: dns_records; Type: TABLE; Schema: public; Owner: agency
+-- Name: dns_records; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.dns_records (
@@ -770,10 +660,8 @@ CREATE TABLE public.dns_records (
 );
 
 
-ALTER TABLE public.dns_records OWNER TO agency;
-
 --
--- Name: dns_records_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
+-- Name: dns_records_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
 CREATE SEQUENCE public.dns_records_id_seq
@@ -784,64 +672,15 @@ CREATE SEQUENCE public.dns_records_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.dns_records_id_seq OWNER TO agency;
-
 --
--- Name: dns_records_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
+-- Name: dns_records_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
 ALTER SEQUENCE public.dns_records_id_seq OWNED BY public.dns_records.id;
 
 
 --
--- Name: email_threads; Type: TABLE; Schema: public; Owner: agency
---
-
-CREATE TABLE public.email_threads (
-    id integer NOT NULL,
-    contact_id integer,
-    listing_id integer,
-    campaign_id integer,
-    subject text,
-    body text,
-    gmail_message_id text,
-    direction text DEFAULT 'outbound'::text,
-    status text DEFAULT 'draft'::text,
-    sent_at timestamp without time zone,
-    opened_at timestamp without time zone,
-    replied_at timestamp without time zone,
-    follow_up_number integer DEFAULT 0,
-    is_follow_up boolean DEFAULT false,
-    created_at timestamp without time zone DEFAULT now()
-);
-
-
-ALTER TABLE public.email_threads OWNER TO agency;
-
---
--- Name: email_threads_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
---
-
-CREATE SEQUENCE public.email_threads_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.email_threads_id_seq OWNER TO agency;
-
---
--- Name: email_threads_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
---
-
-ALTER SEQUENCE public.email_threads_id_seq OWNED BY public.email_threads.id;
-
-
---
--- Name: health_checks; Type: TABLE; Schema: public; Owner: agency
+-- Name: health_checks; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.health_checks (
@@ -853,10 +692,8 @@ CREATE TABLE public.health_checks (
 );
 
 
-ALTER TABLE public.health_checks OWNER TO agency;
-
 --
--- Name: health_checks_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
+-- Name: health_checks_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
 CREATE SEQUENCE public.health_checks_id_seq
@@ -867,256 +704,15 @@ CREATE SEQUENCE public.health_checks_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.health_checks_id_seq OWNER TO agency;
-
 --
--- Name: health_checks_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
+-- Name: health_checks_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
 ALTER SEQUENCE public.health_checks_id_seq OWNED BY public.health_checks.id;
 
 
 --
--- Name: job_applications; Type: TABLE; Schema: public; Owner: agency
---
-
-CREATE TABLE public.job_applications (
-    id integer NOT NULL,
-    listing_id integer,
-    campaign_id integer,
-    resume_id integer,
-    cover_letter_id integer,
-    contact_id integer,
-    status text DEFAULT 'preparing'::text,
-    applied_at timestamp without time zone,
-    linkedin_sent_at timestamp without time zone,
-    email_sent_at timestamp without time zone,
-    interview_date timestamp without time zone,
-    offer_details text,
-    rejection_reason text,
-    notes text,
-    created_at timestamp without time zone DEFAULT now(),
-    updated_at timestamp without time zone DEFAULT now()
-);
-
-
-ALTER TABLE public.job_applications OWNER TO agency;
-
---
--- Name: job_applications_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
---
-
-CREATE SEQUENCE public.job_applications_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.job_applications_id_seq OWNER TO agency;
-
---
--- Name: job_applications_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
---
-
-ALTER SEQUENCE public.job_applications_id_seq OWNED BY public.job_applications.id;
-
-
---
--- Name: job_campaigns; Type: TABLE; Schema: public; Owner: agency
---
-
-CREATE TABLE public.job_campaigns (
-    id integer NOT NULL,
-    name text NOT NULL,
-    status text DEFAULT 'draft'::text,
-    target_jobs_per_run integer DEFAULT 10,
-    run_interval_hours integer DEFAULT 24,
-    resume_text text,
-    job_titles text[] DEFAULT '{}'::text[],
-    locations text[] DEFAULT '{}'::text[],
-    company_include text[] DEFAULT '{}'::text[],
-    company_exclude text[] DEFAULT '{}'::text[],
-    keywords_include text[] DEFAULT '{}'::text[],
-    keywords_exclude text[] DEFAULT '{}'::text[],
-    min_salary integer,
-    max_applications_per_company integer DEFAULT 1,
-    linkedin_note_template text,
-    cover_letter_template text,
-    email_template text,
-    follow_up_days integer DEFAULT 5,
-    max_follow_ups integer DEFAULT 2,
-    gmail_oauth_state text,
-    gmail_token text,
-    created_at timestamp without time zone DEFAULT now(),
-    updated_at timestamp without time zone DEFAULT now()
-);
-
-
-ALTER TABLE public.job_campaigns OWNER TO agency;
-
---
--- Name: job_campaigns_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
---
-
-CREATE SEQUENCE public.job_campaigns_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.job_campaigns_id_seq OWNER TO agency;
-
---
--- Name: job_campaigns_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
---
-
-ALTER SEQUENCE public.job_campaigns_id_seq OWNED BY public.job_campaigns.id;
-
-
---
--- Name: job_contacts; Type: TABLE; Schema: public; Owner: agency
---
-
-CREATE TABLE public.job_contacts (
-    id integer NOT NULL,
-    listing_id integer,
-    name text,
-    title text,
-    company text,
-    email text,
-    linkedin_url text,
-    phone text,
-    source text DEFAULT 'manual'::text,
-    confidence integer DEFAULT 0,
-    status text DEFAULT 'pending'::text,
-    notes text,
-    created_at timestamp without time zone DEFAULT now()
-);
-
-
-ALTER TABLE public.job_contacts OWNER TO agency;
-
---
--- Name: job_contacts_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
---
-
-CREATE SEQUENCE public.job_contacts_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.job_contacts_id_seq OWNER TO agency;
-
---
--- Name: job_contacts_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
---
-
-ALTER SEQUENCE public.job_contacts_id_seq OWNED BY public.job_contacts.id;
-
-
---
--- Name: job_listings; Type: TABLE; Schema: public; Owner: agency
---
-
-CREATE TABLE public.job_listings (
-    id integer NOT NULL,
-    campaign_id integer,
-    title text NOT NULL,
-    company text NOT NULL,
-    location text,
-    description text,
-    url text,
-    salary_range text,
-    source text DEFAULT 'manual'::text,
-    posted_date date,
-    requirements text,
-    score integer DEFAULT 0,
-    status text DEFAULT 'discovered'::text,
-    notes text,
-    created_at timestamp without time zone DEFAULT now(),
-    updated_at timestamp without time zone DEFAULT now()
-);
-
-
-ALTER TABLE public.job_listings OWNER TO agency;
-
---
--- Name: job_listings_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
---
-
-CREATE SEQUENCE public.job_listings_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.job_listings_id_seq OWNER TO agency;
-
---
--- Name: job_listings_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
---
-
-ALTER SEQUENCE public.job_listings_id_seq OWNED BY public.job_listings.id;
-
-
---
--- Name: job_run_history; Type: TABLE; Schema: public; Owner: agency
---
-
-CREATE TABLE public.job_run_history (
-    id integer NOT NULL,
-    campaign_id integer,
-    status text DEFAULT 'running'::text,
-    jobs_targeted integer DEFAULT 0,
-    jobs_processed integer DEFAULT 0,
-    applications_created integer DEFAULT 0,
-    emails_sent integer DEFAULT 0,
-    linkedin_notes_sent integer DEFAULT 0,
-    errors text,
-    started_at timestamp without time zone DEFAULT now(),
-    completed_at timestamp without time zone
-);
-
-
-ALTER TABLE public.job_run_history OWNER TO agency;
-
---
--- Name: job_run_history_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
---
-
-CREATE SEQUENCE public.job_run_history_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.job_run_history_id_seq OWNER TO agency;
-
---
--- Name: job_run_history_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
---
-
-ALTER SEQUENCE public.job_run_history_id_seq OWNED BY public.job_run_history.id;
-
-
---
--- Name: job_runs; Type: TABLE; Schema: public; Owner: agency
+-- Name: job_runs; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.job_runs (
@@ -1137,10 +733,8 @@ CREATE TABLE public.job_runs (
 );
 
 
-ALTER TABLE public.job_runs OWNER TO agency;
-
 --
--- Name: job_runs_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
+-- Name: job_runs_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
 CREATE SEQUENCE public.job_runs_id_seq
@@ -1152,17 +746,15 @@ CREATE SEQUENCE public.job_runs_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.job_runs_id_seq OWNER TO agency;
-
 --
--- Name: job_runs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
+-- Name: job_runs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
 ALTER SEQUENCE public.job_runs_id_seq OWNED BY public.job_runs.id;
 
 
 --
--- Name: keywords; Type: TABLE; Schema: public; Owner: agency
+-- Name: keywords; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.keywords (
@@ -1176,10 +768,8 @@ CREATE TABLE public.keywords (
 );
 
 
-ALTER TABLE public.keywords OWNER TO agency;
-
 --
--- Name: keywords_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
+-- Name: keywords_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
 CREATE SEQUENCE public.keywords_id_seq
@@ -1191,57 +781,15 @@ CREATE SEQUENCE public.keywords_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.keywords_id_seq OWNER TO agency;
-
 --
--- Name: keywords_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
+-- Name: keywords_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
 ALTER SEQUENCE public.keywords_id_seq OWNED BY public.keywords.id;
 
 
 --
--- Name: linkedin_notes; Type: TABLE; Schema: public; Owner: agency
---
-
-CREATE TABLE public.linkedin_notes (
-    id integer NOT NULL,
-    contact_id integer,
-    listing_id integer,
-    campaign_id integer,
-    content text,
-    status text DEFAULT 'draft'::text,
-    sent_at timestamp without time zone,
-    created_at timestamp without time zone DEFAULT now()
-);
-
-
-ALTER TABLE public.linkedin_notes OWNER TO agency;
-
---
--- Name: linkedin_notes_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
---
-
-CREATE SEQUENCE public.linkedin_notes_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.linkedin_notes_id_seq OWNER TO agency;
-
---
--- Name: linkedin_notes_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
---
-
-ALTER SEQUENCE public.linkedin_notes_id_seq OWNED BY public.linkedin_notes.id;
-
-
---
--- Name: mentions; Type: TABLE; Schema: public; Owner: agency
+-- Name: mentions; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.mentions (
@@ -1255,10 +803,8 @@ CREATE TABLE public.mentions (
 );
 
 
-ALTER TABLE public.mentions OWNER TO agency;
-
 --
--- Name: mentions_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
+-- Name: mentions_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
 CREATE SEQUENCE public.mentions_id_seq
@@ -1270,17 +816,15 @@ CREATE SEQUENCE public.mentions_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.mentions_id_seq OWNER TO agency;
-
 --
--- Name: mentions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
+-- Name: mentions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
 ALTER SEQUENCE public.mentions_id_seq OWNED BY public.mentions.id;
 
 
 --
--- Name: ports; Type: TABLE; Schema: public; Owner: agency
+-- Name: ports; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.ports (
@@ -1291,10 +835,8 @@ CREATE TABLE public.ports (
 );
 
 
-ALTER TABLE public.ports OWNER TO agency;
-
 --
--- Name: projects; Type: TABLE; Schema: public; Owner: agency
+-- Name: projects; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.projects (
@@ -1309,14 +851,19 @@ CREATE TABLE public.projects (
     github_owner text DEFAULT 'itsbaldeep'::text NOT NULL,
     base_branch text DEFAULT 'main'::text NOT NULL,
     local_path text,
-    agent_allowed boolean DEFAULT false NOT NULL
+    agent_allowed boolean DEFAULT false NOT NULL,
+    classification text DEFAULT 'engagement'::text NOT NULL,
+    lifecycle text DEFAULT 'active'::text NOT NULL,
+    recovery_ref text,
+    parked_at timestamp with time zone,
+    ops_manifest jsonb DEFAULT '{}'::jsonb NOT NULL,
+    CONSTRAINT projects_classification_check CHECK ((classification = ANY (ARRAY['core'::text, 'engagement'::text]))),
+    CONSTRAINT projects_lifecycle_check CHECK ((lifecycle = ANY (ARRAY['active'::text, 'soft_parked'::text, 'hard_parked'::text])))
 );
 
 
-ALTER TABLE public.projects OWNER TO agency;
-
 --
--- Name: projects_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
+-- Name: projects_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
 CREATE SEQUENCE public.projects_id_seq
@@ -1327,58 +874,15 @@ CREATE SEQUENCE public.projects_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.projects_id_seq OWNER TO agency;
-
 --
--- Name: projects_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
+-- Name: projects_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
 ALTER SEQUENCE public.projects_id_seq OWNED BY public.projects.id;
 
 
 --
--- Name: resume_versions; Type: TABLE; Schema: public; Owner: agency
---
-
-CREATE TABLE public.resume_versions (
-    id integer NOT NULL,
-    listing_id integer,
-    campaign_id integer,
-    original_resume text,
-    tailored_resume text,
-    changes text,
-    ats_keywords text[] DEFAULT '{}'::text[],
-    status text DEFAULT 'draft'::text,
-    created_at timestamp without time zone DEFAULT now()
-);
-
-
-ALTER TABLE public.resume_versions OWNER TO agency;
-
---
--- Name: resume_versions_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
---
-
-CREATE SEQUENCE public.resume_versions_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.resume_versions_id_seq OWNER TO agency;
-
---
--- Name: resume_versions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
---
-
-ALTER SEQUENCE public.resume_versions_id_seq OWNED BY public.resume_versions.id;
-
-
---
--- Name: services; Type: TABLE; Schema: public; Owner: agency
+-- Name: services; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.services (
@@ -1396,10 +900,8 @@ CREATE TABLE public.services (
 );
 
 
-ALTER TABLE public.services OWNER TO agency;
-
 --
--- Name: services_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
+-- Name: services_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
 CREATE SEQUENCE public.services_id_seq
@@ -1410,17 +912,15 @@ CREATE SEQUENCE public.services_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.services_id_seq OWNER TO agency;
-
 --
--- Name: services_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
+-- Name: services_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
 ALTER SEQUENCE public.services_id_seq OWNED BY public.services.id;
 
 
 --
--- Name: suggestions; Type: TABLE; Schema: public; Owner: agency
+-- Name: suggestions; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.suggestions (
@@ -1444,10 +944,8 @@ CREATE TABLE public.suggestions (
 );
 
 
-ALTER TABLE public.suggestions OWNER TO agency;
-
 --
--- Name: suggestions_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
+-- Name: suggestions_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
 CREATE SEQUENCE public.suggestions_id_seq
@@ -1459,17 +957,15 @@ CREATE SEQUENCE public.suggestions_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.suggestions_id_seq OWNER TO agency;
-
 --
--- Name: suggestions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
+-- Name: suggestions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
 ALTER SEQUENCE public.suggestions_id_seq OWNED BY public.suggestions.id;
 
 
 --
--- Name: tasks; Type: TABLE; Schema: public; Owner: agency
+-- Name: tasks; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.tasks (
@@ -1493,10 +989,8 @@ CREATE TABLE public.tasks (
 );
 
 
-ALTER TABLE public.tasks OWNER TO agency;
-
 --
--- Name: tasks_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
+-- Name: tasks_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
 CREATE SEQUENCE public.tasks_id_seq
@@ -1508,17 +1002,15 @@ CREATE SEQUENCE public.tasks_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.tasks_id_seq OWNER TO agency;
-
 --
--- Name: tasks_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
+-- Name: tasks_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
 ALTER SEQUENCE public.tasks_id_seq OWNED BY public.tasks.id;
 
 
 --
--- Name: token_usage; Type: TABLE; Schema: public; Owner: agency
+-- Name: token_usage; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.token_usage (
@@ -1532,10 +1024,8 @@ CREATE TABLE public.token_usage (
 );
 
 
-ALTER TABLE public.token_usage OWNER TO agency;
-
 --
--- Name: token_usage_id_seq; Type: SEQUENCE; Schema: public; Owner: agency
+-- Name: token_usage_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
 CREATE SEQUENCE public.token_usage_id_seq
@@ -1546,255 +1036,190 @@ CREATE SEQUENCE public.token_usage_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.token_usage_id_seq OWNER TO agency;
-
 --
--- Name: token_usage_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: agency
+-- Name: token_usage_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
 ALTER SEQUENCE public.token_usage_id_seq OWNED BY public.token_usage.id;
 
 
 --
--- Name: approvals id; Type: DEFAULT; Schema: public; Owner: agency
+-- Name: approvals id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.approvals ALTER COLUMN id SET DEFAULT nextval('public.approvals_id_seq'::regclass);
 
 
 --
--- Name: assistant_messages id; Type: DEFAULT; Schema: public; Owner: agency
+-- Name: assistant_messages id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.assistant_messages ALTER COLUMN id SET DEFAULT nextval('public.assistant_messages_id_seq'::regclass);
 
 
 --
--- Name: audits id; Type: DEFAULT; Schema: public; Owner: agency
+-- Name: audits id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.audits ALTER COLUMN id SET DEFAULT nextval('public.audits_id_seq'::regclass);
 
 
 --
--- Name: background_jobs id; Type: DEFAULT; Schema: public; Owner: agency
+-- Name: background_jobs id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.background_jobs ALTER COLUMN id SET DEFAULT nextval('public.background_jobs_id_seq'::regclass);
 
 
 --
--- Name: brand_embeddings id; Type: DEFAULT; Schema: public; Owner: agency
+-- Name: brand_embeddings id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.brand_embeddings ALTER COLUMN id SET DEFAULT nextval('public.brand_embeddings_id_seq'::regclass);
 
 
 --
--- Name: brand_pipelines id; Type: DEFAULT; Schema: public; Owner: agency
+-- Name: brand_pipelines id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.brand_pipelines ALTER COLUMN id SET DEFAULT nextval('public.brand_pipelines_id_seq'::regclass);
 
 
 --
--- Name: brand_properties id; Type: DEFAULT; Schema: public; Owner: agency
+-- Name: brand_properties id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.brand_properties ALTER COLUMN id SET DEFAULT nextval('public.brand_properties_id_seq'::regclass);
 
 
 --
--- Name: brands id; Type: DEFAULT; Schema: public; Owner: agency
+-- Name: brands id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.brands ALTER COLUMN id SET DEFAULT nextval('public.brands_id_seq'::regclass);
 
 
 --
--- Name: capabilities id; Type: DEFAULT; Schema: public; Owner: agency
+-- Name: capabilities id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.capabilities ALTER COLUMN id SET DEFAULT nextval('public.capabilities_id_seq'::regclass);
 
 
 --
--- Name: clients id; Type: DEFAULT; Schema: public; Owner: agency
+-- Name: clients id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.clients ALTER COLUMN id SET DEFAULT nextval('public.clients_id_seq'::regclass);
 
 
 --
--- Name: competitor_pages id; Type: DEFAULT; Schema: public; Owner: agency
+-- Name: competitor_pages id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.competitor_pages ALTER COLUMN id SET DEFAULT nextval('public.competitor_pages_id_seq'::regclass);
 
 
 --
--- Name: competitors id; Type: DEFAULT; Schema: public; Owner: agency
+-- Name: competitors id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.competitors ALTER COLUMN id SET DEFAULT nextval('public.competitors_id_seq'::regclass);
 
 
 --
--- Name: concept_variations id; Type: DEFAULT; Schema: public; Owner: agency
+-- Name: concept_variations id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.concept_variations ALTER COLUMN id SET DEFAULT nextval('public.concept_variations_id_seq'::regclass);
 
 
 --
--- Name: content_items id; Type: DEFAULT; Schema: public; Owner: agency
+-- Name: content_items id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.content_items ALTER COLUMN id SET DEFAULT nextval('public.content_items_id_seq'::regclass);
 
 
 --
--- Name: content_research id; Type: DEFAULT; Schema: public; Owner: agency
+-- Name: content_research id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.content_research ALTER COLUMN id SET DEFAULT nextval('public.content_research_id_seq'::regclass);
 
 
 --
--- Name: cover_letters id; Type: DEFAULT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.cover_letters ALTER COLUMN id SET DEFAULT nextval('public.cover_letters_id_seq'::regclass);
-
-
---
--- Name: dns_records id; Type: DEFAULT; Schema: public; Owner: agency
+-- Name: dns_records id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.dns_records ALTER COLUMN id SET DEFAULT nextval('public.dns_records_id_seq'::regclass);
 
 
 --
--- Name: email_threads id; Type: DEFAULT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.email_threads ALTER COLUMN id SET DEFAULT nextval('public.email_threads_id_seq'::regclass);
-
-
---
--- Name: health_checks id; Type: DEFAULT; Schema: public; Owner: agency
+-- Name: health_checks id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.health_checks ALTER COLUMN id SET DEFAULT nextval('public.health_checks_id_seq'::regclass);
 
 
 --
--- Name: job_applications id; Type: DEFAULT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.job_applications ALTER COLUMN id SET DEFAULT nextval('public.job_applications_id_seq'::regclass);
-
-
---
--- Name: job_campaigns id; Type: DEFAULT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.job_campaigns ALTER COLUMN id SET DEFAULT nextval('public.job_campaigns_id_seq'::regclass);
-
-
---
--- Name: job_contacts id; Type: DEFAULT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.job_contacts ALTER COLUMN id SET DEFAULT nextval('public.job_contacts_id_seq'::regclass);
-
-
---
--- Name: job_listings id; Type: DEFAULT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.job_listings ALTER COLUMN id SET DEFAULT nextval('public.job_listings_id_seq'::regclass);
-
-
---
--- Name: job_run_history id; Type: DEFAULT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.job_run_history ALTER COLUMN id SET DEFAULT nextval('public.job_run_history_id_seq'::regclass);
-
-
---
--- Name: job_runs id; Type: DEFAULT; Schema: public; Owner: agency
+-- Name: job_runs id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.job_runs ALTER COLUMN id SET DEFAULT nextval('public.job_runs_id_seq'::regclass);
 
 
 --
--- Name: keywords id; Type: DEFAULT; Schema: public; Owner: agency
+-- Name: keywords id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.keywords ALTER COLUMN id SET DEFAULT nextval('public.keywords_id_seq'::regclass);
 
 
 --
--- Name: linkedin_notes id; Type: DEFAULT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.linkedin_notes ALTER COLUMN id SET DEFAULT nextval('public.linkedin_notes_id_seq'::regclass);
-
-
---
--- Name: mentions id; Type: DEFAULT; Schema: public; Owner: agency
+-- Name: mentions id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.mentions ALTER COLUMN id SET DEFAULT nextval('public.mentions_id_seq'::regclass);
 
 
 --
--- Name: projects id; Type: DEFAULT; Schema: public; Owner: agency
+-- Name: projects id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.projects ALTER COLUMN id SET DEFAULT nextval('public.projects_id_seq'::regclass);
 
 
 --
--- Name: resume_versions id; Type: DEFAULT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.resume_versions ALTER COLUMN id SET DEFAULT nextval('public.resume_versions_id_seq'::regclass);
-
-
---
--- Name: services id; Type: DEFAULT; Schema: public; Owner: agency
+-- Name: services id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.services ALTER COLUMN id SET DEFAULT nextval('public.services_id_seq'::regclass);
 
 
 --
--- Name: suggestions id; Type: DEFAULT; Schema: public; Owner: agency
+-- Name: suggestions id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.suggestions ALTER COLUMN id SET DEFAULT nextval('public.suggestions_id_seq'::regclass);
 
 
 --
--- Name: tasks id; Type: DEFAULT; Schema: public; Owner: agency
+-- Name: tasks id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.tasks ALTER COLUMN id SET DEFAULT nextval('public.tasks_id_seq'::regclass);
 
 
 --
--- Name: token_usage id; Type: DEFAULT; Schema: public; Owner: agency
+-- Name: token_usage id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.token_usage ALTER COLUMN id SET DEFAULT nextval('public.token_usage_id_seq'::regclass);
 
 
 --
--- Name: approvals approvals_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: approvals approvals_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.approvals
@@ -1802,7 +1227,7 @@ ALTER TABLE ONLY public.approvals
 
 
 --
--- Name: assistant_messages assistant_messages_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: assistant_messages assistant_messages_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.assistant_messages
@@ -1810,7 +1235,7 @@ ALTER TABLE ONLY public.assistant_messages
 
 
 --
--- Name: audits audits_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: audits audits_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.audits
@@ -1818,7 +1243,7 @@ ALTER TABLE ONLY public.audits
 
 
 --
--- Name: background_jobs background_jobs_name_key; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: background_jobs background_jobs_name_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.background_jobs
@@ -1826,7 +1251,7 @@ ALTER TABLE ONLY public.background_jobs
 
 
 --
--- Name: background_jobs background_jobs_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: background_jobs background_jobs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.background_jobs
@@ -1834,7 +1259,7 @@ ALTER TABLE ONLY public.background_jobs
 
 
 --
--- Name: brand_embeddings brand_embeddings_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: brand_embeddings brand_embeddings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.brand_embeddings
@@ -1842,7 +1267,7 @@ ALTER TABLE ONLY public.brand_embeddings
 
 
 --
--- Name: brand_pipelines brand_pipelines_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: brand_pipelines brand_pipelines_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.brand_pipelines
@@ -1850,7 +1275,7 @@ ALTER TABLE ONLY public.brand_pipelines
 
 
 --
--- Name: brand_properties brand_properties_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: brand_properties brand_properties_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.brand_properties
@@ -1858,7 +1283,7 @@ ALTER TABLE ONLY public.brand_properties
 
 
 --
--- Name: brands brands_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: brands brands_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.brands
@@ -1866,7 +1291,7 @@ ALTER TABLE ONLY public.brands
 
 
 --
--- Name: brands brands_slug_key; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: brands brands_slug_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.brands
@@ -1874,7 +1299,7 @@ ALTER TABLE ONLY public.brands
 
 
 --
--- Name: capabilities capabilities_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: capabilities capabilities_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.capabilities
@@ -1882,7 +1307,7 @@ ALTER TABLE ONLY public.capabilities
 
 
 --
--- Name: capabilities capabilities_project_id_capability_key; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: capabilities capabilities_project_id_capability_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.capabilities
@@ -1890,7 +1315,7 @@ ALTER TABLE ONLY public.capabilities
 
 
 --
--- Name: clients clients_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: clients clients_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.clients
@@ -1898,7 +1323,7 @@ ALTER TABLE ONLY public.clients
 
 
 --
--- Name: competitor_pages competitor_pages_competitor_id_url_key; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: competitor_pages competitor_pages_competitor_id_url_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.competitor_pages
@@ -1906,7 +1331,7 @@ ALTER TABLE ONLY public.competitor_pages
 
 
 --
--- Name: competitor_pages competitor_pages_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: competitor_pages competitor_pages_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.competitor_pages
@@ -1914,7 +1339,7 @@ ALTER TABLE ONLY public.competitor_pages
 
 
 --
--- Name: competitors competitors_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: competitors competitors_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.competitors
@@ -1922,7 +1347,7 @@ ALTER TABLE ONLY public.competitors
 
 
 --
--- Name: concept_variations concept_variations_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: concept_variations concept_variations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.concept_variations
@@ -1930,7 +1355,7 @@ ALTER TABLE ONLY public.concept_variations
 
 
 --
--- Name: content_items content_items_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: content_items content_items_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.content_items
@@ -1938,7 +1363,7 @@ ALTER TABLE ONLY public.content_items
 
 
 --
--- Name: content_research content_research_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: content_research content_research_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.content_research
@@ -1946,15 +1371,7 @@ ALTER TABLE ONLY public.content_research
 
 
 --
--- Name: cover_letters cover_letters_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.cover_letters
-    ADD CONSTRAINT cover_letters_pkey PRIMARY KEY (id);
-
-
---
--- Name: dns_records dns_records_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: dns_records dns_records_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.dns_records
@@ -1962,7 +1379,7 @@ ALTER TABLE ONLY public.dns_records
 
 
 --
--- Name: dns_records dns_records_subdomain_key; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: dns_records dns_records_subdomain_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.dns_records
@@ -1970,15 +1387,7 @@ ALTER TABLE ONLY public.dns_records
 
 
 --
--- Name: email_threads email_threads_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.email_threads
-    ADD CONSTRAINT email_threads_pkey PRIMARY KEY (id);
-
-
---
--- Name: health_checks health_checks_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: health_checks health_checks_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.health_checks
@@ -1986,47 +1395,7 @@ ALTER TABLE ONLY public.health_checks
 
 
 --
--- Name: job_applications job_applications_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.job_applications
-    ADD CONSTRAINT job_applications_pkey PRIMARY KEY (id);
-
-
---
--- Name: job_campaigns job_campaigns_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.job_campaigns
-    ADD CONSTRAINT job_campaigns_pkey PRIMARY KEY (id);
-
-
---
--- Name: job_contacts job_contacts_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.job_contacts
-    ADD CONSTRAINT job_contacts_pkey PRIMARY KEY (id);
-
-
---
--- Name: job_listings job_listings_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.job_listings
-    ADD CONSTRAINT job_listings_pkey PRIMARY KEY (id);
-
-
---
--- Name: job_run_history job_run_history_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.job_run_history
-    ADD CONSTRAINT job_run_history_pkey PRIMARY KEY (id);
-
-
---
--- Name: job_runs job_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: job_runs job_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.job_runs
@@ -2034,7 +1403,7 @@ ALTER TABLE ONLY public.job_runs
 
 
 --
--- Name: keywords keywords_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: keywords keywords_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.keywords
@@ -2042,15 +1411,7 @@ ALTER TABLE ONLY public.keywords
 
 
 --
--- Name: linkedin_notes linkedin_notes_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.linkedin_notes
-    ADD CONSTRAINT linkedin_notes_pkey PRIMARY KEY (id);
-
-
---
--- Name: mentions mentions_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: mentions mentions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.mentions
@@ -2058,7 +1419,7 @@ ALTER TABLE ONLY public.mentions
 
 
 --
--- Name: ports ports_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: ports ports_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.ports
@@ -2066,7 +1427,7 @@ ALTER TABLE ONLY public.ports
 
 
 --
--- Name: projects projects_name_key; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: projects projects_name_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.projects
@@ -2074,7 +1435,7 @@ ALTER TABLE ONLY public.projects
 
 
 --
--- Name: projects projects_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: projects projects_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.projects
@@ -2082,7 +1443,7 @@ ALTER TABLE ONLY public.projects
 
 
 --
--- Name: projects projects_repo_name_key; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: projects projects_repo_name_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.projects
@@ -2090,15 +1451,7 @@ ALTER TABLE ONLY public.projects
 
 
 --
--- Name: resume_versions resume_versions_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.resume_versions
-    ADD CONSTRAINT resume_versions_pkey PRIMARY KEY (id);
-
-
---
--- Name: services services_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: services services_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.services
@@ -2106,7 +1459,7 @@ ALTER TABLE ONLY public.services
 
 
 --
--- Name: services services_project_id_name_key; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: services services_project_id_name_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.services
@@ -2114,7 +1467,7 @@ ALTER TABLE ONLY public.services
 
 
 --
--- Name: suggestions suggestions_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: suggestions suggestions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.suggestions
@@ -2122,7 +1475,7 @@ ALTER TABLE ONLY public.suggestions
 
 
 --
--- Name: tasks tasks_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: tasks tasks_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.tasks
@@ -2130,7 +1483,7 @@ ALTER TABLE ONLY public.tasks
 
 
 --
--- Name: token_usage token_usage_pkey; Type: CONSTRAINT; Schema: public; Owner: agency
+-- Name: token_usage token_usage_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.token_usage
@@ -2138,82 +1491,65 @@ ALTER TABLE ONLY public.token_usage
 
 
 --
--- Name: job_applications uq_job_app_listing_campaign; Type: CONSTRAINT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.job_applications
-    ADD CONSTRAINT uq_job_app_listing_campaign UNIQUE (listing_id, campaign_id);
-
-
---
--- Name: competitor_pages_first_seen_idx; Type: INDEX; Schema: public; Owner: agency
+-- Name: competitor_pages_first_seen_idx; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX competitor_pages_first_seen_idx ON public.competitor_pages USING btree (competitor_id, first_seen_at DESC);
 
 
 --
--- Name: idx_email_threads_campaign; Type: INDEX; Schema: public; Owner: agency
+-- Name: idx_approvals_task_id; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_email_threads_campaign ON public.email_threads USING btree (campaign_id);
-
-
---
--- Name: idx_job_applications_campaign; Type: INDEX; Schema: public; Owner: agency
---
-
-CREATE INDEX idx_job_applications_campaign ON public.job_applications USING btree (campaign_id);
+CREATE INDEX idx_approvals_task_id ON public.approvals USING btree (task_id);
 
 
 --
--- Name: idx_job_applications_listing; Type: INDEX; Schema: public; Owner: agency
+-- Name: idx_content_items_publish_task_id; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_job_applications_listing ON public.job_applications USING btree (listing_id);
-
-
---
--- Name: idx_job_contacts_listing; Type: INDEX; Schema: public; Owner: agency
---
-
-CREATE INDEX idx_job_contacts_listing ON public.job_contacts USING btree (listing_id);
+CREATE INDEX idx_content_items_publish_task_id ON public.content_items USING btree (publish_task_id);
 
 
 --
--- Name: idx_job_listings_campaign; Type: INDEX; Schema: public; Owner: agency
+-- Name: idx_projects_classification_lifecycle; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_job_listings_campaign ON public.job_listings USING btree (campaign_id);
-
-
---
--- Name: idx_job_listings_status; Type: INDEX; Schema: public; Owner: agency
---
-
-CREATE INDEX idx_job_listings_status ON public.job_listings USING btree (status);
+CREATE INDEX idx_projects_classification_lifecycle ON public.projects USING btree (classification, lifecycle);
 
 
 --
--- Name: idx_resume_versions_listing; Type: INDEX; Schema: public; Owner: agency
+-- Name: idx_suggestions_execution_task_id; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_resume_versions_listing ON public.resume_versions USING btree (listing_id);
+CREATE INDEX idx_suggestions_execution_task_id ON public.suggestions USING btree (execution_task_id);
 
 
 --
--- Name: approvals approvals_project_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: idx_tasks_parent_task_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_tasks_parent_task_id ON public.tasks USING btree (parent_task_id);
+
+
+--
+-- Name: approvals approvals_project_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.approvals
     ADD CONSTRAINT approvals_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.projects(id);
+
+
+--
+-- Name: approvals approvals_task_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
 
 ALTER TABLE ONLY public.approvals
     ADD CONSTRAINT approvals_task_id_fkey FOREIGN KEY (task_id) REFERENCES public.tasks(id) ON DELETE SET NULL;
 
 
 --
--- Name: audits audits_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: audits audits_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.audits
@@ -2221,7 +1557,7 @@ ALTER TABLE ONLY public.audits
 
 
 --
--- Name: brand_embeddings brand_embeddings_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: brand_embeddings brand_embeddings_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.brand_embeddings
@@ -2229,7 +1565,7 @@ ALTER TABLE ONLY public.brand_embeddings
 
 
 --
--- Name: brand_pipelines brand_pipelines_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: brand_pipelines brand_pipelines_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.brand_pipelines
@@ -2237,7 +1573,7 @@ ALTER TABLE ONLY public.brand_pipelines
 
 
 --
--- Name: brand_properties brand_properties_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: brand_properties brand_properties_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.brand_properties
@@ -2245,7 +1581,7 @@ ALTER TABLE ONLY public.brand_properties
 
 
 --
--- Name: brands brands_project_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: brands brands_project_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.brands
@@ -2253,7 +1589,7 @@ ALTER TABLE ONLY public.brands
 
 
 --
--- Name: capabilities capabilities_project_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: capabilities capabilities_project_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.capabilities
@@ -2261,7 +1597,7 @@ ALTER TABLE ONLY public.capabilities
 
 
 --
--- Name: clients clients_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: clients clients_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.clients
@@ -2269,7 +1605,7 @@ ALTER TABLE ONLY public.clients
 
 
 --
--- Name: clients clients_project_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: clients clients_project_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.clients
@@ -2277,7 +1613,7 @@ ALTER TABLE ONLY public.clients
 
 
 --
--- Name: competitor_pages competitor_pages_competitor_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: competitor_pages competitor_pages_competitor_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.competitor_pages
@@ -2285,7 +1621,7 @@ ALTER TABLE ONLY public.competitor_pages
 
 
 --
--- Name: competitors competitors_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: competitors competitors_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.competitors
@@ -2293,7 +1629,7 @@ ALTER TABLE ONLY public.competitors
 
 
 --
--- Name: concept_variations concept_variations_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: concept_variations concept_variations_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.concept_variations
@@ -2301,7 +1637,7 @@ ALTER TABLE ONLY public.concept_variations
 
 
 --
--- Name: concept_variations concept_variations_project_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: concept_variations concept_variations_project_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.concept_variations
@@ -2309,7 +1645,7 @@ ALTER TABLE ONLY public.concept_variations
 
 
 --
--- Name: concept_variations concept_variations_task_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: concept_variations concept_variations_task_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.concept_variations
@@ -2317,7 +1653,7 @@ ALTER TABLE ONLY public.concept_variations
 
 
 --
--- Name: content_items content_items_approval_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: content_items content_items_approval_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.content_items
@@ -2325,7 +1661,7 @@ ALTER TABLE ONLY public.content_items
 
 
 --
--- Name: content_items content_items_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: content_items content_items_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.content_items
@@ -2333,7 +1669,15 @@ ALTER TABLE ONLY public.content_items
 
 
 --
--- Name: content_items content_items_suggestion_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: content_items content_items_publish_task_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.content_items
+    ADD CONSTRAINT content_items_publish_task_id_fkey FOREIGN KEY (publish_task_id) REFERENCES public.tasks(id) ON DELETE SET NULL;
+
+
+--
+-- Name: content_items content_items_suggestion_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.content_items
@@ -2341,18 +1685,15 @@ ALTER TABLE ONLY public.content_items
 
 
 --
--- Name: content_items content_items_task_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: content_items content_items_task_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.content_items
     ADD CONSTRAINT content_items_task_id_fkey FOREIGN KEY (task_id) REFERENCES public.tasks(id);
 
-ALTER TABLE ONLY public.content_items
-    ADD CONSTRAINT content_items_publish_task_id_fkey FOREIGN KEY (publish_task_id) REFERENCES public.tasks(id) ON DELETE SET NULL;
-
 
 --
--- Name: content_research content_research_keyword_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: content_research content_research_keyword_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.content_research
@@ -2360,7 +1701,7 @@ ALTER TABLE ONLY public.content_research
 
 
 --
--- Name: content_research content_research_task_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: content_research content_research_task_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.content_research
@@ -2368,23 +1709,7 @@ ALTER TABLE ONLY public.content_research
 
 
 --
--- Name: cover_letters cover_letters_campaign_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.cover_letters
-    ADD CONSTRAINT cover_letters_campaign_id_fkey FOREIGN KEY (campaign_id) REFERENCES public.job_campaigns(id) ON DELETE CASCADE;
-
-
---
--- Name: cover_letters cover_letters_listing_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.cover_letters
-    ADD CONSTRAINT cover_letters_listing_id_fkey FOREIGN KEY (listing_id) REFERENCES public.job_listings(id) ON DELETE CASCADE;
-
-
---
--- Name: dns_records dns_records_project_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: dns_records dns_records_project_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.dns_records
@@ -2392,31 +1717,7 @@ ALTER TABLE ONLY public.dns_records
 
 
 --
--- Name: email_threads email_threads_campaign_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.email_threads
-    ADD CONSTRAINT email_threads_campaign_id_fkey FOREIGN KEY (campaign_id) REFERENCES public.job_campaigns(id) ON DELETE CASCADE;
-
-
---
--- Name: email_threads email_threads_contact_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.email_threads
-    ADD CONSTRAINT email_threads_contact_id_fkey FOREIGN KEY (contact_id) REFERENCES public.job_contacts(id) ON DELETE CASCADE;
-
-
---
--- Name: email_threads email_threads_listing_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.email_threads
-    ADD CONSTRAINT email_threads_listing_id_fkey FOREIGN KEY (listing_id) REFERENCES public.job_listings(id) ON DELETE CASCADE;
-
-
---
--- Name: health_checks health_checks_service_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: health_checks health_checks_service_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.health_checks
@@ -2424,71 +1725,7 @@ ALTER TABLE ONLY public.health_checks
 
 
 --
--- Name: job_applications job_applications_campaign_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.job_applications
-    ADD CONSTRAINT job_applications_campaign_id_fkey FOREIGN KEY (campaign_id) REFERENCES public.job_campaigns(id) ON DELETE CASCADE;
-
-
---
--- Name: job_applications job_applications_contact_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.job_applications
-    ADD CONSTRAINT job_applications_contact_id_fkey FOREIGN KEY (contact_id) REFERENCES public.job_contacts(id);
-
-
---
--- Name: job_applications job_applications_cover_letter_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.job_applications
-    ADD CONSTRAINT job_applications_cover_letter_id_fkey FOREIGN KEY (cover_letter_id) REFERENCES public.cover_letters(id);
-
-
---
--- Name: job_applications job_applications_listing_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.job_applications
-    ADD CONSTRAINT job_applications_listing_id_fkey FOREIGN KEY (listing_id) REFERENCES public.job_listings(id) ON DELETE CASCADE;
-
-
---
--- Name: job_applications job_applications_resume_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.job_applications
-    ADD CONSTRAINT job_applications_resume_id_fkey FOREIGN KEY (resume_id) REFERENCES public.resume_versions(id);
-
-
---
--- Name: job_contacts job_contacts_listing_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.job_contacts
-    ADD CONSTRAINT job_contacts_listing_id_fkey FOREIGN KEY (listing_id) REFERENCES public.job_listings(id) ON DELETE CASCADE;
-
-
---
--- Name: job_listings job_listings_campaign_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.job_listings
-    ADD CONSTRAINT job_listings_campaign_id_fkey FOREIGN KEY (campaign_id) REFERENCES public.job_campaigns(id) ON DELETE CASCADE;
-
-
---
--- Name: job_run_history job_run_history_campaign_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.job_run_history
-    ADD CONSTRAINT job_run_history_campaign_id_fkey FOREIGN KEY (campaign_id) REFERENCES public.job_campaigns(id) ON DELETE CASCADE;
-
-
---
--- Name: job_runs job_runs_approval_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: job_runs job_runs_approval_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.job_runs
@@ -2496,7 +1733,7 @@ ALTER TABLE ONLY public.job_runs
 
 
 --
--- Name: job_runs job_runs_job_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: job_runs job_runs_job_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.job_runs
@@ -2504,7 +1741,7 @@ ALTER TABLE ONLY public.job_runs
 
 
 --
--- Name: keywords keywords_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: keywords keywords_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.keywords
@@ -2512,31 +1749,7 @@ ALTER TABLE ONLY public.keywords
 
 
 --
--- Name: linkedin_notes linkedin_notes_campaign_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.linkedin_notes
-    ADD CONSTRAINT linkedin_notes_campaign_id_fkey FOREIGN KEY (campaign_id) REFERENCES public.job_campaigns(id) ON DELETE CASCADE;
-
-
---
--- Name: linkedin_notes linkedin_notes_contact_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.linkedin_notes
-    ADD CONSTRAINT linkedin_notes_contact_id_fkey FOREIGN KEY (contact_id) REFERENCES public.job_contacts(id) ON DELETE CASCADE;
-
-
---
--- Name: linkedin_notes linkedin_notes_listing_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.linkedin_notes
-    ADD CONSTRAINT linkedin_notes_listing_id_fkey FOREIGN KEY (listing_id) REFERENCES public.job_listings(id) ON DELETE CASCADE;
-
-
---
--- Name: mentions mentions_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: mentions mentions_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.mentions
@@ -2544,7 +1757,7 @@ ALTER TABLE ONLY public.mentions
 
 
 --
--- Name: ports ports_project_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: ports ports_project_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.ports
@@ -2552,23 +1765,7 @@ ALTER TABLE ONLY public.ports
 
 
 --
--- Name: resume_versions resume_versions_campaign_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.resume_versions
-    ADD CONSTRAINT resume_versions_campaign_id_fkey FOREIGN KEY (campaign_id) REFERENCES public.job_campaigns(id) ON DELETE CASCADE;
-
-
---
--- Name: resume_versions resume_versions_listing_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
---
-
-ALTER TABLE ONLY public.resume_versions
-    ADD CONSTRAINT resume_versions_listing_id_fkey FOREIGN KEY (listing_id) REFERENCES public.job_listings(id) ON DELETE CASCADE;
-
-
---
--- Name: services services_project_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: services services_project_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.services
@@ -2576,7 +1773,7 @@ ALTER TABLE ONLY public.services
 
 
 --
--- Name: suggestions suggestions_approval_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: suggestions suggestions_approval_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.suggestions
@@ -2584,7 +1781,7 @@ ALTER TABLE ONLY public.suggestions
 
 
 --
--- Name: suggestions suggestions_audit_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: suggestions suggestions_audit_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.suggestions
@@ -2592,21 +1789,31 @@ ALTER TABLE ONLY public.suggestions
 
 
 --
--- Name: suggestions suggestions_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: suggestions suggestions_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.suggestions
     ADD CONSTRAINT suggestions_brand_id_fkey FOREIGN KEY (brand_id) REFERENCES public.brands(id) ON DELETE CASCADE;
 
+
+--
+-- Name: suggestions suggestions_execution_task_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
 ALTER TABLE ONLY public.suggestions
     ADD CONSTRAINT suggestions_execution_task_id_fkey FOREIGN KEY (execution_task_id) REFERENCES public.tasks(id) ON DELETE SET NULL;
+
+
+--
+-- Name: tasks tasks_parent_task_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
 
 ALTER TABLE ONLY public.tasks
     ADD CONSTRAINT tasks_parent_task_id_fkey FOREIGN KEY (parent_task_id) REFERENCES public.tasks(id) ON DELETE SET NULL;
 
 
 --
--- Name: token_usage token_usage_project_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
+-- Name: token_usage token_usage_project_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.token_usage
@@ -2617,4 +1824,4 @@ ALTER TABLE ONLY public.token_usage
 -- PostgreSQL database dump complete
 --
 
-\unrestrict 3VciH0ZSbf7g8vqVHHB7jUSjHueqnn4GepKb8THyylDBOSIHh8Zq7fZTrAx1BCz
+\unrestrict smlKcO3rTj3Yx25QohanGsHVdSku1oiewIEteV0QdBnCOFdSowKPtMvwDpi227N

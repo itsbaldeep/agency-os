@@ -2,12 +2,15 @@
 image_slot assets (deterministic SVG generation stored in MinIO)."""
 import os, json, io, re, hashlib, html as _html
 
-# ── MinIO (hearth-storage) ──────────────────────────────────────────────
-S3_ENDPOINT = os.environ.get("S3_ENDPOINT", "100.64.0.1:9002")
-S3_ACCESS = os.environ.get("S3_ACCESS", "hearth")
-S3_SECRET = os.environ.get("S3_SECRET", "hearth_storage")
-S3_BUCKET = os.environ.get("S3_BUCKET", "agency-content")
-S3_PUBLIC = os.environ.get("S3_PUBLIC_BASE", "http://100.64.0.1:9002")
+# ── Core Agency object storage ──────────────────────────────────────────
+# Engagement storage must never be a dependency of this module.  Core MinIO
+# credentials already belong to the Agency service environment, so there is no
+# second S3 password pair to drift or leak.
+S3_ENDPOINT = os.environ.get("AGENCY_S3_ENDPOINT", "100.64.0.1:9010")
+S3_ACCESS = os.environ.get("MINIO_ROOT_USER", "")
+S3_SECRET = os.environ.get("MINIO_ROOT_PASSWORD", "")
+S3_BUCKET = os.environ.get("AGENCY_S3_BUCKET", "agency-content")
+S3_PUBLIC = os.environ.get("AGENCY_S3_PUBLIC_BASE", "https://assets.apps.deployden.tech")
 
 
 def storage_client():

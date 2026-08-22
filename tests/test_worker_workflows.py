@@ -86,6 +86,19 @@ class WorkerWorkflowTests(unittest.TestCase):
         self.assertEqual(seen["destination"]["credential_ref"], "WP_APP_PASSWORD")
         self.assertEqual(result["linked_content_item_id"], 22)
 
+    def test_codex_failure_uses_visible_opencode_fallback(self):
+        with mock.patch.object(worker, "run_codex", return_value=(1, "codex error", 2, 0)), \
+             mock.patch.object(worker, "run_opencode", return_value=(0, "fallback ok", 3, 4)) as run_fb, \
+             mock.patch.object(worker, "post_discord") as notify, \
+             mock.patch.dict(worker.os.environ, {}, clear=False):
+            worker.os.environ.pop("OPENCODE_FALLBACK", None)
+            result = worker.run_agent_harness("do work", "/tmp", timeout=30)
+        self.assertEqual(result[0], 0)
+        self.assertEqual(result[2:4], (5, 4))
+        self.assertEqual(result[4], "opencode/deepseek-v4-flash")
+        run_fb.assert_called_once()
+        notify.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

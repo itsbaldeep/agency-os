@@ -596,7 +596,8 @@ def call_zen(prompt, model="deepseek-chat", max_tokens=1500, temperature=None, t
              _base_url=None, _api_key=None):
     """OpenAI-format raw completion, with cross-provider fallback support.
 
-    The historical name is retained because scripts/jobs import it directly.
+    The historical name is retained to avoid a risky rename across active
+    content/audit handlers; it no longer implies an OpenCode Zen dependency.
     """
     model = _normalise_api_model(model)
     base_url = (_base_url or OPENAI_BASE_URL).rstrip("/")
@@ -637,9 +638,15 @@ def call_zen(prompt, model="deepseek-chat", max_tokens=1500, temperature=None, t
                     print(f"[worker] {fb_key_env} is unset; skipping {fb_model}", flush=True)
                     continue
                 print(f"[worker] LLM {model} blocked ({e.code}), falling back to {fb_model} at {fb_base_url}", flush=True)
-                return call_zen(prompt, model=fb_model, max_tokens=max_tokens, temperature=temperature,
-                                timeout=timeout, _fb_index=fb_index + 1,
-                                _base_url=fb_base_url, _api_key=fb_key)
+                post_discord(
+                    f"🟠 Raw completion fallback: `{model}` failed with HTTP {e.code}; "
+                    f"trying free model `{fb_model}`. This fallback is recorded at zero API cost."
+                )
+                fallback = call_zen(prompt, model=fb_model, max_tokens=max_tokens, temperature=temperature,
+                                    timeout=timeout, _fb_index=fb_index + 1,
+                                    _base_url=fb_base_url, _api_key=fb_key)
+                fallback["fallback_from"] = model
+                return fallback
         return {"ok": False, "error": f"HTTP {e.code}: {body}", "model": model}
     except (socket.timeout, urllib.error.URLError) as e:
         return {"ok": False, "error": f"TIMEOUT: {str(e)[:200]}", "model": model}
@@ -698,12 +705,13 @@ def run_codex(prompt, workdir, model=None, timeout=300):
 
 
 def run_opencode(prompt, workdir, model=None, timeout=300):
-    """Legacy escape hatch; use only when OPENCODE_FALLBACK is explicitly set."""
+    """OpenCode web/CLI fallback using its independently authenticated provider."""
     import subprocess
-    cmd = ["/home/agency/.opencode/bin/opencode", "run", "--dir", workdir, prompt,
+    cmd = ["/home/agency/.opencode/bin/opencode", "run", "--dir", workdir,
            "--dangerously-skip-permissions", "--format", "json"]
     if model:
         cmd.extend(["--model", model])
+    cmd.append(prompt)
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env={**os.environ, "HOME": "/home/agency"})
     except subprocess.TimeoutExpired:
@@ -721,9 +729,25 @@ def run_opencode(prompt, workdir, model=None, timeout=300):
 
 
 def run_agent_harness(prompt, workdir, model=None, timeout=300):
+    fallback_model = os.environ.get("OPENCODE_FALLBACK_MODEL", "opencode/deepseek-v4-flash")
     if os.environ.get("OPENCODE_FALLBACK", "").lower() in ("1", "true", "yes"):
-        return run_opencode(prompt, workdir, model=model, timeout=timeout)
-    return run_codex(prompt, workdir, model=model, timeout=timeout)
+        rc, output, tokens_in, tokens_out = run_opencode(
+            prompt, workdir, model=fallback_model, timeout=timeout
+        )
+        return rc, output, tokens_in, tokens_out, fallback_model
+    rc, output, tokens_in, tokens_out = run_codex(prompt, workdir, model=model, timeout=timeout)
+    if rc == 0:
+        return rc, output, tokens_in, tokens_out, model or "codex-subscription"
+    post_discord(
+        f"🟠 Codex harness failed (exit {rc}); falling back to OpenCode exec "
+        f"with `{fallback_model}`. Inspect the linked task even if fallback succeeds."
+    )
+    print(f"[worker] Codex exited {rc}; falling back to OpenCode {fallback_model}", flush=True)
+    fb_rc, fb_output, fb_in, fb_out = run_opencode(
+        prompt, workdir, model=fallback_model, timeout=timeout
+    )
+    combined = output + "\n--- OPENCODE FALLBACK ---\n" + fb_output
+    return fb_rc, combined, tokens_in + fb_in, tokens_out + fb_out, fallback_model
 
 def handle_onboard_project(task):
     """Deterministic repo onboarding. Never invokes opencode."""
@@ -872,6 +896,7 @@ def handle_propose_fix(task):
         problem = ""
         all_log = []
         produced = False
+        harness_model = "codex-subscription"
         for round_i in range(1, max_rounds + 1):
             _pct = 10 if max_rounds <= 1 else min(75, 10 + round((round_i - 1) * (65 / (max_rounds - 1))))
             set_task_progress(task["id"], _pct,
@@ -880,7 +905,7 @@ def handle_propose_fix(task):
             if problem:
                 prompt += ("\n\nYour earlier attempt was reviewed and flagged these "
                            "issues. Address them; keep what already works:\n" + problem)
-            rc, out, tin, tout = run_agent_harness(prompt, wk, model=model, timeout=timeout_s)
+            rc, out, tin, tout, harness_model = run_agent_harness(prompt, wk, model=model, timeout=timeout_s)
             total_in += tin
             total_out += tout
             cost = total_in * prices["in"] + total_out * prices["out"]
@@ -1044,6 +1069,7 @@ def handle_propose_fix(task):
             "prompt_tokens": total_in,
             "completion_tokens": total_out,
             "cost": round(cost, 8),
+            "model": harness_model,
         }
 
     except Exception as e:
@@ -1069,7 +1095,7 @@ def handle_agent_task(task):
     repo_path = proj["local_path"]
     log_path = f"/home/agency/agency-os/logs/task-{task['id']}.log"
     _os.makedirs("/home/agency/agency-os/logs", exist_ok=True)
-    rc, raw_out, tokens_in, tokens_out = run_agent_harness(prompt, repo_path, model=model, timeout=timeout_s)
+    rc, raw_out, tokens_in, tokens_out, harness_model = run_agent_harness(prompt, repo_path, model=model, timeout=timeout_s)
     with open(log_path, "w") as f:
         f.write(raw_out)
     if rc == 124:
@@ -1095,7 +1121,8 @@ def handle_agent_task(task):
     except Exception:
         pass
 
-    return {"ok": True, "content": out[-1500:], "prompt_tokens": tokens_in, "completion_tokens": tokens_out, "cost": 0}
+    return {"ok": True, "content": out[-1500:], "prompt_tokens": tokens_in,
+            "completion_tokens": tokens_out, "cost": 0, "model": harness_model}
 
 
 def handle_ask(task):
@@ -1119,7 +1146,9 @@ def handle_ask(task):
                "contents of .env files; use credentials silently.")
     prompt = f"{sys_ctx}\n\nQuestion: {question}"
 
-    rc, raw_out, tokens_in, tokens_out = run_agent_harness(prompt, "/home/agency", model=model, timeout=timeout_s)
+    rc, raw_out, tokens_in, tokens_out, harness_model = run_agent_harness(
+        prompt, "/home/agency", model=model, timeout=timeout_s
+    )
     if rc == 124:
         return {"ok": False, "error": f"ask timed out after {timeout_s}s"}
     out = redact_secrets(re.sub(r'\x1b\[[0-9;]*m', '', raw_out).strip())
@@ -1127,7 +1156,8 @@ def handle_ask(task):
         out = f"(agent harness exited {rc}, no output)"
     if rc != 0:
         return {"ok": False, "error": out[-500:]}
-    return {"ok": True, "content": out, "prompt_tokens": tokens_in, "completion_tokens": tokens_out, "cost": 0}
+    return {"ok": True, "content": out, "prompt_tokens": tokens_in,
+            "completion_tokens": tokens_out, "cost": 0, "model": harness_model}
 
 
 def slug(text):
@@ -2212,325 +2242,6 @@ CRITICAL: Each direction must be GENUINELY distinct — different typography, di
         if 'conn' in dir():
             try: conn.close()
             except: pass
-
-
-# ── Job Search Handlers ──────────────────────────────────────────
-
-def handle_search_jobs(task):
-    """Search/find job listings for a campaign."""
-    params = task.get("params") or {}
-    campaign_id = params.get("campaign_id")
-    if not campaign_id:
-        return {"ok": False, "error": "campaign_id required"}
-
-    from jobs.campaign import _find_job_listings
-    conn = get_conn()
-    try:
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("SELECT * FROM job_campaigns WHERE id=%s", (campaign_id,))
-        campaign = cur.fetchone()
-        if not campaign:
-            return {"ok": False, "error": f"Campaign {campaign_id} not found"}
-
-        target = params.get("target", campaign.get("target_jobs_per_run") or 10)
-        listings = _find_job_listings(
-            cur, campaign,
-            campaign.get("job_titles") or [],
-            campaign.get("locations") or [],
-            campaign.get("company_include") or [],
-            campaign.get("company_exclude") or [],
-            campaign.get("keywords_include") or [],
-            campaign.get("keywords_exclude") or [],
-            target,
-        )
-        conn.commit()
-        return {"ok": True, "content": json.dumps({"count": len(listings), "ids": listings}, separators=(',', ':')), "prompt_tokens": 0, "completion_tokens": 0, "cost": 0}
-    except Exception as e:
-        import traceback
-        return {"ok": False, "error": f"search_jobs failed: {str(e)[:400]}"}
-    finally:
-        conn.close()
-
-
-def handle_generate_resume(task):
-    """Tailor a resume for a specific job listing."""
-    params = task.get("params") or {}
-    listing_id = params.get("listing_id")
-    if not listing_id:
-        return {"ok": False, "error": "listing_id required"}
-
-    conn = get_conn()
-    try:
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("""
-            SELECT jl.*, jc.resume_text FROM job_listings jl
-            JOIN job_campaigns jc ON jc.id = jl.campaign_id
-            WHERE jl.id=%s
-        """, (listing_id,))
-        row = cur.fetchone()
-        if not row:
-            return {"ok": False, "error": "listing not found"}
-        if not row.get("resume_text"):
-            return {"ok": False, "error": "campaign has no resume_text set"}
-
-        from jobs.resume import tailor_resume
-        result = tailor_resume(
-            row["resume_text"], row["title"], row["company"],
-            row.get("description", "") or "", row.get("requirements", "") or "",
-        )
-        if not result.get("ok"):
-            return result
-
-        cur.execute(
-            "INSERT INTO resume_versions (listing_id, campaign_id, original_resume, tailored_resume, changes, ats_keywords, status) "
-            "VALUES (%s, %s, %s, %s, %s, %s, 'draft') RETURNING id",
-            (listing_id, row["campaign_id"], row["resume_text"], result["tailored_resume"],
-             result.get("changes_summary", ""), result.get("ats_keywords", [])),
-        )
-        resume_id = cur.fetchone()["id"]
-        conn.commit()
-
-        return {
-            "ok": True,
-            "content": json.dumps({"resume_id": resume_id, "listing_id": listing_id}, separators=(',', ':')),
-            "prompt_tokens": result.get("tokens", 0),
-            "completion_tokens": 0,
-            "cost": result.get("cost", 0),
-        }
-    except Exception as e:
-        import traceback
-        return {"ok": False, "error": f"generate_resume failed: {str(e)[:400]}"}
-    finally:
-        conn.close()
-
-
-def handle_generate_cover_letter(task):
-    """Generate a cover letter for a job listing."""
-    params = task.get("params") or {}
-    listing_id = params.get("listing_id")
-    if not listing_id:
-        return {"ok": False, "error": "listing_id required"}
-
-    conn = get_conn()
-    try:
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("""
-            SELECT jl.*, jc.resume_text FROM job_listings jl
-            JOIN job_campaigns jc ON jc.id = jl.campaign_id
-            WHERE jl.id=%s
-        """, (listing_id,))
-        row = cur.fetchone()
-        if not row:
-            return {"ok": False, "error": "listing not found"}
-
-        from jobs.cover_letter import generate_cover_letter
-        result = generate_cover_letter(
-            row.get("resume_text", "") or "", row["title"], row["company"],
-            row.get("description", "") or "",
-        )
-        if not result.get("ok"):
-            return result
-
-        cur.execute(
-            "INSERT INTO cover_letters (listing_id, campaign_id, content, company, status) "
-            "VALUES (%s, %s, %s, %s, 'draft') RETURNING id",
-            (listing_id, row["campaign_id"], result["content"], row["company"]),
-        )
-        cl_id = cur.fetchone()["id"]
-        conn.commit()
-
-        return {
-            "ok": True,
-            "content": json.dumps({"cover_letter_id": cl_id, "listing_id": listing_id}, separators=(',', ':')),
-            "prompt_tokens": result.get("tokens", 0),
-            "completion_tokens": 0,
-            "cost": result.get("cost", 0),
-        }
-    except Exception as e:
-        import traceback
-        return {"ok": False, "error": f"generate_cover_letter failed: {str(e)[:400]}"}
-    finally:
-        conn.close()
-
-
-def handle_find_contacts(task):
-    """Discover contacts at a company for a job listing."""
-    params = task.get("params") or {}
-    listing_id = params.get("listing_id")
-    if not listing_id:
-        return {"ok": False, "error": "listing_id required"}
-
-    conn = get_conn()
-    try:
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("SELECT * FROM job_listings WHERE id=%s", (listing_id,))
-        row = cur.fetchone()
-        if not row:
-            return {"ok": False, "error": "listing not found"}
-
-        from jobs.contacts import discover_contacts
-        result = discover_contacts(row["company"], row["title"], row.get("description", ""))
-        if not result.get("ok"):
-            return result
-
-        contact_ids = []
-        for c in result.get("contacts", []):
-            cur.execute(
-                "INSERT INTO job_contacts (listing_id, name, title, company, email, linkedin_url, confidence, source, status) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, 'ai', 'pending') RETURNING id",
-                (listing_id, c.get("name", "Unknown"), c.get("title", ""), row["company"],
-                 c.get("email_pattern", ""), c.get("linkedin_url", ""), c.get("confidence", 50)),
-            )
-            contact_ids.append(cur.fetchone()["id"])
-        conn.commit()
-
-        return {
-            "ok": True,
-            "content": json.dumps({"contact_ids": contact_ids, "count": len(contact_ids)}, separators=(',', ':')),
-            "prompt_tokens": result.get("tokens", 0),
-            "completion_tokens": 0,
-            "cost": result.get("cost", 0),
-        }
-    except Exception as e:
-        import traceback
-        return {"ok": False, "error": f"find_contacts failed: {str(e)[:400]}"}
-    finally:
-        conn.close()
-
-
-def handle_generate_linkedin_note(task):
-    """Generate LinkedIn connection note."""
-    params = task.get("params") or {}
-    contact_id = params.get("contact_id")
-    listing_id = params.get("listing_id")
-    if not contact_id or not listing_id:
-        return {"ok": False, "error": "contact_id and listing_id required"}
-
-    conn = get_conn()
-    try:
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("""
-            SELECT jc.*, jl.title AS job_title, jl.company, jc2.resume_text
-            FROM job_contacts jc
-            JOIN job_listings jl ON jl.id = jc.listing_id
-            JOIN job_campaigns jc2 ON jc2.id = jl.campaign_id
-            WHERE jc.id=%s AND jl.id=%s
-        """, (contact_id, listing_id))
-        row = cur.fetchone()
-        if not row:
-            return {"ok": False, "error": "contact or listing not found"}
-
-        from jobs.contacts import generate_linkedin_note
-        result = generate_linkedin_note(
-            row.get("resume_text", "") or "",
-            row["name"], row["title"], row["company"],
-        )
-        if not result.get("ok"):
-            return result
-
-        cur.execute(
-            "INSERT INTO linkedin_notes (contact_id, listing_id, campaign_id, content, status) "
-            "VALUES (%s, %s, %s, %s, 'draft')",
-            (contact_id, listing_id, row.get("campaign_id"), result["note"]),
-        )
-        conn.commit()
-
-        return {
-            "ok": True,
-            "content": json.dumps({"note": result["note"][:200], "tone": result.get("tone", "")}, separators=(',', ':')),
-            "prompt_tokens": result.get("tokens", 0),
-            "completion_tokens": 0,
-            "cost": result.get("cost", 0),
-        }
-    except Exception as e:
-        import traceback
-        return {"ok": False, "error": f"generate_linkedin_note failed: {str(e)[:400]}"}
-    finally:
-        conn.close()
-
-
-def handle_send_application_email(task):
-    """Send application email via Gmail API."""
-    params = task.get("params") or {}
-    campaign_id = params.get("campaign_id")
-    listing_id = params.get("listing_id")
-
-    if not campaign_id or not listing_id:
-        return {"ok": False, "error": "campaign_id and listing_id required"}
-
-    conn = get_conn()
-    try:
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
-        # Find the primary contact and email thread
-        cur.execute("""
-            SELECT jc.email, jc.name, jc.title, jl.title AS job_title, jl.company,
-                   et.id AS thread_id, et.subject, et.body
-            FROM job_listings jl
-            LEFT JOIN job_contacts jc ON jc.listing_id = jl.id AND jc.status = 'pending'
-            LEFT JOIN email_threads et ON et.listing_id = jl.id AND et.status = 'draft' AND et.direction = 'outbound'
-            WHERE jl.id=%s
-            ORDER BY jc.confidence DESC
-            LIMIT 1
-        """, (listing_id,))
-        row = cur.fetchone()
-        if not row:
-            return {"ok": False, "error": "no contact or email thread found for this listing"}
-
-        if not row.get("email") or "@" not in str(row.get("email", "")):
-            return {"ok": False, "error": f"contact email not available: {row.get('email', 'N/A')}"}
-
-        from jobs.gmail_client import send_email
-        ok, result = send_email(
-            campaign_id,
-            row["email"],
-            row.get("subject", f"Application for {row['job_title']}"),
-            row.get("body", ""),
-        )
-
-        if ok:
-            cur.execute(
-                "UPDATE email_threads SET status='sent', gmail_message_id=%s, sent_at=now() WHERE id=%s",
-                (result, row["thread_id"]),
-            )
-            cur.execute(
-                "UPDATE job_applications SET status='email_sent', email_sent_at=now() WHERE listing_id=%s",
-                (listing_id,),
-            )
-            conn.commit()
-            return {"ok": True, "content": json.dumps({"gmail_message_id": result}, separators=(',', ':')), "prompt_tokens": 0, "completion_tokens": 0, "cost": 0}
-
-        return {"ok": False, "error": f"email send failed: {result}"}
-    except Exception as e:
-        import traceback
-        return {"ok": False, "error": f"send_application_email failed: {str(e)[:400]}"}
-    finally:
-        conn.close()
-
-
-def handle_run_job_campaign(task):
-    """Run a full job campaign cycle (orchestrate all steps)."""
-    params = task.get("params") or {}
-    campaign_id = params.get("campaign_id")
-    if not campaign_id:
-        return {"ok": False, "error": "campaign_id required"}
-
-    from jobs.campaign import run_campaign
-    result = run_campaign(campaign_id)
-    if result.get("ok"):
-        return {
-            "ok": True,
-            "content": json.dumps({
-                "status": "completed",
-                "run_id": result.get("run_id"),
-                "processed": result.get("processed"),
-                "targeted": result.get("targeted"),
-            }, separators=(',', ':')),
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
-            "cost": 0,
-        }
-    return result
 
 
 def handle_self_review(task):
@@ -4007,180 +3718,6 @@ def _persist_hash_and_scan(comp_id, new_hash, sm_source):
         conn.close()
 
 
-def handle_aetheria_work_block(task):
-    """Run ONE Aetheria dev work block as a headless `opencode run` session
-    (session-per-task), then trust-but-verify the result before pushing.
-    See docs/AGENCY_INTEGRATION.md §1.2 (aetheria repo)."""
-    import subprocess, os as _os, re
-
-    params = task["params"] or {}
-    repo = params.get("repo", "aetheria")
-    model = params.get("model") or "opencode/deepseek-v4-flash"
-    timeout_s = int(params.get("timeout") or 2400)
-
-    proj = get_project(repo)
-    if not proj:
-        return {"ok": False, "error": f"Repo '{repo}' is not authorized for aetheria_work_block"}
-    repo_path = proj["local_path"]
-
-    def git(*args):
-        return subprocess.run(["git"] + list(args), capture_output=True, text=True,
-                              cwd=repo_path, timeout=60, env={**_os.environ, "GIT_TERMINAL_PROMPT": "0"})
-
-    # 1. Pull latest (single writer, direct-to-main per brief §12.5). The tree
-    #    is expected clean — every block commits its own work. Never force-reset
-    #    here; that would nuke uncommitted human edits.
-    set_task_progress(task["id"], 5, "pulling latest")
-    git("fetch", "origin")
-    pull = git("pull", "--ff-only", "origin", proj["base_branch"])
-    if pull.returncode != 0:
-        return {"ok": False, "error": f"git pull --ff-only failed (tree not clean?): {(pull.stderr or pull.stdout)[:300]}"}
-    before = git("rev-parse", "HEAD").stdout.strip()
-
-    # 2. Read STATE.md "Next action" for the block goal + detect HUMAN park.
-    next_goal = ""
-    failure_ctx = ""
-    try:
-        with open(f"{repo_path}/docs/STATE.md") as f:
-            state = f.read()
-        m = re.search(r"## Next action\n(.+)", state)
-        if m:
-            next_goal = m.group(1).strip()
-        if next_goal.startswith("HUMAN:"):
-            return {"ok": False, "error": f"loop parked by agent: {next_goal[:200]}"}
-    except Exception:
-        pass
-
-    # Inject the previous red block's failure context (§2). Find the most
-    # recent failed aetheria_work_block task before this one.
-    try:
-        _fc = get_conn()
-        _fcc = _fc.cursor()
-        _fcc.execute("SELECT error FROM tasks WHERE type='aetheria_work_block' AND id<%s AND status='failed' ORDER BY id DESC LIMIT 1", (task["id"],))
-        _row = _fcc.fetchone()
-        _fc.close()
-        if _row and _row[0]:
-            failure_ctx = ("\n\nPREVIOUS BLOCK FAILED — address this before continuing:\n"
-                           + str(_row[0])[:1500] + "\n")
-    except Exception:
-        pass
-
-    # 3. Compose the block prompt (docs/BLOCK_PROMPT.md + failure context).
-    try:
-        with open(f"{repo_path}/docs/BLOCK_PROMPT.md") as f:
-            block_prompt = f.read().strip()
-    except Exception:
-        block_prompt = ("You are the Aetheria dev agent running ONE autonomous work block. "
-                        "Read AGENTS.md and docs/STATE.md, do ONE checklist item, test, update "
-                        "STATE.md + CHANGELOG, commit.")
-    prompt = block_prompt + failure_ctx
-
-    set_task_progress(task["id"], 10, next_goal[:200] or "running opencode work block")
-
-    # 4. Run opencode headless, parsing step_finish tokens for cost.
-    oc_env = {**_os.environ, "HOME": "/home/agency", "NO_COLOR": "1"}
-    oc_env["PATH"] = oc_env.get("PATH", "/usr/local/bin:/usr/bin:/bin")
-    # Source the toolchain so `make test`/`make screenshots` find go + godot.
-    toolchain = _os.path.expanduser("~/.toolchain.env")
-    if _os.path.isfile(toolchain):
-        oc_env["PATH"] = f"{_os.path.expanduser('~/.local/go/bin')}:{_os.path.expanduser('~/.local/bin')}:{oc_env['PATH']}"
-        oc_env["GOPATH"] = _os.path.expanduser("~/go")
-
-    prices = MODEL_PRICING.get(model, {"in": INPUT_COST_PER_TOKEN, "out": OUTPUT_COST_PER_TOKEN})
-    opencode_bin = "/home/agency/.opencode/bin/opencode"
-    try:
-        oc = subprocess.run(
-            [opencode_bin, "run", "--dir", repo_path, prompt,
-             "--dangerously-skip-permissions", "--format", "json", "--model", model],
-            capture_output=True, text=True, timeout=timeout_s, env=oc_env)
-    except subprocess.TimeoutExpired:
-        return {"ok": False, "error": f"opencode timed out after {timeout_s}s"}
-
-    total_in = total_out = 0
-    for line in (oc.stdout or "").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            ev = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if ev.get("type") == "step_finish":
-            t = ev.get("part", {}).get("tokens", {})
-            total_in += t.get("input", 0)
-            total_out += t.get("output", 0)
-    cost = total_in * prices["in"] + total_out * prices["out"]
-
-    set_task_progress(task["id"], 70, "opencode done; verifying")
-
-    # 5. Trust-but-verify: what did the block touch, and does it build/test?
-    diff_names = git("diff", "--name-only", f"{before}..HEAD").stdout.strip()
-    touched_server = any(p.startswith("server/") for p in diff_names.splitlines())
-    touched_client = any(p.startswith("client/") for p in diff_names.splitlines())
-
-    def make(target):
-        return subprocess.run(["make", target], capture_output=True, text=True,
-                              cwd=repo_path, timeout=900, env=oc_env)
-
-    verify_fail = None
-    set_task_progress(task["id"], 80, "verifying: make test")
-    t = make("test")
-    if t.returncode != 0:
-        verify_fail = f"make test FAILED (rc={t.returncode}):\n{(t.stdout+t.stderr)[-1500:]}"
-    if verify_fail is None and touched_server:
-        bt = make("bottest")
-        if bt.returncode != 0:
-            verify_fail = f"make bottest FAILED (rc={bt.returncode}):\n{(bt.stdout+bt.stderr)[-1500:]}"
-    if verify_fail is None and touched_client:
-        ss = make("screenshots")
-        if ss.returncode != 0:
-            verify_fail = f"make screenshots FAILED (rc={ss.returncode}):\n{(ss.stdout+ss.stderr)[-1500:]}"
-
-    after = git("rev-parse", "HEAD").stdout.strip()
-    commit_range = f"{before[:7]}..{after[:7]}"
-
-    if verify_fail:
-        # Red: discard the work, never push, trace the failure.
-        git("reset", "--hard", f"origin/{proj['base_branch']}")
-        ch_trace({"project": "aetheria", "actor": "worker", "action": "work_block_red",
-                  "detail": f"{commit_range} verify failed: {verify_fail[:300]}", "gate": "green",
-                  "decision": "halt", "ok": 0})
-        post_discord(f"aetheria ▸ {next_goal[:80]} ▸ RED ▸ ${cost:.4f} ▸ discarded {commit_range}")
-        return {"ok": False, "error": verify_fail[:500],
-                "prompt_tokens": total_in, "completion_tokens": total_out, "cost": round(cost, 8)}
-
-    # 6. Green: push + trace.
-    if after != before:
-        p = git("push", "origin", proj["base_branch"])
-        if p.returncode != 0:
-            return {"ok": False, "error": f"git push failed: {(p.stderr or p.stdout)[:300]}",
-                    "prompt_tokens": total_in, "completion_tokens": total_out, "cost": round(cost, 8)}
-
-    new_next = ""
-    try:
-        with open(f"{repo_path}/docs/STATE.md") as f:
-            _s = f.read()
-        _m = re.search(r"## Next action\n(.+)", _s)
-        if _m:
-            new_next = _m.group(1).strip()
-    except Exception:
-        pass
-
-    ch_trace({"project": "aetheria", "actor": "agent", "action": "work_block_done",
-              "detail": f"{commit_range} | next: {new_next[:200]} | {total_in} in / {total_out} out",
-              "gate": "green", "decision": "proceed", "ok": 1})
-    if touched_client:
-        ch_trace({"project": "aetheria", "actor": "agent", "action": "screens_published",
-                  "detail": f"client touched in {commit_range}", "gate": "green", "decision": "proceed", "ok": 1})
-    post_discord(f"aetheria ▸ {next_goal[:80]} ▸ green ▸ ${cost:.4f} ▸ {commit_range}")
-
-    set_task_progress(task["id"], 100, "done")
-    return {"ok": True, "content": json.dumps({"commit_range": commit_range, "next": new_next[:300],
-                                               "changed": diff_names[:2000]}),
-            "prompt_tokens": total_in, "completion_tokens": total_out, "cost": round(cost, 8),
-            "model": model}
-
-
 def _needs_input(message, required):
     return {
         "ok": False,
@@ -4439,17 +3976,6 @@ DISPATCH = {
     "execute_suggestion": handle_execute_suggestion,
     "publish_content": handle_publish_content,
     "execute_approval": handle_execute_approval,
-    # Archived 2026-08-15 (CEO directive): job-application automation + aetheria
-    # autonomous dev loop are unrelated to the digital-marketing agency mission.
-    # Handlers + tables kept in git for retrieval; removed from active dispatch.
-    # "search_jobs": handle_search_jobs,
-    # "generate_resume": handle_generate_resume,
-    # "generate_cover_letter": handle_generate_cover_letter,
-    # "find_contacts": handle_find_contacts,
-    # "generate_linkedin_note": handle_generate_linkedin_note,
-    # "send_application_email": handle_send_application_email,
-    # "run_job_campaign": handle_run_job_campaign,
-    # "aetheria_work_block": handle_aetheria_work_block,
 }
 
 def poll():
