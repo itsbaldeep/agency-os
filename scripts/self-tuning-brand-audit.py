@@ -162,7 +162,7 @@ Homepage text:
 
 From the text, infer: pricing model, target customer, and whether their go-to-market is self-serve or sales-led.
 
-Then name exactly 3 competitors a REAL buyer would cross-shop — same price point, same target, same self-serve/sales model.
+Then name exactly 3 direct substitutes a REAL buyer would cross-shop — same product form, core workflow, price point, target, and self-serve/sales model. Prefer feature-equivalent products over broad category incumbents that merely share an audience. If a broad incumbent lacks the company's defining workflow, it is not a direct competitor.
 
 Respond ONLY with a valid JSON object (no markdown, no code fences):
 {{"pricing_model":"...","target_customer":"...","go_to_market":"self-serve","competitors":[{{"name":"Company","domain":"company.com","why":"reason"}}]}}"""

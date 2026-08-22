@@ -916,6 +916,8 @@ ALTER SEQUENCE public.tasks_id_seq OWNED BY public.tasks.id;
 CREATE TABLE public.token_usage (
     id bigint NOT NULL,
     project_id bigint,
+    task_id integer,
+    job_run_id integer,
     ts timestamp with time zone DEFAULT now() NOT NULL,
     model text,
     tokens_in bigint,
@@ -1657,6 +1659,16 @@ ALTER TABLE ONLY public.tasks
 
 ALTER TABLE ONLY public.token_usage
     ADD CONSTRAINT token_usage_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.projects(id);
+
+ALTER TABLE ONLY public.token_usage
+    ADD CONSTRAINT token_usage_task_id_fkey FOREIGN KEY (task_id) REFERENCES public.tasks(id) ON DELETE SET NULL;
+
+ALTER TABLE ONLY public.token_usage
+    ADD CONSTRAINT token_usage_job_run_id_fkey FOREIGN KEY (job_run_id) REFERENCES public.job_runs(id) ON DELETE SET NULL;
+
+CREATE UNIQUE INDEX competitors_brand_domain_uidx ON public.competitors USING btree (brand_id, lower(domain));
+CREATE UNIQUE INDEX token_usage_task_id_uidx ON public.token_usage USING btree (task_id) WHERE (task_id IS NOT NULL);
+CREATE UNIQUE INDEX token_usage_job_run_id_uidx ON public.token_usage USING btree (job_run_id) WHERE (job_run_id IS NOT NULL);
 
 
 --

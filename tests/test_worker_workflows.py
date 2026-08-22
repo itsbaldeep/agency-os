@@ -163,7 +163,8 @@ class WorkerWorkflowTests(unittest.TestCase):
         )
         inserts = [call for call in cursor.calls if "INSERT INTO token_usage" in call[0]]
         self.assertEqual(len(inserts), 1)
-        self.assertEqual(inserts[0][1][2:4], (10, 5))
+        self.assertEqual(inserts[0][1][1], 4)
+        self.assertEqual(inserts[0][1][3:5], (10, 5))
 
     def test_side_effect_tasks_require_review_after_interruption(self):
         self.assertIn("publish_content", worker.SIDE_EFFECT_TASKS)

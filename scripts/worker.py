@@ -199,9 +199,9 @@ def record_task_usage(cur, task, result):
             "codex" if task.get("type") in harness_types else "deepseek-v4/mixed"
         )
         cur.execute(
-            "INSERT INTO token_usage (project_id,model,tokens_in,tokens_out,cost_usd) "
-            "VALUES (%s,%s,%s,%s,%s)",
-            (project_id, model, tokens_in, tokens_out, cost),
+            "INSERT INTO token_usage (project_id,task_id,model,tokens_in,tokens_out,cost_usd) "
+            "VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+            (project_id, task.get("id"), model, tokens_in, tokens_out, cost),
         )
         cur.execute("RELEASE SAVEPOINT record_task_usage")
     except Exception as exc:
@@ -1332,12 +1332,17 @@ def handle_run_brand_audit(task):
     total_prompt_tokens = 0
     total_completion_tokens = 0
     total_cost = 0.0
+    models_used = []
 
     def acc(r):
         nonlocal total_prompt_tokens, total_completion_tokens, total_cost
         total_prompt_tokens += r.get("prompt_tokens", 0)
         total_completion_tokens += r.get("completion_tokens", 0)
         total_cost += r.get("cost", 0)
+        for name in str(r.get("model") or "").split(","):
+            name = name.strip()
+            if name and name != "unknown" and name not in models_used:
+                models_used.append(name)
 
     conn = get_conn()
     try:
@@ -1487,7 +1492,8 @@ Homepage excerpt: {crawl['text'][:1000]}"""
             if not re.match(r'^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z]{2,})+$', cdomain):
                 continue
             cur.execute("INSERT INTO competitors (brand_id, domain, name) VALUES (%s, %s, %s) "
-                        "ON CONFLICT DO NOTHING", (brand_id_val, cdomain, cname))
+                        "ON CONFLICT (brand_id, (lower(domain))) DO UPDATE SET name=EXCLUDED.name",
+                        (brand_id_val, cdomain, cname))
 
         conn.commit()
 
@@ -1573,6 +1579,7 @@ Homepage excerpt: {crawl['text'][:1000]}"""
             "prompt_tokens": total_prompt_tokens,
             "completion_tokens": total_completion_tokens,
             "cost": round(total_cost, 8),
+            "model": ",".join(models_used) or "unknown",
         }
 
     except Exception as e:
