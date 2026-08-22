@@ -1148,6 +1148,14 @@ ALTER TABLE ONLY public.brand_properties
 
 
 --
+-- Name: brand_properties brand_properties_brand_type_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.brand_properties
+    ADD CONSTRAINT brand_properties_brand_type_key UNIQUE (brand_id, property_type);
+
+
+--
 -- Name: brands brands_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 

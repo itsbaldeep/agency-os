@@ -1469,8 +1469,15 @@ Homepage excerpt: {crawl['text'][:1000]}"""
             cur.execute("INSERT INTO brands (name, slug, access_tier) VALUES (%s, %s, '0') ON CONFLICT (slug) DO UPDATE SET name=EXCLUDED.name RETURNING id",
                         (brand_name, slug))
             brand_id_val = cur.fetchone()["id"]
-            cur.execute("INSERT INTO brand_properties (brand_id, property_type, value, accessible) VALUES "
-                        "(%s, 'domain', %s, true) ON CONFLICT DO NOTHING", (brand_id_val, domain))
+
+        # brand_properties is current state. Audit history belongs in audits,
+        # so repeated onboarding/audits update one canonical property row.
+        cur.execute(
+            "INSERT INTO brand_properties (brand_id, property_type, value, accessible) VALUES "
+            "(%s, 'domain', %s, true) ON CONFLICT (brand_id, property_type) DO UPDATE SET "
+            "value=EXCLUDED.value, accessible=EXCLUDED.accessible, created_at=now()",
+            (brand_id_val, domain),
+        )
 
         # Write business properties (skip null values)
         for ptype, pval in [("category", category), ("positioning", positioning),
@@ -1479,7 +1486,8 @@ Homepage excerpt: {crawl['text'][:1000]}"""
             if pval is None:
                 pval = "unknown"
             cur.execute("INSERT INTO brand_properties (brand_id, property_type, value, accessible) "
-                        "VALUES (%s, %s, %s, true) ON CONFLICT DO NOTHING",
+                        "VALUES (%s, %s, %s, true) ON CONFLICT (brand_id, property_type) DO UPDATE SET "
+                        "value=EXCLUDED.value, accessible=EXCLUDED.accessible, created_at=now()",
                         (brand_id_val, ptype, str(pval)))
 
         # Reconcile only the previous audit's unscanned auto-proposals. This
