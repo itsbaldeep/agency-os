@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "tools": [
+    {"id": "postgres", "name": "PostgreSQL", "role": "Core relational source of truth", "status": "active", "health": "container:agency-postgres", "credential_refs": ["POSTGRES_PASSWORD"]},
+    {"id": "clickhouse", "name": "ClickHouse", "role": "Bounded event and visibility samples", "status": "active_bounded", "health": "container:agency-clickhouse", "credential_refs": ["CLICKHOUSE_PASSWORD"]},
+    {"id": "minio", "name": "Core MinIO", "role": "Agency content-pipeline assets", "status": "active", "health": "container:agency-minio", "credential_refs": ["MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD"]},
+    {"id": "dashboard", "name": "Agency Dashboard", "role": "Human control plane on Tailnet :5001", "status": "active", "health": "container:agency-dashboard", "credential_refs": []},
+    {"id": "discord", "name": "Discord", "role": "Exception alerts, digest and operator prompts", "status": "active", "health": "credential:DISCORD_WEBHOOK_URL", "credential_refs": ["DISCORD_WEBHOOK_URL", "DISCORD_TOKEN"]},
+    {"id": "codex", "name": "Codex CLI", "role": "Primary manual agent harness on subscription", "status": "active", "health": "operator-session", "credential_refs": []},
+    {"id": "deepseek", "name": "DeepSeek API", "role": "Primary raw structured completions", "status": "active", "health": "credential:DEEPSEEK_API_KEY", "credential_refs": ["DEEPSEEK_API_KEY"]},
+    {"id": "opencode", "name": "OpenCode web + exec", "role": "Mobile web agent and explicit fallback", "status": "active", "health": "systemd:opencode@4096", "credential_refs": []},
+    {"id": "caddy", "name": "Caddy", "role": "Public and Tailnet routing", "status": "active", "health": "systemd:caddy", "credential_refs": []},
+    {"id": "github", "name": "GitHub", "role": "Source hosting and deliberate PR workflow", "status": "active", "health": "credential:GITHUB_TOKEN", "credential_refs": ["GITHUB_TOKEN"]},
+    {"id": "gsc", "name": "Google Search Console", "role": "First-party search performance when property access exists", "status": "configured_unverified", "health": "credential:GSC_SERVICE_ACCOUNT", "credential_refs": ["GSC_SERVICE_ACCOUNT"]},
+    {"id": "pexels", "name": "Pexels", "role": "Content image source", "status": "configured_unverified", "health": "credential:PEXELS_API_KEY", "credential_refs": ["PEXELS_API_KEY"]},
+    {"id": "ga4", "name": "Google Analytics 4", "role": "First-party traffic and conversion evidence", "status": "planned", "health": null, "credential_refs": []},
+    {"id": "dns_provider", "name": "DNS provider API", "role": "Verified DNS record execution", "status": "planned", "health": null, "credential_refs": []}
+  ]
+}
