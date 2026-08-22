@@ -68,18 +68,22 @@ def zen(prompt, model="deepseek-chat", max_tokens=800, _fb_index=0, _base_url=No
         return {"ok": True, "content": c, "prompt_tokens": usage.get("prompt_tokens", 0), "completion_tokens": usage.get("completion_tokens", 0), "model": model}
     except Exception as e:
         emsg = str(e)[:300]
+        error_text = emsg.lower()
+        status_code = getattr(e, "code", None)
         # Credits exhausted or free-model rate-limited → try the next fallback model
         if _fb_index < len(FREE_FALLBACK_MODELS) and (
-            "CreditsError" in emsg or "Insufficient balance" in emsg
-            or "FreeUsageLimitError" in emsg or "Rate limit" in emsg
-            or "401" in emsg or "429" in emsg):
-            fb_base_url, fb_key_env, fb_model = FREE_FALLBACK_MODELS[_fb_index]
-            fb_key = os.environ.get(fb_key_env, "")
-            if not fb_key:
-                return zen(prompt, model=model, max_tokens=max_tokens, _fb_index=_fb_index + 1)
-            print(f"[audit] LLM {model} blocked, falling back to {fb_model} at {fb_base_url}", flush=True)
-            return zen(prompt, model=fb_model, max_tokens=max_tokens, _fb_index=_fb_index + 1,
-                       _base_url=fb_base_url, _api_key=fb_key)
+            "creditserror" in error_text or "insufficient balance" in error_text
+            or "freeusagelimiterror" in error_text or "rate limit" in error_text
+            or status_code in (401, 402, 429)):
+            for fb_index in range(_fb_index, len(FREE_FALLBACK_MODELS)):
+                fb_base_url, fb_key_env, fb_model = FREE_FALLBACK_MODELS[fb_index]
+                fb_key = os.environ.get(fb_key_env, "")
+                if not fb_key:
+                    print(f"[audit] {fb_key_env} is unset; skipping {fb_model}", flush=True)
+                    continue
+                print(f"[audit] LLM {model} blocked, falling back to {fb_model} at {fb_base_url}", flush=True)
+                return zen(prompt, model=fb_model, max_tokens=max_tokens,
+                           _fb_index=fb_index + 1, _base_url=fb_base_url, _api_key=fb_key)
         return {"ok": False, "error": emsg, "model": model}
 
 def crawl_homepage(domain):

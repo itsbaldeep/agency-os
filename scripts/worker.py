@@ -462,21 +462,22 @@ def call_zen(prompt, model="deepseek-chat", max_tokens=1500, temperature=None, t
         return {"ok": True, "content": content, "prompt_tokens": pt, "completion_tokens": ct, "cost": round(cost, 8), "model": model}
     except urllib.error.HTTPError as e:
         body = e.read().decode()[:500] if hasattr(e, 'read') else str(e)
+        error_text = body.lower()
         # Credits exhausted or free-model rate-limited → try the next fallback model
         if _fb_index < len(FREE_FALLBACK_MODELS) and (
-            "CreditsError" in body or "Insufficient balance" in body
-            or "FreeUsageLimitError" in body or "Rate limit" in body
-            or e.code in (401, 429)):
-            fb_base_url, fb_key_env, fb_model = FREE_FALLBACK_MODELS[_fb_index]
-            fb_key = os.environ.get(fb_key_env, "")
-            if not fb_key:
-                print(f"[worker] {fb_key_env} is unset; skipping {fb_model}", flush=True)
-                return call_zen(prompt, model=model, max_tokens=max_tokens, temperature=temperature,
-                                timeout=timeout, _fb_index=_fb_index + 1)
-            print(f"[worker] LLM {model} blocked ({e.code}), falling back to {fb_model} at {fb_base_url}", flush=True)
-            return call_zen(prompt, model=fb_model, max_tokens=max_tokens, temperature=temperature,
-                            timeout=timeout, _fb_index=_fb_index + 1,
-                            _base_url=fb_base_url, _api_key=fb_key)
+            "creditserror" in error_text or "insufficient balance" in error_text
+            or "freeusagelimiterror" in error_text or "rate limit" in error_text
+            or e.code in (401, 402, 429)):
+            for fb_index in range(_fb_index, len(FREE_FALLBACK_MODELS)):
+                fb_base_url, fb_key_env, fb_model = FREE_FALLBACK_MODELS[fb_index]
+                fb_key = os.environ.get(fb_key_env, "")
+                if not fb_key:
+                    print(f"[worker] {fb_key_env} is unset; skipping {fb_model}", flush=True)
+                    continue
+                print(f"[worker] LLM {model} blocked ({e.code}), falling back to {fb_model} at {fb_base_url}", flush=True)
+                return call_zen(prompt, model=fb_model, max_tokens=max_tokens, temperature=temperature,
+                                timeout=timeout, _fb_index=fb_index + 1,
+                                _base_url=fb_base_url, _api_key=fb_key)
         return {"ok": False, "error": f"HTTP {e.code}: {body}", "model": model}
     except (socket.timeout, urllib.error.URLError) as e:
         return {"ok": False, "error": f"TIMEOUT: {str(e)[:200]}", "model": model}
