@@ -1,6 +1,6 @@
 # Agency OS — CEO Directive (2026-08-16, state locked for fresh-context handoff)
 
-Authority: human co-CEO + AI co-CEO (OpenCode). This file is the persistent
+Authority: human co-CEO + AI co-CEO (Codex CLI). This file is the persistent
 strategic context — read it on every session start. It supersedes informal
 chat decisions. Update it when strategy changes.
 
@@ -47,7 +47,7 @@ current truth, not the previous state.
 
 ### What works (verified live)
 - Control plane: Postgres ledger, ClickHouse traces, approval gates, cron,
-  Discord bot, dashboard, OpenCode brain. Solid.
+  Discord bot, dashboard, Codex CLI agent harness. Solid.
 - `defend_audit`: thin but functional — checks robots/sitemap/blog/feed/
   WP REST/meta/OG/JSON-LD presence/image alt. Writes `capabilities` rows.
   Accepts brand_id (auto-resolves domain, auto-creates project for black-box).
@@ -86,15 +86,12 @@ current truth, not the previous state.
   paperboat.com (brand 4) baseline done (9 pages, 2022-10-31 lastmod).
   Competitors page now links back to engagement+report, shows "why" text,
   explains baseline-vs-delta status, flags unverified auto-proposed domains.
-- **Free-model fallback (2026-08-16):** credits exhausted on the opencode
-  workspace (HTTP 401 CreditsError killed every AI task). Added fallback
-  chain to all three LLM call sites (worker.py call_zen, self-tuning-brand-
-  audit.py zen, suggestion-engine.py zen): hy3-free → laguna-s-2.1-free →
-  nemotron-3-ultra-free → deepseek-v4-flash-free → mimo-v2.5-free, all $0.
-  Triggers on CreditsError / Insufficient balance / FreeUsageLimitError /
-  429. Verified: content_compose task 270 (17 blocks) ran entirely on
-  hy3-free at $0.0; content item 19 (Technoflavour, "physical therapy
-  benefits") is now draft. Free models report cost=0 and echo model name.
+- **Model-stack migration (2026-08-22):** Codex CLI, authenticated by the
+  ChatGPT subscription, is the coding-agent harness. Raw pipeline completions
+  use DeepSeek (`OPENAI_BASE_URL=https://api.deepseek.com`,
+  `DEEPSEEK_API_KEY`, `deepseek-chat`); cross-host fallbacks are GLM-4.5-Flash
+  at z.ai and an OpenRouter `:free` model. OpenCode remains an opt-in rollback
+  only (`OPENCODE_FALLBACK=1`).
 - **ClickHouse fixed**: memory 307MB→1.5GB (max_memory_usage 1500000000),
   stuck DELETE mutations killed, pre-DELETE removed from audit script
   (insert-only). ai_visibility_checks rows: brand 1=60, 2=60, 4=15.
@@ -112,8 +109,8 @@ current truth, not the previous state.
 4. **No ads/campaigns/email/WhatsApp/social** — zero. SearchAtlas's tagline
    ("runs your SEO, AEO, Google Ads, Meta Ads, content, and site health")
    beats us ~10-fold in scope.
-5. **Credits exhausted** — paid model down; free fallback works but free
-   models are rate-limited and lower quality. Top-up restores quality.
+5. **API balance can be exhausted** — DeepSeek pipeline completions then use
+   configured z.ai/OpenRouter fallbacks, which are rate-limited and lower quality.
 6. **AI-visibility is a training-knowledge proxy** — single LLM (DeepSeek),
    substring match, no real ChatGPT/Perplexity/Gemini/Copilot citation data.
    Citation matching has no word boundaries ("Apple" matches any fruit).
@@ -224,9 +221,9 @@ marketplace restrictions) are a feature none of them show.
       property; DNS TXT verification is the standard path.
 - [ ] **Confirm technoflavour.com status** — real client/prospect? Do they
       have a GSC property we can access?
-- [ ] **Top up opencode workspace credits** (optional but recommended) —
-      paid deepseek-v4-flash is the primary model; free fallback works but
-      free models are rate-limited and lower quality.
+- [ ] **Fund the DeepSeek API account** (optional but recommended) —
+      `deepseek-chat` is the primary raw-completions model; configured
+      fallbacks are rate-limited and lower quality.
 
 ### When we have a real client engagement
 - [ ] **WordPress Application Password** from the client (Phase 3 publisher).
@@ -250,12 +247,11 @@ marketplace restrictions) are a feature none of them show.
 3. **Push context to files** — CEO_DIRECTIVE.md, ROADMAP.md. Never hold
    critical state only in chat. On session start: read CEO_DIRECTIVE.md
    then ROADMAP.md (ROADMAP has the system state block).
-4. **Deploy from time to time** — don't let work sit uncommitted. The
-   auto-deploy jobs (8, 9) will pick up merges. **WARNING: pushing to
-   agency-os restarts the worker and orphans running tasks — re-queue
-   orphaned tasks after each push, or temporarily disable job 8 during
-   long audits.** Deploy scripts SKIP when /home/agency/agency-os has
-   uncommitted changes — commit config drift there first.
+4. **Deploy deliberately** — jobs 8 and 9 are disabled; do not re-enable
+   them as part of routine work. **WARNING: a manual agency-os deploy restarts
+   the worker and can orphan running tasks — re-queue affected tasks after a
+   deploy.** Deploy scripts SKIP when /home/agency/agency-os has uncommitted
+   changes — commit config drift there first.
 5. **Everything visible on the dashboard** — if it's not on :5001, it doesn't
    exist for the human co-CEO.
 6. **Never assume a data source is available** — ask for keys/permissions early.
@@ -264,9 +260,10 @@ marketplace restrictions) are a feature none of them show.
    and executes. Every LLM output passes a deterministic validator.
 9. **Black-box first** — every feature must work without repo/CMS access.
    Deeper access unlocks more, but the default path is public-web-only.
-10. **Credits may be zero** — the free fallback chain keeps the pipeline alive
-    (hy3-free etc.). Free models are slower/rate-limited; don't treat their
-    output as equal quality. Check for "model" key in call results.
+10. **Keep providers separate** — Codex uses `~/.codex/auth.json` for the
+    ChatGPT subscription; DeepSeek keys are for raw completions only and must
+    never be passed to Codex. If DeepSeek is unavailable, configured z.ai and
+    OpenRouter fallbacks keep the pipeline alive, but may be rate-limited.
 
 ## 8. Parasites killed (2026-08-15)
 
