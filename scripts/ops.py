@@ -226,6 +226,9 @@ def export_configs(destination: Path) -> dict[str, bool]:
         "caddy": Path("/etc/caddy"),
         "headscale-config": Path("/etc/headscale/config.yaml"),
     }
+    audits = sorted((AGENCY_HOME / "core/agency-os").glob("AUDIT-*.md"))
+    if audits:
+        sources["agency-os-latest-audit"] = audits[-1]
     included: dict[str, bool] = {}
     with tarfile.open(destination, "w:gz") as archive:
         for name, path in sources.items():
