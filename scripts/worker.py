@@ -3324,7 +3324,12 @@ def _parse_composed_block(raw_output, block_type):
     parsed = _draft_parse_json(raw_output or "")
     if not isinstance(parsed, dict):
         return None
-    generated = parsed.get("content", parsed)
+    generated = parsed.get("content")
+    # Some JSON-mode providers emit the requested fields at top level while
+    # also including a null/string metadata key named content. Prefer a usable
+    # wrapper; otherwise validate the direct object shape.
+    if not isinstance(generated, dict) and not (isinstance(generated, str) and generated.strip()):
+        generated = {k: v for k, v in parsed.items() if k != "content"}
     if isinstance(generated, str) and block_type in ("intro", "prose"):
         generated = {"markdown": generated}
     return generated if isinstance(generated, dict) else None
