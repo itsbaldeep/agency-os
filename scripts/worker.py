@@ -47,43 +47,43 @@ DB_HOST = "100.64.0.1"
 DB_NAME = "agencyos"
 DB_USER = "agency"
 DB_PASS = os.environ.get("POSTGRES_PASSWORD", "")
-ZEN_URL = os.environ.get("OPENAI_BASE_URL", "https://opencode.ai/zen/v1") + "/chat/completions"
-ZEN_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.deepseek.com").rstrip("/")
+ZEN_URL = OPENAI_BASE_URL + "/chat/completions"
+ZEN_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 CH_AUTH = base64.b64encode(f"agency:{os.environ.get('CLICKHOUSE_PASSWORD','changeme_strong_password')}".encode()).decode()
 
 # ── per-stage model routing ───────────────────────────────────────────
 # Change any stage's model string here.
-# deepseek-v4-flash-free tested: reasoning-only model, outputs empty content
-#   for structured JSON prompts — NOT usable for pipeline stages.
-# big-pickle tested: works but costs MORE per call than deepseek-v4-flash
-#   due to higher input-token usage (272 vs 29 tokens).
-# deepseek-v4-flash is the cheapest reliable model at ~$0.00004/call.
-# Swap "cheap" to a future free model when one produces direct content output.
+# DeepSeek's OpenAI-compatible API is the primary raw-completions provider.
+# Keep model routing central so Discord model= prefixes remain predictable.
 MODEL_CONFIG = {
-    "cheap": "deepseek-v4-flash",               # classify, competitors, prompts, visibility
-    "quality": "deepseek-v4-flash",             # suggestion generation
+    "cheap": "deepseek-chat",                    # classify, competitors, prompts, visibility
+    "quality": "deepseek-chat",                  # suggestion generation
     "temp_structured": 0.1,                     # low temperature for JSON output
 }
-# Dedicated worker Zen key — set WORKER_ZEN_KEY in .env to separate worker
-# spend from OpenCode spend on the Zen dashboard. Falls back to OPENAI_API_KEY.
-WORKER_ZEN_KEY = os.environ.get("WORKER_ZEN_KEY") or os.environ.get("OPENAI_API_KEY", "")
-
-# Free-model fallback chain. When the primary model is blocked (CreditsError /
-# Insufficient balance / FreeUsageLimitError), retry with these at $0 cost.
-# Verified to return usable content: hy3-free, laguna-s-2.1-free, nemotron-3-ultra-free.
-FREE_FALLBACK_MODELS = ["hy3-free", "laguna-s-2.1-free", "nemotron-3-ultra-free", "deepseek-v4-flash-free", "mimo-v2.5-free"]
+# Each fallback carries its provider because the no-cost capacity is no longer
+# on one Zen host. Override OPENROUTER_FREE_MODEL if its current :free catalog
+# entry changes.
+FREE_FALLBACK_MODELS = (
+    ("https://api.z.ai/api/paas/v4", "ZAI_API_KEY", "glm-4.5-flash"),
+    ("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY",
+     os.environ.get("OPENROUTER_FREE_MODEL", "deepseek/deepseek-r1:free")),
+)
 
 # Hard token budget ceiling per task (run_brand_audit)
 TOKEN_BUDGET_TOTAL = 60_000  # abort if total prompt+completion exceeds this
 
-# Approximate pricing for deepseek-v4-flash: $0.15/M input, $0.60/M output
-INPUT_COST_PER_TOKEN = 0.15 / 1_000_000
-OUTPUT_COST_PER_TOKEN = 0.60 / 1_000_000
+# DeepSeek current published prices for deepseek-chat: $0.27/M input cache
+# miss, $0.07/M input cache hit, and $1.10/M output. The ledger has a single
+# input column, so default to the cache-miss rate unless usage says otherwise.
+INPUT_COST_PER_TOKEN = 0.27 / 1_000_000
+OUTPUT_COST_PER_TOKEN = 1.10 / 1_000_000
+CACHE_HIT_INPUT_COST_PER_TOKEN = 0.07 / 1_000_000
 
 MODEL_PRICING = {
-    "opencode/deepseek-v4-flash": {"in": INPUT_COST_PER_TOKEN, "out": OUTPUT_COST_PER_TOKEN},
-    # GLM-5.2 (Aetheria UI/shader/arch + ask) — $1.40/M in, $4.40/M out.
-    "opencode/glm-5.2": {"in": 1.40 / 1_000_000, "out": 4.40 / 1_000_000},
+    "deepseek-chat": {"in": INPUT_COST_PER_TOKEN, "out": OUTPUT_COST_PER_TOKEN},
+    "deepseek-reasoner": {"in": 0.55 / 1_000_000, "out": 2.19 / 1_000_000},
+    "codex": {"in": 0.0, "out": 0.0},  # subscription usage is not API-billed
 }
 
 # ── multi-stage content pipeline block schema ─────────────────────────
@@ -424,14 +424,27 @@ Requirements:
 
     return result
 
-def call_zen(prompt, model="deepseek-v4-flash", max_tokens=1500, temperature=None, timeout=90, _fb_index=0):
-    model = model.removeprefix("opencode/")
+def _normalise_api_model(model):
+    """Preserve old Discord prefixes while routing legacy Zen models to DeepSeek."""
+    model = (model or "deepseek-chat").removeprefix("opencode/")
+    return "deepseek-chat" if model in ("deepseek-v4-flash", "glm-5.2") else model
+
+
+def call_zen(prompt, model="deepseek-chat", max_tokens=1500, temperature=None, timeout=90, _fb_index=0,
+             _base_url=None, _api_key=None):
+    """OpenAI-format raw completion, with cross-provider fallback support.
+
+    The historical name is retained because scripts/jobs import it directly.
+    """
+    model = _normalise_api_model(model)
+    base_url = (_base_url or OPENAI_BASE_URL).rstrip("/")
+    api_key = ZEN_KEY if _api_key is None else _api_key
     body_dict = {"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": max_tokens}
     if temperature is not None:
         body_dict["temperature"] = temperature
     body = json.dumps(body_dict).encode()
-    req = urllib.request.Request(ZEN_URL, data=body,
-        headers={"Authorization": f"Bearer {WORKER_ZEN_KEY}", "Content-Type": "application/json", "User-Agent": "AgencyOS-Worker/1.0"})
+    req = urllib.request.Request(base_url + "/chat/completions", data=body,
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "User-Agent": "AgencyOS-Worker/1.0"})
     try:
         resp = urllib.request.urlopen(req, timeout=timeout)
         data = json.loads(resp.read())
@@ -440,8 +453,12 @@ def call_zen(prompt, model="deepseek-v4-flash", max_tokens=1500, temperature=Non
         usage = data.get("usage", {})
         pt = usage.get("prompt_tokens", 0)
         ct = usage.get("completion_tokens", 0)
-        is_free = model in FREE_FALLBACK_MODELS
-        cost = 0.0 if is_free else pt * INPUT_COST_PER_TOKEN + ct * OUTPUT_COST_PER_TOKEN
+        cache_hit = usage.get("prompt_cache_hit_tokens", 0)
+        cache_miss = usage.get("prompt_cache_miss_tokens", pt - cache_hit)
+        is_free = _fb_index > 0
+        cost = 0.0 if is_free else (cache_hit * CACHE_HIT_INPUT_COST_PER_TOKEN
+                                    + cache_miss * INPUT_COST_PER_TOKEN
+                                    + ct * OUTPUT_COST_PER_TOKEN)
         return {"ok": True, "content": content, "prompt_tokens": pt, "completion_tokens": ct, "cost": round(cost, 8), "model": model}
     except urllib.error.HTTPError as e:
         body = e.read().decode()[:500] if hasattr(e, 'read') else str(e)
@@ -450,10 +467,16 @@ def call_zen(prompt, model="deepseek-v4-flash", max_tokens=1500, temperature=Non
             "CreditsError" in body or "Insufficient balance" in body
             or "FreeUsageLimitError" in body or "Rate limit" in body
             or e.code in (401, 429)):
-            fb = FREE_FALLBACK_MODELS[_fb_index]
-            print(f"[worker] LLM {model} blocked ({e.code}), falling back to {fb}", flush=True)
-            return call_zen(prompt, model=fb, max_tokens=max_tokens, temperature=temperature,
-                            timeout=timeout, _fb_index=_fb_index + 1)
+            fb_base_url, fb_key_env, fb_model = FREE_FALLBACK_MODELS[_fb_index]
+            fb_key = os.environ.get(fb_key_env, "")
+            if not fb_key:
+                print(f"[worker] {fb_key_env} is unset; skipping {fb_model}", flush=True)
+                return call_zen(prompt, model=model, max_tokens=max_tokens, temperature=temperature,
+                                timeout=timeout, _fb_index=_fb_index + 1)
+            print(f"[worker] LLM {model} blocked ({e.code}), falling back to {fb_model} at {fb_base_url}", flush=True)
+            return call_zen(prompt, model=fb_model, max_tokens=max_tokens, temperature=temperature,
+                            timeout=timeout, _fb_index=_fb_index + 1,
+                            _base_url=fb_base_url, _api_key=fb_key)
         return {"ok": False, "error": f"HTTP {e.code}: {body}", "model": model}
     except (socket.timeout, urllib.error.URLError) as e:
         return {"ok": False, "error": f"TIMEOUT: {str(e)[:200]}", "model": model}
@@ -527,7 +550,7 @@ def handle_propose_fix(task):
     params = task["params"] or {}
     repo = params.get("repo", "")
     description = params.get("description", "")
-    model = params.get("model") or "opencode/deepseek-v4-flash"
+    model = params.get("model") or "deepseek-chat"
     timeout_s = int(params.get("timeout") or 600)
 
     proj = get_project(repo)
@@ -703,7 +726,7 @@ def handle_propose_fix(task):
                 "\"summary\": 2-3 sentence description of what changed and why, "
                 "\"notes\": 1-2 sentences on decisions or caveats}.\n"
                 f"Task: {description}\nDiff stat:\n{names_text}",
-                model="deepseek-v4-flash",
+                model="deepseek-chat",
             )
             if zen.get("ok"):
                 try:
@@ -828,7 +851,7 @@ def handle_agent_task(task):
     params = task["params"] or {}
     repo = params.get("repo", "")
     prompt = (params.get("prompt") or "").strip()
-    model = params.get("model") or "opencode/deepseek-v4-flash"
+    model = params.get("model") or "deepseek-chat"
     timeout_s = int(params.get("timeout") or 300)
 
     proj = get_project(repo)
@@ -891,7 +914,7 @@ def handle_agent_task(task):
 def handle_ask(task):
     params = task["params"] or {}
     question = (params.get("question") or "").strip()
-    model = params.get("model") or "opencode/glm-5.2"
+    model = params.get("model") or "deepseek-chat"
     timeout_s = int(params.get("timeout") or 300)
 
     if not question:
@@ -2604,7 +2627,7 @@ def handle_defend_audit(task):
         "You are summarizing a technical website audit for a non-technical business owner. "
         "Write 5-8 short plain sentences covering what works and what needs attention. Do not use jargon.\n\n"
         "Findings (JSON):\n" + json.dumps({c: cap for c, cap in capabilities}, default=str)[:4000],
-        model="deepseek-v4-flash", max_tokens=800)
+        model="deepseek-chat", max_tokens=800)
     if not result["ok"]:
         return result
     return {"ok": True, "content": result.get("content", ""),
@@ -2663,7 +2686,7 @@ def handle_assistant_turn(task):
               'Only include ACTION when the operator asked for work to be done.\n\n'
               f"LIVE STATE:\n{chr(10).join(live)}\n\nCONVERSATION:\n{conversation}\n\n{message}")
 
-    result = call_zen(prompt, model="glm-5.2", max_tokens=2500)
+    result = call_zen(prompt, model="deepseek-chat", max_tokens=2500)
     if not result["ok"]:
         return result
 

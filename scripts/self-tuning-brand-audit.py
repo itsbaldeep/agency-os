@@ -17,7 +17,8 @@ import json, os, sys, time, urllib.request, urllib.error, base64, socket, re, su
 
 # ── config ────────────────────────────────────────────────────────────────────
 ENV_PATH = "/home/agency/agency-os/.env"
-ZEN_URL = "https://opencode.ai/zen/v1/chat/completions"
+OPENAI_BASE_URL = "https://api.deepseek.com"
+ZEN_URL = ""
 ZEN_KEY = ""
 CH_AUTH = ""
 CH_HOST = "http://100.64.0.1:8123"
@@ -27,28 +28,38 @@ DB_USER = "agency"
 DB_PASS = ""
 
 def load_env():
-    global ZEN_KEY, CH_AUTH, DB_PASS
+    global OPENAI_BASE_URL, ZEN_URL, ZEN_KEY, CH_AUTH, DB_PASS
     with open(ENV_PATH) as f:
         for line in f:
             line = line.strip()
             if "=" not in line or line.startswith("#"): continue
             k, v = line.split("=", 1)
-            if k == "OPENAI_API_KEY": ZEN_KEY = v
+            os.environ[k] = v
+            if k == "OPENAI_BASE_URL": OPENAI_BASE_URL = v.rstrip("/")
+            elif k == "DEEPSEEK_API_KEY": ZEN_KEY = v
             elif k == "CLICKHOUSE_PASSWORD": CH_AUTH = base64.b64encode(f"agency:{v}".encode()).decode()
             elif k == "POSTGRES_PASSWORD": DB_PASS = v
 load_env()
+ZEN_URL = OPENAI_BASE_URL + "/chat/completions"
 
 import psycopg2, psycopg2.extras
 
 def db():
     return psycopg2.connect(host=DB_HOST, port=5432, dbname=DB_NAME, user=DB_USER, password=DB_PASS)
 
-FREE_FALLBACK_MODELS = ["hy3-free", "laguna-s-2.1-free", "nemotron-3-ultra-free", "deepseek-v4-flash-free", "mimo-v2.5-free"]
+FREE_FALLBACK_MODELS = (
+    ("https://api.z.ai/api/paas/v4", "ZAI_API_KEY", "glm-4.5-flash"),
+    ("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY",
+     os.environ.get("OPENROUTER_FREE_MODEL", "deepseek/deepseek-r1:free")),
+)
 
-def zen(prompt, model="deepseek-v4-flash", max_tokens=800, _fb_index=0):
+def zen(prompt, model="deepseek-chat", max_tokens=800, _fb_index=0, _base_url=None, _api_key=None):
+    model = "deepseek-chat" if model in ("deepseek-v4-flash", "glm-5.2") else model
+    base_url = (_base_url or OPENAI_BASE_URL).rstrip("/")
+    api_key = ZEN_KEY if _api_key is None else _api_key
     body = json.dumps({"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": max_tokens}).encode()
-    req = urllib.request.Request(ZEN_URL, data=body,
-        headers={"Authorization": f"Bearer {ZEN_KEY}", "Content-Type": "application/json", "User-Agent": "AgencyOS-Audit/1.0"})
+    req = urllib.request.Request(base_url + "/chat/completions", data=body,
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "User-Agent": "AgencyOS-Audit/1.0"})
     try:
         resp = urllib.request.urlopen(req, timeout=60)
         data = json.loads(resp.read())
@@ -62,9 +73,13 @@ def zen(prompt, model="deepseek-v4-flash", max_tokens=800, _fb_index=0):
             "CreditsError" in emsg or "Insufficient balance" in emsg
             or "FreeUsageLimitError" in emsg or "Rate limit" in emsg
             or "401" in emsg or "429" in emsg):
-            fb = FREE_FALLBACK_MODELS[_fb_index]
-            print(f"[audit] LLM {model} blocked, falling back to {fb}", flush=True)
-            return zen(prompt, model=fb, max_tokens=max_tokens, _fb_index=_fb_index + 1)
+            fb_base_url, fb_key_env, fb_model = FREE_FALLBACK_MODELS[_fb_index]
+            fb_key = os.environ.get(fb_key_env, "")
+            if not fb_key:
+                return zen(prompt, model=model, max_tokens=max_tokens, _fb_index=_fb_index + 1)
+            print(f"[audit] LLM {model} blocked, falling back to {fb_model} at {fb_base_url}", flush=True)
+            return zen(prompt, model=fb_model, max_tokens=max_tokens, _fb_index=_fb_index + 1,
+                       _base_url=fb_base_url, _api_key=fb_key)
         return {"ok": False, "error": emsg, "model": model}
 
 def crawl_homepage(domain):
@@ -223,7 +238,7 @@ def run_audit(domain, brand_id, category, competitors, prompts, market_tier=None
         results.append({"prompt": prompt, "cited": int(b), "competitors": cited_comps, "content": r["content"][:200]})
         detail = r["content"][:200].replace('\t',' ').replace('\n',' ')
         prompt_escaped = prompt.replace('\t',' ').replace('\n',' ')
-        sql = f"INSERT INTO default.ai_visibility_checks (brand_id, engine, prompt, cited, position, competitors_cited, detail) FORMAT TabSeparated\n{brand_id}\tzen/deepseek-v4-flash\t{prompt_escaped}\t{int(b)}\t{i+1}\t{cited_comps}\t{detail}"
+        sql = f"INSERT INTO default.ai_visibility_checks (brand_id, engine, prompt, cited, position, competitors_cited, detail) FORMAT TabSeparated\n{brand_id}\tdeepseek/deepseek-chat\t{prompt_escaped}\t{int(b)}\t{i+1}\t{cited_comps}\t{detail}"
         try:
             req = urllib.request.Request(f"{CH_HOST}/", data=sql.encode(), headers={"Authorization": f"Basic {CH_AUTH}"})
             urllib.request.urlopen(req, timeout=10)
@@ -252,7 +267,7 @@ def run_audit(domain, brand_id, category, competitors, prompts, market_tier=None
         for cname, cnt in comp_cited_counts.items():
             comp_citation_data[cname] = cnt
         summary = json.dumps({
-            "status":"completed","engine":"zen/deepseek-v4-flash","methodology":"Self-tuning audit. Category auto-detected from crawl. Competitors auto-proposed. 15 brand-neutral prompts auto-generated.",
+            "status":"completed","engine":"deepseek/deepseek-chat","methodology":"Self-tuning audit. Category auto-detected from crawl. Competitors auto-proposed. 15 brand-neutral prompts auto-generated.",
             "domain":domain,"category":category,
             "market_tier":market_tier or {"pricing_model":"?","target_customer":"?","go_to_market":"?"},
             "competitors":[{"name":c["name"],"domain":c.get("domain",""),"why":c.get("why","")} for c in competitors],

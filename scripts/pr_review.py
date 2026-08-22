@@ -30,16 +30,16 @@ def load_env():
 
 load_env()
 
-ZEN_URL = os.environ.get("OPENAI_BASE_URL", "https://opencode.ai/zen/v1").rstrip("/") + "/chat/completions"
-ZEN_KEY = os.environ.get("WORKER_ZEN_KEY") or os.environ.get("OPENAI_API_KEY", "")
+ZEN_URL = os.environ.get("OPENAI_BASE_URL", "https://api.deepseek.com").rstrip("/") + "/chat/completions"
+ZEN_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 
 # Fixer first, independent critic second — heterogeneous ensemble.
-REVIEW_MODELS = ["deepseek-v4-flash", "glm-5.2"]
+REVIEW_MODELS = ["deepseek-chat", "deepseek-reasoner"]
 
 # Rough USD pricing for cost accounting.
 _PRICES = {
-    "deepseek-v4-flash": {"in": 0.15 / 1_000_000, "out": 0.60 / 1_000_000},
-    "glm-5.2": {"in": 0.15 / 1_000_000, "out": 0.60 / 1_000_000},
+    "deepseek-chat": {"in": 0.27 / 1_000_000, "out": 1.10 / 1_000_000},
+    "deepseek-reasoner": {"in": 0.55 / 1_000_000, "out": 2.19 / 1_000_000},
 }
 
 REVIEW_PROMPT = (
