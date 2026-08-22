@@ -96,13 +96,18 @@ def main():
             "avail": human_bytes(disk.free), "use_perc": f"{round(disk.used / disk.total * 100)}%",
         },
     }
-    DESTINATION.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    # This snapshot contains names and aggregate host metrics only. The
+    # dashboard runs under an isolated non-root UID and mounts it read-only, so
+    # traversal/read permissions must not depend on matching host UIDs.
+    DESTINATION.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+    current_mode = DESTINATION.parent.stat().st_mode & 0o7777
+    os.chmod(DESTINATION.parent, current_mode | 0o055)
     fd, tmp_name = tempfile.mkstemp(prefix=".host-health.", dir=DESTINATION.parent)
     try:
         with os.fdopen(fd, "w") as handle:
             json.dump(payload, handle, separators=(",", ":"))
             handle.write("\n")
-        os.chmod(tmp_name, 0o600)
+        os.chmod(tmp_name, 0o644)
         os.replace(tmp_name, DESTINATION)
     finally:
         try:
