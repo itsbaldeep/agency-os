@@ -7,14 +7,14 @@ PGCONN="host=100.64.0.1 port=5432 dbname=agencyos user=agency"
 CADDY_APPS_DIR="/home/agency/agency-os/caddy-apps"
 
 approvals=$(psql "$PGCONN" -t -A -F'|' -c "
-    SELECT id, type, payload
+    SELECT id, type, payload, COALESCE(task_id::text, '')
     FROM approvals
     WHERE status='approved'
     ORDER BY requested_at
     LIMIT 10;
 " 2>/dev/null)
 
-while IFS='|' read -r id type payload; do
+while IFS='|' read -r id type payload task_id; do
     [ -z "$id" ] && continue
     echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) executing approval $id type=$type"
 
@@ -105,7 +105,27 @@ CADDY
             ;;
 
         *)
-            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) approval $id type=$type requires agent, skipping"
+            if [ -z "$task_id" ]; then
+                task_id=$(psql "$PGCONN" -t -A -c "
+                    WITH created AS (
+                      INSERT INTO tasks (type,status,params,triggered_by)
+                      VALUES ('execute_approval','queued',jsonb_build_object('approval_id',$id),'approval-executor')
+                      RETURNING id
+                    )
+                    UPDATE approvals SET task_id=created.id FROM created WHERE approvals.id=$id
+                    RETURNING created.id;
+                " | head -1)
+                echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) approval $id linked to task $task_id"
+            else
+                task_status=$(psql "$PGCONN" -t -A -c "SELECT status FROM tasks WHERE id=$task_id")
+                if [ "$task_status" = "done" ]; then
+                    psql "$PGCONN" -c "UPDATE approvals SET status='executed', executed_at=now() WHERE id=$id" >/dev/null
+                elif [ "$task_status" = "failed" ]; then
+                    psql "$PGCONN" -c "UPDATE approvals SET status='failed', note='Linked execution task failed' WHERE id=$id" >/dev/null
+                elif [ "$task_status" = "needs_input" ]; then
+                    psql "$PGCONN" -c "UPDATE approvals SET note='Linked execution task needs operator input' WHERE id=$id" >/dev/null
+                fi
+            fi
             ;;
     esac
 

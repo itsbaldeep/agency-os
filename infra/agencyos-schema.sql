@@ -120,7 +120,8 @@ CREATE TABLE public.approvals (
     requested_at timestamp with time zone DEFAULT now() NOT NULL,
     decided_at timestamp with time zone,
     executed_at timestamp with time zone,
-    note text
+    note text,
+    task_id integer
 );
 
 
@@ -642,7 +643,8 @@ CREATE TABLE public.content_items (
     task_id integer,
     compliance_flags jsonb DEFAULT '[]'::jsonb NOT NULL,
     structured jsonb,
-    content_blocks jsonb
+    content_blocks jsonb,
+    publish_task_id integer
 );
 
 
@@ -1437,7 +1439,8 @@ CREATE TABLE public.suggestions (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     rejection_reason text DEFAULT ''::text,
     action_type text DEFAULT 'monitor'::text NOT NULL,
-    compliance_flags jsonb DEFAULT '[]'::jsonb NOT NULL
+    compliance_flags jsonb DEFAULT '[]'::jsonb NOT NULL,
+    execution_task_id integer
 );
 
 
@@ -1485,7 +1488,8 @@ CREATE TABLE public.tasks (
     finished_at timestamp with time zone,
     announced_at timestamp with time zone,
     progress integer,
-    progress_text text
+    progress_text text,
+    parent_task_id integer
 );
 
 
@@ -2204,6 +2208,9 @@ CREATE INDEX idx_resume_versions_listing ON public.resume_versions USING btree (
 ALTER TABLE ONLY public.approvals
     ADD CONSTRAINT approvals_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.projects(id);
 
+ALTER TABLE ONLY public.approvals
+    ADD CONSTRAINT approvals_task_id_fkey FOREIGN KEY (task_id) REFERENCES public.tasks(id) ON DELETE SET NULL;
+
 
 --
 -- Name: audits audits_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
@@ -2339,6 +2346,9 @@ ALTER TABLE ONLY public.content_items
 
 ALTER TABLE ONLY public.content_items
     ADD CONSTRAINT content_items_task_id_fkey FOREIGN KEY (task_id) REFERENCES public.tasks(id);
+
+ALTER TABLE ONLY public.content_items
+    ADD CONSTRAINT content_items_publish_task_id_fkey FOREIGN KEY (publish_task_id) REFERENCES public.tasks(id) ON DELETE SET NULL;
 
 
 --
@@ -2588,6 +2598,12 @@ ALTER TABLE ONLY public.suggestions
 ALTER TABLE ONLY public.suggestions
     ADD CONSTRAINT suggestions_brand_id_fkey FOREIGN KEY (brand_id) REFERENCES public.brands(id) ON DELETE CASCADE;
 
+ALTER TABLE ONLY public.suggestions
+    ADD CONSTRAINT suggestions_execution_task_id_fkey FOREIGN KEY (execution_task_id) REFERENCES public.tasks(id) ON DELETE SET NULL;
+
+ALTER TABLE ONLY public.tasks
+    ADD CONSTRAINT tasks_parent_task_id_fkey FOREIGN KEY (parent_task_id) REFERENCES public.tasks(id) ON DELETE SET NULL;
+
 
 --
 -- Name: token_usage token_usage_project_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: agency
@@ -2602,4 +2618,3 @@ ALTER TABLE ONLY public.token_usage
 --
 
 \unrestrict 3VciH0ZSbf7g8vqVHHB7jUSjHueqnn4GepKb8THyylDBOSIHh8Zq7fZTrAx1BCz
-

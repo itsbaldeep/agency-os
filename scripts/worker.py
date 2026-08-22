@@ -109,6 +109,168 @@ CONTENT_BLOCK_TYPES = frozenset({
 def get_conn():
     return psycopg2.connect(host=DB_HOST, port=5432, dbname=DB_NAME, user=DB_USER, password=DB_PASS)
 
+
+SIDE_EFFECT_TASKS = frozenset({"publish_content", "execute_approval", "execute_suggestion", "propose_fix"})
+_failure_alerted_at = {}
+
+
+def classify_failure(error):
+    """Deterministic first aid. This classifies; it never asks an LLM to guess."""
+    text = (error or "").lower()
+    rules = (
+        (("credential", "api key", "token", "401", "403", "unauthorized"),
+         "credentials/access", "verify the named credential reference and external permission"),
+        (("timeout", "timed out", "rate limit", "429"),
+         "external capacity", "retry only after the provider recovers or the bounded retry window opens"),
+        (("validation", "invalid json", "failed these checks"),
+         "deterministic validation", "inspect the validator reason before spending on another generation"),
+        (("no handler", "unsupported"),
+         "unsupported workflow", "route this task through a registered handler or archive the dead UI path"),
+        (("worker restarted", "orphan"),
+         "worker interruption", "inspect side effects, then explicitly resume or requeue"),
+        (("dns", "connection", "network", "fetch failed"),
+         "network/data source", "verify the source exists and is reachable before retrying"),
+    )
+    for needles, category, action in rules:
+        if any(needle in text for needle in needles):
+            return category, action
+    return "application failure", "inspect the task error and reproduce deterministically"
+
+
+def notify_task_failure(task, error):
+    category, action = classify_failure(error)
+    now = time.time()
+    task_type = task.get("type", "unknown")
+    last = _failure_alerted_at.get(task_type, 0)
+    failed = total = 0
+    conn = None
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT count(*) FILTER (WHERE status='failed'), count(*) FROM tasks "
+            "WHERE type=%s AND created_at > now() - interval '24 hours'",
+            (task_type,),
+        )
+        failed, total = cur.fetchone()
+    except Exception as exc:
+        print(f"[worker] failure-rate lookup warning: {exc}", flush=True)
+    finally:
+        if conn:
+            conn.close()
+    rate = (failed / total) if total else 0
+    high_rate = failed >= 2 or (total >= 3 and rate >= 0.25)
+    if now - last < 1800 and not high_rate:
+        return
+    _failure_alerted_at[task_type] = now
+    prefix = "🚨 HIGH FAILURE RATE" if high_rate else "⚠️ task failed"
+    post_discord(
+        f"{prefix}: #{task['id']} `{task_type}`\n"
+        f"Category: **{category}** · 24h: {failed}/{total} failed ({rate:.0%})\n"
+        f"First aid: {action}\nError: {redact_secrets(str(error))[:450]}"
+    )
+
+
+def record_task_usage(cur, task, result):
+    """One task-level accounting path for both success and failure results."""
+    tokens_in = int(result.get("prompt_tokens") or 0)
+    tokens_out = int(result.get("completion_tokens") or 0)
+    cost = float(result.get("cost") or 0)
+    if not (tokens_in or tokens_out or cost):
+        return
+    cur.execute("SAVEPOINT record_task_usage")
+    try:
+        params = task.get("params") or {}
+        project_id = params.get("project_id")
+        lookups = (
+            ("brand_id", "SELECT project_id FROM brands WHERE id=%s"),
+            ("suggestion_id", "SELECT b.project_id FROM suggestions s JOIN brands b ON b.id=s.brand_id WHERE s.id=%s"),
+            ("content_item_id", "SELECT b.project_id FROM content_items ci JOIN brands b ON b.id=ci.brand_id WHERE ci.id=%s"),
+            ("approval_id", "SELECT project_id FROM approvals WHERE id=%s"),
+        )
+        for key, sql in lookups:
+            if project_id or not params.get(key):
+                continue
+            cur.execute(sql, (params[key],))
+            row = cur.fetchone()
+            # poll() uses RealDictCursor; maintenance callers may use tuples.
+            project_id = (next(iter(row.values())) if hasattr(row, "values") else row[0]) if row else None
+        harness_types = {"propose_fix", "agent_task", "ask", "onboard_project", "assistant_turn"}
+        model = result.get("model") or params.get("model") or (
+            "codex" if task.get("type") in harness_types else "deepseek-chat/mixed"
+        )
+        cur.execute(
+            "INSERT INTO token_usage (project_id,model,tokens_in,tokens_out,cost_usd) "
+            "VALUES (%s,%s,%s,%s,%s)",
+            (project_id, model, tokens_in, tokens_out, cost),
+        )
+        cur.execute("RELEASE SAVEPOINT record_task_usage")
+    except Exception as exc:
+        cur.execute("ROLLBACK TO SAVEPOINT record_task_usage")
+        print(f"[worker] token accounting warning for task {task.get('id')}: {exc}", flush=True)
+
+
+def update_workflow_link(cur, task, outcome, result=None, error=""):
+    params = task.get("params") or {}
+    result = result or {}
+    task_type = task.get("type")
+    if task_type == "execute_suggestion" and params.get("suggestion_id"):
+        status = {
+            "done": result.get("workflow_status", "implemented"),
+            "needs_input": "needs_input",
+            "failed": "failed",
+        }[outcome]
+        cur.execute(
+            "UPDATE suggestions SET status=%s, updated_at=now() WHERE id=%s",
+            (status, params["suggestion_id"]),
+        )
+    elif task_type == "publish_content" and params.get("content_item_id"):
+        status = {
+            "done": result.get("workflow_status", "published"),
+            "needs_input": "needs_publish_input",
+            "failed": "publish_failed",
+        }[outcome]
+        cur.execute(
+            "UPDATE content_items SET status=%s, updated_at=now() WHERE id=%s",
+            (status, params["content_item_id"]),
+        )
+    elif task_type == "execute_approval" and params.get("approval_id"):
+        if outcome == "done":
+            cur.execute(
+                "UPDATE approvals SET status='executed', executed_at=now(), note=%s WHERE id=%s",
+                (result.get("content", "")[:500], params["approval_id"]),
+            )
+        elif outcome == "failed":
+            cur.execute(
+                "UPDATE approvals SET status='failed', note=%s WHERE id=%s",
+                (str(error)[:500], params["approval_id"]),
+            )
+        else:
+            cur.execute(
+                "UPDATE approvals SET note=%s WHERE id=%s",
+                (("Linked task needs input: " + json.dumps(result.get("required_inputs", [])))[:500],
+                 params["approval_id"]),
+            )
+        content_id = result.get("linked_content_item_id")
+        if not content_id:
+            cur.execute("SELECT payload->>'content_item_id' FROM approvals WHERE id=%s", (params["approval_id"],))
+            row = cur.fetchone()
+            raw_id = (next(iter(row.values())) if hasattr(row, "values") else row[0]) if row else None
+            try:
+                content_id = int(raw_id) if raw_id else None
+            except (TypeError, ValueError):
+                content_id = None
+        if content_id:
+            content_status = {
+                "done": result.get("workflow_status", "published"),
+                "needs_input": "needs_publish_input",
+                "failed": "publish_failed",
+            }[outcome]
+            cur.execute(
+                "UPDATE content_items SET status=%s, updated_at=now() WHERE id=%s",
+                (content_status, content_id),
+            )
+
 def set_task_progress(task_id, pct, text=""):
     """Best-effort live progress for the dashboard (never fatal)."""
     try:
@@ -873,16 +1035,6 @@ def handle_propose_fix(task):
         _log = ("\n".join(all_log) + "\n") if all_log else ""
         _tail = (f"{findings[:1500]}\n" if outcome != "clean" and findings else "")
         post_discord(f"🗂 PR #{review_pr} OUTCOME **{outcome.upper()}**\n{_log}{_tail}")
-
-        try:
-            _tu = get_conn()
-            _tuc = _tu.cursor()
-            _tuc.execute("INSERT INTO token_usage (model, tokens_in, tokens_out, cost_usd) VALUES (%s, %s, %s, %s)",
-                         ("codex" if not os.environ.get("OPENCODE_FALLBACK") else (model or "opencode"), total_in, total_out, round(cost, 8)))
-            _tu.commit()
-            _tu.close()
-        except Exception as e:
-            print(f"[worker] Failed to record token_usage: {e}", flush=True)
 
         set_task_progress(task["id"], 100, "done")
 
@@ -2648,29 +2800,10 @@ def handle_defend_audit(task):
         model="deepseek-chat", max_tokens=800)
     if not result["ok"]:
         return result
-    # Keep the per-model spend ledger aligned with the task row. Most tasks
-    # report their token totals on `tasks`; this audit also needs its raw LLM
-    # call represented in `token_usage` for per-brand spend reporting.
-    try:
-        conn = get_conn()
-        try:
-            cur = conn.cursor()
-            cur.execute(
-                "INSERT INTO token_usage (project_id, model, tokens_in, tokens_out, cost_usd) "
-                "VALUES (%s, %s, %s, %s, %s)",
-                (project_id, result.get("model", "deepseek-chat"),
-                 result.get("prompt_tokens", 0), result.get("completion_tokens", 0),
-                 result.get("cost", 0)),
-            )
-            conn.commit()
-        finally:
-            conn.close()
-    except Exception as e:
-        print(f"[worker] Failed to record defend_audit token_usage: {e}", flush=True)
     return {"ok": True, "content": result.get("content", ""),
             "prompt_tokens": result.get("prompt_tokens", 0),
             "completion_tokens": result.get("completion_tokens", 0),
-            "cost": result.get("cost", 0)}
+            "cost": result.get("cost", 0), "model": result.get("model", "deepseek-chat")}
 
 
 def handle_assistant_turn(task):
@@ -2914,9 +3047,9 @@ def handle_content_research(task):
         if params.get("title"):
             outline_params["title"] = params["title"]
         cur.execute(
-            "INSERT INTO tasks (type, status, params, triggered_by) "
-            "VALUES ('content_outline', 'queued', %s, 'research-chain') RETURNING id",
-            (json.dumps(outline_params),))
+            "INSERT INTO tasks (type, status, params, triggered_by, parent_task_id) "
+            "VALUES ('content_outline', 'queued', %s, 'research-chain', %s) RETURNING id",
+            (json.dumps(outline_params), task["id"]))
         outline_task_id = cur.fetchone()[0]
         conn.commit()
     except Exception as e:
@@ -4041,18 +4174,249 @@ def handle_aetheria_work_block(task):
                   "detail": f"client touched in {commit_range}", "gate": "green", "decision": "proceed", "ok": 1})
     post_discord(f"aetheria ▸ {next_goal[:80]} ▸ green ▸ ${cost:.4f} ▸ {commit_range}")
 
-    try:
-        _tu = get_conn(); _tuc = _tu.cursor()
-        _tuc.execute("INSERT INTO token_usage (model, tokens_in, tokens_out, cost_usd) VALUES (%s,%s,%s,%s)",
-                     (model, total_in, total_out, round(cost, 8)))
-        _tu.commit(); _tu.close()
-    except Exception:
-        pass
-
     set_task_progress(task["id"], 100, "done")
     return {"ok": True, "content": json.dumps({"commit_range": commit_range, "next": new_next[:300],
                                                "changed": diff_names[:2000]}),
-            "prompt_tokens": total_in, "completion_tokens": total_out, "cost": round(cost, 8)}
+            "prompt_tokens": total_in, "completion_tokens": total_out, "cost": round(cost, 8),
+            "model": model}
+
+
+def _needs_input(message, required):
+    return {
+        "ok": False,
+        "status": "needs_input",
+        "error": message,
+        "content": message,
+        "required_inputs": required,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "cost": 0,
+    }
+
+
+def handle_execute_suggestion(task):
+    """Turn a suggestion approval into a linked, inspectable execution task."""
+    params = task.get("params") or {}
+    suggestion_id = params.get("suggestion_id")
+    if not suggestion_id:
+        return {"ok": False, "error": "execute_suggestion: suggestion_id is required"}
+    conn = get_conn()
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            "SELECT s.*, b.project_id, p.repo_name, p.local_path, p.agent_allowed "
+            "FROM suggestions s JOIN brands b ON b.id=s.brand_id "
+            "LEFT JOIN projects p ON p.id=b.project_id WHERE s.id=%s",
+            (suggestion_id,),
+        )
+        suggestion = cur.fetchone()
+    finally:
+        conn.close()
+    if not suggestion:
+        return {"ok": False, "error": f"execute_suggestion: suggestion {suggestion_id} not found"}
+
+    title = suggestion.get("title") or ""
+    rationale = suggestion.get("rationale") or ""
+    action_type = (suggestion.get("action_type") or "").lower()
+    title_lower = title.lower()
+    content_like = action_type == "content" or (
+        action_type == "create" and any(word in title_lower for word in ("blog", "article", "content", "landing page"))
+    )
+    if content_like:
+        keyword = (params.get("target_keyword") or "").strip()
+        urls = params.get("competitor_urls") or []
+        if isinstance(urls, str):
+            urls = [line.strip() for line in urls.splitlines() if line.strip()]
+        missing = []
+        if not keyword:
+            missing.append("target_keyword")
+        if not urls:
+            missing.append("competitor_urls")
+        if missing:
+            return _needs_input(
+                "Content execution needs a target keyword and public competitor URLs before research can start.",
+                missing,
+            )
+        routed = dict(task)
+        routed["params"] = {
+            "target_keyword": keyword,
+            "competitor_urls": urls,
+            "brand_id": suggestion["brand_id"],
+            "title": params.get("title") or title,
+            "suggestion_id": suggestion_id,
+        }
+        result = handle_content_research(routed)
+        if result.get("ok"):
+            result["workflow_status"] = "content_planning"
+        return result
+
+    if not suggestion.get("agent_allowed") or not suggestion.get("local_path") or not suggestion.get("repo_name"):
+        return _needs_input(
+            "This action has no authorized implementation surface. Add project access or concrete manual instructions.",
+            ["project_access_or_manual_instructions"],
+        )
+    routed = dict(task)
+    instructions = (params.get("instructions") or "").strip()
+    routed["params"] = {
+        "repo": suggestion["repo_name"],
+        "description": f"{title}\n\n{rationale}\n\nOperator context: {instructions}"[:3000],
+        "base": "main",
+        "suggestion_id": suggestion_id,
+    }
+    result = handle_propose_fix(routed)
+    if result.get("ok"):
+        result["workflow_status"] = "implementation_proposed"
+    return result
+
+
+def _project_env_value(project_path, name):
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name or ""):
+        return ""
+    try:
+        root = os.path.realpath(project_path)
+        allowed = ("/home/agency/projects/", "/home/agency/engagements/")
+        if not any(root.startswith(prefix) for prefix in allowed):
+            return ""
+        with open(os.path.join(root, ".env")) as handle:
+            for raw in handle:
+                if raw.startswith(name + "="):
+                    return raw.split("=", 1)[1].strip().strip('"').strip("'")
+    except OSError:
+        return ""
+    return ""
+
+
+def handle_publish_content(task):
+    """Publish only through an explicit destination adapter and credential reference."""
+    import html
+
+    params = task.get("params") or {}
+    content_id = params.get("content_item_id")
+    if not content_id:
+        return {"ok": False, "error": "publish_content: content_item_id is required"}
+    conn = get_conn()
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            "SELECT ci.id,ci.title,ci.body,ci.status,b.project_id,p.local_path,p.agent_allowed,"
+            "c.intake_params FROM content_items ci JOIN brands b ON b.id=ci.brand_id "
+            "LEFT JOIN projects p ON p.id=b.project_id "
+            "LEFT JOIN clients c ON c.brand_id=b.id WHERE ci.id=%s",
+            (content_id,),
+        )
+        item = cur.fetchone()
+    finally:
+        conn.close()
+    if not item:
+        return {"ok": False, "error": f"publish_content: content item {content_id} not found"}
+    if not (item.get("body") or "").strip():
+        return {"ok": False, "error": "publish_content: approved item has no composed body"}
+
+    destination = params.get("destination") or {}
+    if isinstance(destination, str):
+        destination = {"type": destination}
+    intake = item.get("intake_params") or {}
+    if isinstance(intake, str):
+        try:
+            intake = json.loads(intake)
+        except json.JSONDecodeError:
+            intake = {}
+    configured = intake.get("publication") if isinstance(intake, dict) else {}
+    if isinstance(configured, dict):
+        destination = {**configured, **destination}
+    driver = (destination.get("type") or "").lower()
+    if not driver:
+        return _needs_input(
+            "Content is approved, but this engagement has no publication adapter.",
+            ["destination.type", "destination configuration", "credential_ref"],
+        )
+    if driver != "wordpress":
+        return _needs_input(
+            f"The `{driver}` publication adapter is not configured for this engagement.",
+            ["supported adapter mapping", "destination path/endpoint", "credential_ref"],
+        )
+
+    base_url = (destination.get("base_url") or "").rstrip("/")
+    username = destination.get("username") or ""
+    credential_ref = destination.get("credential_ref") or ""
+    if not base_url.startswith("https://") or not username or not credential_ref:
+        return _needs_input(
+            "WordPress publishing requires HTTPS base_url, username, and an engagement env credential reference.",
+            ["base_url", "username", "credential_ref"],
+        )
+    password = _project_env_value(item.get("local_path") or "", credential_ref)
+    if not password:
+        return _needs_input(
+            "The named WordPress credential was not found in the engagement-owned .env file.",
+            [credential_ref],
+        )
+    paragraphs = [part.strip() for part in item["body"].split("\n\n") if part.strip()]
+    rendered = "\n".join(f"<p>{html.escape(part)}</p>" for part in paragraphs)
+    payload = json.dumps({"title": item["title"], "content": rendered, "status": "publish"}).encode()
+    auth = base64.b64encode(f"{username}:{password}".encode()).decode()
+    request = urllib.request.Request(
+        base_url + "/wp-json/wp/v2/posts",
+        data=payload,
+        method="POST",
+        headers={"Authorization": f"Basic {auth}", "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            published = json.loads(response.read())
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")[:300]
+        return {"ok": False, "error": f"WordPress publish HTTP {exc.code}: {body}"}
+    except Exception as exc:
+        return {"ok": False, "error": f"WordPress publish failed: {str(exc)[:300]}"}
+    return {
+        "ok": True,
+        "content": json.dumps({"post_id": published.get("id"), "url": published.get("link")}),
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "cost": 0,
+        "workflow_status": "published",
+    }
+
+
+def handle_execute_approval(task):
+    params = task.get("params") or {}
+    approval_id = params.get("approval_id")
+    if not approval_id:
+        return {"ok": False, "error": "execute_approval: approval_id is required"}
+    conn = get_conn()
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT id,type::text,payload FROM approvals WHERE id=%s", (approval_id,))
+        approval = cur.fetchone()
+    finally:
+        conn.close()
+    if not approval:
+        return {"ok": False, "error": f"execute_approval: approval {approval_id} not found"}
+    payload = approval.get("payload") or {}
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError:
+            payload = {}
+    if approval["type"] == "content" and payload.get("content_item_id"):
+        # Inputs supplied after the task entered needs_input override the
+        # original approval payload, while the content id stays immutable.
+        destination = payload.get("destination") or {}
+        if isinstance(params.get("destination"), dict):
+            destination = {**destination, **params["destination"]}
+        routed = dict(task)
+        routed["params"] = {
+            "approval_id": approval_id,
+            "content_item_id": payload["content_item_id"],
+            "destination": destination,
+        }
+        result = handle_publish_content(routed)
+        result["linked_content_item_id"] = payload["content_item_id"]
+        return result
+    return _needs_input(
+        f"Approval type `{approval['type']}` has no deterministic executor mapping.",
+        ["executor mapping", "required inputs"],
+    )
 
 
 DISPATCH = {
@@ -4072,6 +4436,9 @@ DISPATCH = {
     "onboard_project": handle_onboard_project,
     "self_review": handle_self_review,
     "competitor_scan": handle_competitor_scan,
+    "execute_suggestion": handle_execute_suggestion,
+    "publish_content": handle_publish_content,
+    "execute_approval": handle_execute_approval,
     # Archived 2026-08-15 (CEO directive): job-application automation + aetheria
     # autonomous dev loop are unrelated to the digital-marketing agency mission.
     # Handlers + tables kept in git for retrieval; removed from active dispatch.
@@ -4101,48 +4468,103 @@ def poll():
         handler = DISPATCH.get(ttype)
         if not handler:
             err = f"No handler for type: {ttype}"
-            cur.execute("UPDATE tasks SET status='failed', error=%s, finished_at=now() WHERE id=%s", (err, tid))
+            category, action = classify_failure(err)
+            cur.execute(
+                "UPDATE tasks SET status='failed', error=%s, result_ref=%s, finished_at=now() WHERE id=%s",
+                (err, json.dumps({"failure_category": category, "first_aid": action}), tid),
+            )
             conn.commit()
+            notify_task_failure(task, err)
             return True
         try:
             result = handler(task)
         except Exception as e:
-            cur.execute("UPDATE tasks SET status='failed', error=%s, finished_at=now() WHERE id=%s", (str(e)[:500], tid))
+            error = str(e)[:500]
+            category, action = classify_failure(error)
+            cur.execute(
+                "UPDATE tasks SET status='failed', error=%s, result_ref=%s, finished_at=now() WHERE id=%s",
+                (error, json.dumps({"failure_category": category, "first_aid": action}), tid),
+            )
+            update_workflow_link(cur, task, "failed", error=error)
             conn.commit()
             print(f"[worker] Task {tid} crashed in handler: {e}", flush=True)
+            notify_task_failure(task, error)
+            return True
+        if result.get("status") == "needs_input":
+            content = result.get("content") or result.get("error") or "Additional input is required"
+            cur.execute(
+                "UPDATE tasks SET status='needs_input', error=%s, result_ref=%s, "
+                "progress=100, progress_text='waiting for operator input', finished_at=now() WHERE id=%s",
+                (content[:500], json.dumps({"required_inputs": result.get("required_inputs", []),
+                                            "message": content})[:20000], tid),
+            )
+            record_task_usage(cur, task, result)
+            update_workflow_link(cur, task, "needs_input", result=result)
+            conn.commit()
+            post_discord(
+                f"🟡 Task #{tid} `{ttype}` needs input\n{content[:500]}\n"
+                f"Required: {', '.join(result.get('required_inputs', [])) or 'operator review'}"
+            )
+            print(f"[worker] Task {tid} needs input: {content[:200]}", flush=True)
             return True
         if result.get("ok"):
             content = result.get("content", "")
             cur.execute(
                 "UPDATE tasks SET status='done', prompt_tokens=%s, completion_tokens=%s, cost=%s, result_ref=%s, finished_at=now() WHERE id=%s",
-                (result["prompt_tokens"], result["completion_tokens"], result["cost"], content[:20000], tid)
+                (result.get("prompt_tokens", 0), result.get("completion_tokens", 0),
+                 result.get("cost", 0), content[:20000], tid)
             )
             # Link task_id to content_items row (created by handler, body already stored)
             _ci_id = result.get("content_item_id")
             if _ci_id:
                 cur.execute("UPDATE content_items SET task_id=%s WHERE id=%s", (tid, _ci_id))
+            record_task_usage(cur, task, result)
+            update_workflow_link(cur, task, "done", result=result)
             conn.commit()
             ch_trace({"project": "system", "actor": "worker", "action": f"task_done_{ttype}", "detail": f"Task {tid} completed: {result.get('prompt_tokens',0)} in / {result.get('completion_tokens',0)} out, cost ${result.get('cost',0)}", "gate": "green", "decision": "proceed", "ok": 1})
             print(f"[worker] Task {tid} done: {result.get('prompt_tokens',0)} in / {result.get('completion_tokens',0)} out tokens, ${result.get('cost',0)}", flush=True)
         else:
-            cur.execute("UPDATE tasks SET status='failed', error=%s, finished_at=now() WHERE id=%s", (result.get("error", "unknown")[:500], tid))
+            error = result.get("error", "unknown")[:500]
+            category, action = classify_failure(error)
+            cur.execute(
+                "UPDATE tasks SET status='failed', prompt_tokens=%s, completion_tokens=%s, "
+                "cost=%s, error=%s, result_ref=%s, finished_at=now() WHERE id=%s",
+                (result.get("prompt_tokens", 0), result.get("completion_tokens", 0),
+                 result.get("cost", 0), error,
+                 json.dumps({"failure_category": category, "first_aid": action}), tid),
+            )
+            record_task_usage(cur, task, result)
+            update_workflow_link(cur, task, "failed", result=result, error=error)
             conn.commit()
             ch_trace({"project": "system", "actor": "worker", "action": f"task_failed_{ttype}", "detail": f"Task {tid} failed: {result.get('error','')[:200]}", "gate": "green", "decision": "proceed", "ok": 0})
             print(f"[worker] Task {tid} failed: {result.get('error','')[:200]}", flush=True)
+            notify_task_failure(task, error)
         return True
     finally:
         conn.close()
 
 def start_up():
-    """Rescue any tasks left in 'running' by a prior crash."""
+    """Recover interrupted tasks without duplicating external side effects."""
     conn = get_conn()
     try:
         cur = conn.cursor()
-        cur.execute("UPDATE tasks SET status='failed', error='Worker restarted — task orphaned', finished_at=now() WHERE status='running'")
-        rescued = cur.rowcount
+        cur.execute(
+            "UPDATE tasks SET status='queued', started_at=NULL, progress_text='requeued after worker restart' "
+            "WHERE status='running' AND type <> ALL(%s)",
+            (list(SIDE_EFFECT_TASKS),),
+        )
+        requeued = cur.rowcount
+        cur.execute(
+            "UPDATE tasks SET status='needs_input', error='Worker restarted during a side-effecting task; inspect before retry', "
+            "finished_at=now(), progress_text='operator review required after restart' "
+            "WHERE status='running' AND type = ANY(%s)",
+            (list(SIDE_EFFECT_TASKS),),
+        )
+        review = cur.rowcount
         conn.commit()
-        if rescued:
-            print(f"[worker] Rescued {rescued} orphaned task(s)", flush=True)
+        if requeued or review:
+            print(f"[worker] restart recovery: {requeued} safely requeued, {review} need review", flush=True)
+            post_discord(f"🔄 Worker restart recovery: {requeued} task(s) requeued; {review} side-effect task(s) need review")
     finally:
         conn.close()
 
@@ -4160,12 +4582,27 @@ if __name__ == "__main__":
         try:
             _c = get_conn()
             _cu = _c.cursor()
-            _cu.execute("UPDATE tasks SET status='queued', started_at=NULL WHERE status='running' AND started_at < now() - interval '20 minutes'")
+            _cu.execute(
+                "UPDATE tasks SET status='queued', started_at=NULL, progress_text='requeued after stale timeout' "
+                "WHERE status='running' AND started_at < now() - interval '20 minutes' "
+                "AND type <> ALL(%s)",
+                (list(SIDE_EFFECT_TASKS),),
+            )
             _n = _cu.rowcount
+            _cu.execute(
+                "UPDATE tasks SET status='needs_input', error='Side-effecting task exceeded 20 minutes; inspect before retry', "
+                "finished_at=now(), progress_text='operator review required after timeout' "
+                "WHERE status='running' AND started_at < now() - interval '20 minutes' "
+                "AND type = ANY(%s)",
+                (list(SIDE_EFFECT_TASKS),),
+            )
+            _review = _cu.rowcount
             _c.commit()
             _c.close()
             if _n:
                 print(f"[worker] Requeued {_n} stale task(s)", flush=True)
+            if _review:
+                post_discord(f"🟡 {_review} side-effect task(s) exceeded 20 minutes and need operator review")
         except Exception as _e:
             print(f"[worker] Requeue error: {_e}", flush=True)
         time.sleep(2)
