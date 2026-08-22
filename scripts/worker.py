@@ -2922,7 +2922,7 @@ def handle_content_research(task):
             "ok": False,
             "error": "content_research validation failed: " + "; ".join(validation_fails[:12]),
             "prompt_tokens": total_pt, "completion_tokens": total_ct,
-            "cost": round(total_cost, 8),
+            "cost": round(total_cost, 8), "model": result.get("model"),
         }
 
     set_task_progress(task["id"], 85, "research: storing result")
@@ -3116,12 +3116,11 @@ def handle_content_outline(task):
         "4. Open with an intro block whose brief is a genuinely strong hook — front-loaded answer, "
         "specific, never 'In today's world'.\n"
         "5. Include a key_takeaways block near the top.\n"
-        "6. Ordering and count are fully free: use any number of any block type, repeat and "
-        "interleave as the strategy demands. There is NO rigid template and NO minimum per type.\n"
-        "7. Aim for a block count that produces an article meaningfully MORE thorough than the "
-        "competitors' average word count shown in the research — depth is a ranking advantage, but "
-        "every block must earn its place; no filler blocks. Neither a thin 5-block article nor a "
-        "bloated 25-block one.\n"
+        f"6. Ordering and type selection are dynamic, but count is bounded: return 10-{CONTENT_MAX_OUTLINE_BLOCKS} "
+        "blocks inclusive. Repeat and interleave types only as the strategy demands; there is no "
+        "rigid type template and no minimum per type.\n"
+        "7. Make the article more useful through specific briefs and evidence, not by adding more "
+        "blocks. Every block must earn its place; consolidate adjacent ideas instead of using filler.\n"
         "8. Use image_slot SPARINGLY — at most 2-3 across the whole article, only where a visual "
         "genuinely aids understanding (a diagram, a real screenshot concept). Prefer chart and table "
         "blocks to convey data, since those carry real information; images are decoration.\n"
@@ -3169,6 +3168,7 @@ def handle_content_outline(task):
     # image_slot.alt/prompt). Feed validation failures back for a corrected pass.
     total_pt = total_ct = 0
     total_cost = 0.0
+    last_model = params.get("model") or MODEL_CONFIG["quality"]
     blocks = None
     gen_title = None
     attempt_reasons = []
@@ -3180,6 +3180,7 @@ def handle_content_outline(task):
         total_pt += result.get("prompt_tokens", 0)
         total_ct += result.get("completion_tokens", 0)
         total_cost += result.get("cost", 0)
+        last_model = result.get("model") or last_model
         raw_out = result.get("content") or ""
         parsed_obj = _draft_parse_json(raw_out)
         if not isinstance(parsed_obj, dict) or not isinstance(parsed_obj.get("blocks"), list):
@@ -3190,7 +3191,8 @@ def handle_content_outline(task):
                 continue
             return {"ok": False,
                     "error": "outline: output was not a JSON object with blocks",
-                    "prompt_tokens": total_pt, "completion_tokens": total_ct, "cost": round(total_cost, 8)}
+                    "prompt_tokens": total_pt, "completion_tokens": total_ct,
+                    "cost": round(total_cost, 8), "model": last_model}
         blocks = parsed_obj["blocks"]
         gen_title = (parsed_obj.get("title") or "").strip()
         fails = _content_outline_validate(blocks, r.get("facts") or [])
@@ -3208,7 +3210,8 @@ def handle_content_outline(task):
                 continue
             return {"ok": False,
                     "error": "outline failed validation: " + "; ".join(fails),
-                    "prompt_tokens": total_pt, "completion_tokens": total_ct, "cost": round(total_cost, 8)}
+                    "prompt_tokens": total_pt, "completion_tokens": total_ct,
+                    "cost": round(total_cost, 8), "model": last_model}
 
     set_task_progress(task["id"], 85, "outline: storing blocks")
     _ = attempt_reasons
@@ -3235,7 +3238,7 @@ def handle_content_outline(task):
     return {"ok": True, "content": content,
             "prompt_tokens": total_pt, "completion_tokens": total_ct,
             "cost": round(total_cost, 8),
-            "content_item_id": ci_id}
+            "content_item_id": ci_id, "model": last_model}
 
 
 # ── Multi-stage content pipeline: Stage 3 content_compose ────────────
@@ -3562,6 +3565,7 @@ def handle_content_compose(task):
                 return {
                     "ok": False, "error": f"content_compose token budget {CONTENT_COMPOSE_TOKEN_BUDGET} exhausted",
                     "prompt_tokens": total_pt, "completion_tokens": total_ct, "cost": round(total_cost, 8),
+                    "model": last_model,
                 }
             correction = ""
             if local_fails:
@@ -3573,9 +3577,14 @@ def handle_content_compose(task):
                 temperature=MODEL_CONFIG["temp_structured"], timeout=120, json_mode=True,
             )
             if not block_result["ok"]:
+                total_pt += block_result.get("prompt_tokens", 0)
+                total_ct += block_result.get("completion_tokens", 0)
+                total_cost += block_result.get("cost", 0)
+                last_model = block_result.get("model") or last_model
                 return {
                     "ok": False, "error": block_result.get("error", "compose call failed"),
                     "prompt_tokens": total_pt, "completion_tokens": total_ct, "cost": round(total_cost, 8),
+                    "model": last_model,
                 }
             total_pt += block_result.get("prompt_tokens", 0)
             total_ct += block_result.get("completion_tokens", 0)
@@ -3585,6 +3594,7 @@ def handle_content_compose(task):
                 return {
                     "ok": False, "error": f"content_compose token budget {CONTENT_COMPOSE_TOKEN_BUDGET} exceeded",
                     "prompt_tokens": total_pt, "completion_tokens": total_ct, "cost": round(total_cost, 8),
+                    "model": last_model,
                 }
             parsed = _draft_parse_json(block_result.get("content") or "")
             generated = parsed.get("content") if isinstance(parsed, dict) else None
@@ -3607,6 +3617,7 @@ def handle_content_compose(task):
             return {
                 "ok": False, "error": f"compose block {idx} ({bt}) failed validation: " + "; ".join(local_fails),
                 "prompt_tokens": total_pt, "completion_tokens": total_ct, "cost": round(total_cost, 8),
+                "model": last_model,
             }
 
     fails = _content_compose_validate(filled, keyword)
@@ -3614,6 +3625,7 @@ def handle_content_compose(task):
         return {
             "ok": False, "error": "compose final validation failed: " + "; ".join(fails),
             "prompt_tokens": total_pt, "completion_tokens": total_ct, "cost": round(total_cost, 8),
+            "model": last_model,
         }
     set_task_progress(task["id"], 96, "compose: validating")
     body = _content_assemble_plain(filled)
