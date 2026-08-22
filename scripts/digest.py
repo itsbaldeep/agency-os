@@ -19,6 +19,7 @@ import ops  # noqa: E402
 
 
 LOG = Path("/home/agency/agency-os/logs/digest.log")
+HOST_HEALTH = Path("/home/agency/.local/state/agency-os/host-health.json")
 
 
 def env_value(key: str) -> str:
@@ -188,6 +189,28 @@ def recovery_and_credentials() -> tuple[str, list[str]]:
     return "\n".join((backup_line, offsite_line, credential_line)), alerts
 
 
+def system_maintenance() -> tuple[str, list[str]]:
+    try:
+        maintenance = json.loads(HOST_HEALTH.read_text()).get("maintenance") or {}
+    except (OSError, ValueError, TypeError):
+        return "⚠️ Host maintenance state unavailable", ["⚠️ Host maintenance state unavailable"]
+    count = int(maintenance.get("upgradable_count") or 0)
+    reboot = bool(maintenance.get("reboot_required"))
+    names = maintenance.get("reboot_packages") or []
+    lines = [f"Package updates pending: **{count}**"]
+    alerts = []
+    if count:
+        alerts.append(f"⚠️ {count} host package update(s) pending")
+    if reboot:
+        suffix = f" ({', '.join(names[:4])})" if names else ""
+        line = f"🚨 Host reboot required{suffix}"
+        lines.append(line)
+        alerts.append(line)
+    else:
+        lines.append("✅ No reboot pending")
+    return "\n".join(lines), alerts
+
+
 def estate_summary() -> str:
     result = rows("SELECT state,count(*) FROM projects GROUP BY state ORDER BY state")
     return "; ".join(f"**{count}** {state}" for state, count in result) or "No projects registered"
@@ -225,7 +248,9 @@ def main() -> int:
         queue, queue_alerts = work_queue()
         content, content_alerts = content_pipeline()
         recovery, recovery_alerts = recovery_and_credentials()
-        alerts = failure_alerts + queue_alerts + content_alerts + recovery_alerts
+        maintenance, maintenance_alerts = system_maintenance()
+        alerts = (failure_alerts + queue_alerts + content_alerts
+                  + recovery_alerts + maintenance_alerts)
         action_text = "\n".join(alerts[:8]) if alerts else "✅ No immediate action required"
         fields = [
             {"name": "🚨 Action required", "value": action_text[:1024], "inline": False},
@@ -233,6 +258,7 @@ def main() -> int:
             {"name": "❌ Failures", "value": failures[:1024], "inline": False},
             {"name": "📥 Work queue", "value": queue[:1024], "inline": False},
             {"name": "💾 Recovery + credentials", "value": recovery[:1024], "inline": False},
+            {"name": "🛠️ Host maintenance", "value": maintenance[:1024], "inline": False},
             {"name": "💰 Accounted usage", "value": tracked_spend()[:1024], "inline": False},
             {"name": "📦 Estate", "value": estate_summary()[:1024], "inline": False},
         ]

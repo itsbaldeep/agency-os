@@ -45,6 +45,34 @@ def memory():
     }
 
 
+def maintenance():
+    """Return names/counts only; never publish package source credentials."""
+    try:
+        output = run("apt", "list", "--upgradable")
+        packages = sorted({
+            line.split("/", 1)[0]
+            for line in output.splitlines()
+            if "/" in line and not line.startswith("Listing")
+        })
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        packages = []
+    reboot_marker = Path("/var/run/reboot-required")
+    reboot_packages = Path("/var/run/reboot-required.pkgs")
+    try:
+        reboot_names = sorted({
+            line.strip() for line in reboot_packages.read_text().splitlines()
+            if line.strip()
+        })
+    except OSError:
+        reboot_names = []
+    return {
+        "upgradable_count": len(packages),
+        "upgradable_packages": packages,
+        "reboot_required": reboot_marker.exists(),
+        "reboot_packages": reboot_names,
+    }
+
+
 def main():
     containers = []
     for line in run("docker", "stats", "--no-stream", "--format", "{{json .}}").splitlines():
@@ -61,6 +89,7 @@ def main():
         "containers": containers,
         "networks": sorted(n for n in networks if n.startswith("net-") and n != "net-control"),
         "memory": memory(),
+        "maintenance": maintenance(),
         "cpu": {"load_1m": load[0], "load_5m": load[1], "load_15m": load[2]},
         "disk": {
             "size": human_bytes(disk.total), "used": human_bytes(disk.used),
