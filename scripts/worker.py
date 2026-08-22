@@ -986,7 +986,7 @@ def slug(text):
 
 
 def handle_run_brand_audit(task):
-    import sys, importlib.util, re as _re
+    import sys, importlib.util, re
     SCRIPT_DIR = "/home/agency/agency-os/scripts"
     sys.path.insert(0, SCRIPT_DIR)
 
@@ -1131,7 +1131,7 @@ Homepage excerpt: {crawl['text'][:1000]}"""
         if existing_brand_id:
             brand_id_val = int(existing_brand_id)
         else:
-            slug = _re.sub(r'[^a-z0-9]+', '-', domain.split(".")[0].lower()).strip('-')
+            slug = re.sub(r'[^a-z0-9]+', '-', domain.split(".")[0].lower()).strip('-')
             cur.execute("INSERT INTO brands (name, slug, access_tier) VALUES (%s, %s, '0') ON CONFLICT (slug) DO UPDATE SET name=EXCLUDED.name RETURNING id",
                         (brand_name, slug))
             brand_id_val = cur.fetchone()["id"]
