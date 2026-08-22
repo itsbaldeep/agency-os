@@ -38,8 +38,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.0"
-          memory: 2g
+          cpus: "0.25"
+          memory: 512m
 
   minio:
     image: minio/minio:latest
