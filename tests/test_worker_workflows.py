@@ -137,6 +137,13 @@ class WorkerWorkflowTests(unittest.TestCase):
         failures = worker._content_outline_validate(blocks, [{"id": "fact-1"}])
         self.assertTrue(any("unknown fact_ids" in failure for failure in failures))
 
+    def test_outline_count_is_capped_before_substantive_validation(self):
+        blocks = [{"type": "prose", "brief": f"Section {i}"} for i in range(20)]
+        capped, original = worker._cap_outline_blocks(blocks)
+        self.assertEqual(len(capped), worker.CONTENT_MAX_OUTLINE_BLOCKS)
+        self.assertEqual(original, 20)
+        self.assertEqual(capped[-1]["brief"], "Section 17")
+
     def test_compose_block_keyword_contract_is_local(self):
         block = {"type": "prose", "brief": "Explain", "markdown": "Useful qualitative advice.",
                  "keyword_target": True, "fact_ids": [], "sources": []}

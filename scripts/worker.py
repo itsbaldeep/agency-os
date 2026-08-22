@@ -3049,6 +3049,19 @@ def _content_outline_validate(blocks, facts=None):
     return fails
 
 
+def _cap_outline_blocks(blocks):
+    """Enforce the mechanical count boundary without another model call.
+
+    Blocks are already ordered and self-contained. The substantive validator
+    runs after this cap, so an essential intro, keyword carrier, fact reference,
+    or type-specific field can never be silently lost.
+    """
+    original_count = len(blocks) if isinstance(blocks, list) else 0
+    if original_count <= CONTENT_MAX_OUTLINE_BLOCKS:
+        return blocks, None
+    return blocks[:CONTENT_MAX_OUTLINE_BLOCKS], original_count
+
+
 def handle_content_outline(task):
     """Stage 2: read the full research row, then one call_zen translates the
     competitive strategy into a typed block array without unsupported data."""
@@ -3171,6 +3184,7 @@ def handle_content_outline(task):
     last_model = params.get("model") or MODEL_CONFIG["quality"]
     blocks = None
     gen_title = None
+    compacted_from = None
     attempt_reasons = []
     for attempt in range(2):
         result = call_zen(prompt, model=params.get("model") or MODEL_CONFIG["quality"], max_tokens=3000,
@@ -3193,7 +3207,8 @@ def handle_content_outline(task):
                     "error": "outline: output was not a JSON object with blocks",
                     "prompt_tokens": total_pt, "completion_tokens": total_ct,
                     "cost": round(total_cost, 8), "model": last_model}
-        blocks = parsed_obj["blocks"]
+        blocks, source_count = _cap_outline_blocks(parsed_obj["blocks"])
+        compacted_from = source_count or compacted_from
         gen_title = (parsed_obj.get("title") or "").strip()
         fails = _content_outline_validate(blocks, r.get("facts") or [])
         if not gen_title:
@@ -3227,14 +3242,16 @@ def handle_content_outline(task):
              params.get("suggestion_id"),
              final_title[:200],
              json.dumps({"blocks": blocks, "target_keyword": r["target_keyword"],
-                         "research_id": research_id, "facts": r.get("facts") or []})))
+                         "research_id": research_id, "facts": r.get("facts") or [],
+                         "outline_compacted_from": compacted_from})))
         ci_id = cur.fetchone()["id"]
         conn.commit()
     finally:
         conn.close()
 
     set_task_progress(task["id"], 100, "outline complete")
-    content = json.dumps({"content_item_id": ci_id, "blocks": blocks})
+    content = json.dumps({"content_item_id": ci_id, "blocks": blocks,
+                          "outline_compacted_from": compacted_from})
     return {"ok": True, "content": content,
             "prompt_tokens": total_pt, "completion_tokens": total_ct,
             "cost": round(total_cost, 8),
