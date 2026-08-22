@@ -1,4 +1,4 @@
-# Agency OS — CEO Directive (2026-08-16, state locked for fresh-context handoff)
+# Agency OS — CEO Directive (state verified 2026-08-22)
 
 Authority: human co-CEO + AI co-CEO (Codex CLI). This file is the persistent
 strategic context — read it on every session start. It supersedes informal
@@ -39,90 +39,74 @@ content briefs → drafts → publish. **Attack lives in `run_brand_audit` +
 The loop: **defend → attack → prioritize → approve → execute → verify →
 report → repeat.** Every step visible on the dashboard.
 
-## 3. Honest assessment — where we actually are (2026-08-16)
-
-Progress since 2026-08-15: the report surface, capability rendering, ClickHouse
-stability, and the engagement cockpit are all live. What follows is the
-current truth, not the previous state.
+## 3. Honest assessment — where we actually are (2026-08-22)
 
 ### What works (verified live)
-- Control plane: Postgres ledger, ClickHouse traces, approval gates, cron,
-  Discord bot, dashboard, Codex CLI agent harness. Solid.
-- `defend_audit`: thin but functional — checks robots/sitemap/blog/feed/
-  WP REST/meta/OG/JSON-LD presence/image alt. Writes `capabilities` rows.
-  Accepts brand_id (auto-resolves domain, auto-creates project for black-box).
-  Ran for both active brands (10 capabilities each).
-- `run_brand_audit`: crawls homepage, LLM infers category/competitors/prompts,
-  queries LLM with brand-neutral prompts, substring-matches brand name for
-  "AI visibility." Writes `audits` + `competitors` + ClickHouse rows +
-  `suggestions`. cur2 bug fixed 2026-08-15; confidence gate + suggestion
-  engine now reachable. Fresh audit ran on localfermentco.in (audit 29,
-  7 suggestions).
-- **Report page** `/engagements/brand/<id>/report` — the pitchable surface:
-  executive summary (visibility %, confidence, gate alerts), capabilities
-  checklist with severity colors + per-capability metrics (URL counts,
-  lastmod dates, alt-text stats), gated capabilities (GSC/WP/Code locked
-  badges), per-prompt AI visibility table from ClickHouse, competitor
-  analysis (page counts, freshness), suggestions with capability gates +
-  implementation instructions + linked content/tasks, content & drafts,
-  audit history, recent activity, methodology + raw JSON. All surfaces
-  interlinked (report ↔ content ↔ tasks ↔ competitors ↔ engagements).
-- **Engagement cockpit** `/engagements`: unified clients/projects/brands,
-  hot-first sort by last activity, Black-box/Code/Scaffolded badges, pending
-  action counts, audit/content/capability badges, View Report buttons,
-  onboarding wizard (name+URL minimum, optional: industry, target market,
-  audience, competitors, stage, channel, notes). Deduped (Localfermentco x4 →
-  x1); junk removed (brand 22 "system", project 22, 8 junk clients, archived
-  infra projects excluded from list).
-- **Content pipeline**: research → outline → compose with typed GEO blocks;
-  content list rows clickable → preview page with sticky action bar
-  (Download/Approve/Regenerate/Compose Full Draft); outline rows get
-  "Continue to Draft"; content_blocks rendered as formatted HTML.
-- **Suggestion semantics**: black-box brands — no approve/reject buttons,
-  "Requires Code Access" locked badges, step-by-step how-to instructions,
-  "Generate Content" → /content/new?brand_id=&suggestion_id=, linked content
-  + task badges. Code-access brands — "Implement Now" creates a dev task.
-- `competitor_scan`: fetches competitor sitemaps, diffs against last snapshot.
-  paperboat.com (brand 4) baseline done (9 pages, 2022-10-31 lastmod).
-  Competitors page now links back to engagement+report, shows "why" text,
-  explains baseline-vs-delta status, flags unverified auto-proposed domains.
-- **Model-stack migration (2026-08-22):** Codex CLI, authenticated by the
-  ChatGPT subscription, is the coding-agent harness. Raw pipeline completions
-  use DeepSeek (`OPENAI_BASE_URL=https://api.deepseek.com`,
-  `DEEPSEEK_API_KEY`, `deepseek-chat`); cross-host fallbacks are GLM-4.5-Flash
-  at z.ai and an OpenRouter `:free` model. OpenCode remains an opt-in rollback
-  only (`OPENCODE_FALLBACK=1`).
-- **ClickHouse fixed**: memory 307MB→1.5GB (max_memory_usage 1500000000),
-  stuck DELETE mutations killed, pre-DELETE removed from audit script
-  (insert-only). ai_visibility_checks rows: brand 1=60, 2=60, 4=15.
+
+- The core control plane is Postgres, bounded ClickHouse, core MinIO, dashboard,
+  worker, Discord alerts/bot, Caddy, Headscale, OpenCode web, and Deployden.
+  The dashboard runs non-root without the Docker socket.
+- Core source is under `/home/agency/core`; `/home/agency/agency-os` is a
+  runtime-only deployment tree. Jobs 8–11 are retired and job 12 must never be
+  enabled. Core changes now use one deliberate, tested deployment path.
+- Approval and suggestion actions create linked tasks, can request additional
+  input, record test/outcome state, and link failures back to the initiating row.
+  Publication requires an explicit destination and credential reference.
+- The black-box report/cockpit is live. Jobright audit task 287 completed 15/15
+  bounded visibility samples, stored audit 32, selected reachable direct
+  substitutes (Simplify, Teal, LazyApply), created suggestions, and linked exact
+  model/tokens/cost to the task. Repeated audits now upsert one current value per
+  brand property instead of accumulating duplicate/stale metadata.
+- The content draft path is evidence-gated and resumable. Jobright research 288,
+  outline 291, and compose 297 created dashboard draft 20 with 18 validated blocks,
+  four reverified public evidence snippets/sources, no publish task, and durable
+  per-block checkpoints. Preview and task/spend links return HTTP 200.
+- Model routing is explicit: Codex uses the ChatGPT subscription for coding;
+  DeepSeek V4 Flash handles cheap/classification work and V4 Pro handles evidence
+  synthesis/content. Configured free raw providers precede OpenCode fallbacks.
+  OpenCode OpenAI OAuth works; the OpenCode Zen API credential currently returns
+  401 and remains a visible rotation/availability issue.
+- ClickHouse retains only actionable `events` and `ai_visibility_checks`, capped at
+  0.25 CPU / 512 MiB. Routine success heartbeats are filtered; failures, changes,
+  resolutions, and visibility evidence remain visible.
+- Daily checksummed recovery covers Postgres, both retained ClickHouse tables,
+  core MinIO, central credentials, configuration, and readable OpenCode state.
+  Saturday off-site acknowledgement keeps alerting until the human marks it done.
+- The secret-free host snapshot is readable by the non-root dashboard and exposes
+  RAM, disk, container use, pending packages, and reboot state. The daily Discord
+  digest surfaces task/content failure rates, recovery/credential debt, package
+  debt, and required reboot state rather than repeating routine success noise.
+- Core and engagement resources are separate. Hearth and Streamwise are soft
+  parked; Aetheria and the old jobs/resume stack are hard parked; Deployden is
+  non-parkable core; Weft is reserved and not created.
 
 ### What's broken or missing (the real gap)
-1. **No real SEO data sources.** No GSC property connected (key exists at
-   `gcs-api-key.json` but no property shared for any brand), no GA4, no
-   Ahrefs, no PageSpeed, no real SERP, no backlinks, no site crawl, no
-   schema validation. The "audit" is still homepage curl + LLM + sitemap
-   presence. A senior SEO specialist would call it a triage sketch.
-2. **Suggestion Approve is still a no-op status flip** for black-box brands
-   (buttons hidden on report; API endpoint exists but creates no task).
-3. **Activity timeline query** traces events with project="brands" not brand
-   name — brand activity may be sparse on brand pages.
-4. **No ads/campaigns/email/WhatsApp/social** — zero. SearchAtlas's tagline
-   ("runs your SEO, AEO, Google Ads, Meta Ads, content, and site health")
-   beats us ~10-fold in scope.
-5. **API balance can be exhausted** — DeepSeek pipeline completions then use
-   configured z.ai/OpenRouter fallbacks, which are rate-limited and lower quality.
-6. **AI-visibility is a training-knowledge proxy** — single LLM (DeepSeek),
-   substring match, no real ChatGPT/Perplexity/Gemini/Copilot citation data.
-   Citation matching has no word boundaries ("Apple" matches any fruit).
-7. **Competitors mostly inert stubs** — only paperboat.com scanned;
-   run_brand_audit competitors not yet wired to competitor_scan
-   (scan_enabled=false, no sitemap_url for the rest).
+
+1. **No first-party SEO outcome loop yet.** No Deployden GSC/GA4 property is
+   connected, and there is no production multi-page crawl/PageSpeed collector.
+2. **AI visibility is still a proxy.** It is DeepSeek training-knowledge sampling,
+   not live-web ChatGPT/Perplexity/Gemini/Copilot or first-party search visibility.
+3. **The content tournament is incomplete.** One evidence-gated outline and draft
+   work; multiple outline/draft variants with human selection are still planned.
+4. **Publication breadth is narrow.** WordPress has a tracked adapter but needs a
+   live credential/destination proof. Git/PHP/Java/Next.js adapters do not exist.
+5. **Recovery has two honest gaps.** The sudo helper lacks fixed-target
+   `backup-core` support for root-only state, and the first laptop copy/ack is due.
+6. **Fallback is degraded.** OpenCode OpenAI OAuth succeeds, but the desired free
+   OpenCode Zen credential is invalid; configured free API providers depend on
+   their own present credentials/rate limits.
+7. **Soft parks retain rollback weight.** Hearth's stopped containers/layers and a
+   root-owned `.next` build remain intentionally preserved until a later cleanup.
+8. **Host maintenance is due.** Twenty-three packages are upgradable and the host
+   requires a reboot for the installed kernel; Codex lacks passwordless authority
+   for package upgrades/reboot, so this remains visible rather than silently run.
 
 ### The honest bottom line
-We went from 5-10% to maybe 20-25% of what competitors do, on the surfaces
-that matter most for pitching (report + cockpit + content). The product
-surface is real now. The next leap requires real data (GSC/PageSpeed/crawl)
-and one real client to iterate against.
+
+Agency OS now has a proven black-box audit and evidence-gated draft baseline, not a
+complete marketing agency. The next leap is measured first-party SEO on Deployden:
+deterministic crawl + PageSpeed + GSC/GA4, then linked suggestions and verified
+execution. Do not expand into Weft or campaign automation before that loop repeats.
 
 ## 4. Competitive position (vs SearchAtlas, Synscribe, Alli AI)
 
@@ -140,90 +124,38 @@ approval gate. You own the data, you own the decision."*
 compliance checks (superlatives, health claims, review incentives,
 marketplace restrictions) are a feature none of them show.
 
-## 5. Grounded roadmap — black-box SEO first, then expand
+## 5. Grounded roadmap — measured SEO before surface expansion
 
-### Phase 0 — Fix what's broken (DONE except 2 items)
-- [x] Fix `cur2` bug in `handle_run_brand_audit` (DONE 2026-08-15)
-- [x] Kill parasites: Aetheria loop, job-application stack, dead projects (DONE)
-- [x] Dashboard: brand audit report page (DONE 2026-08-15 — the pitchable surface)
-- [x] Render `defend_audit` results on brand report page (capability chips) (DONE)
-- [x] Stop wiping visibility history — pre-DELETE removed, insert-only (DONE)
-- [x] ClickHouse memory fix + mutation cleanup (DONE 2026-08-15)
-- [x] Competitor domain validation + dedupe (DONE)
-- [x] Suggestion semantics: black-box instructions vs code implement vs content
-      links, capability-gated (DONE 2026-08-15)
-- [x] Content list/preview UI + engagements cockpit + onboarding wizard (DONE)
-- [x] Free-model fallback for exhausted credits (DONE 2026-08-16)
-- [ ] Wire suggestion Approve → creates a task (still a no-op status flip;
-      buttons hidden for black-box)
-- [ ] Fix activity timeline query (project="brands" vs brand name)
+The detailed, current sequence lives in `ROADMAP.md`; do not duplicate its state
+here. The strategic order is fixed:
 
-### Phase 1 — Real SEO data (1-2 weeks, needs user-provided keys)
-- [ ] **Google Search Console connector** — service-account OAuth per brand.
-      Nightly collector: queries, impressions, clicks, CTR, position → `signals`
-      table. **STATUS: key file exists (gcs-api-key.json, gitignored) but NO
-      GSC property shared for any brand. technoflavour is not addable by us;
-      localfermentco property unknown. Connector code not started — report
-      shows "Requires DNS TXT verification" gate until a property exists.**
-- [ ] **PageSpeed Insights API** — free, no auth. Add to `defend_audit`:
-      LCP/CLS/INP, mobile score, lab data. Best unblocked next step.
-- [ ] **Rich Results / Schema validation** — Google's Rich Results Test API.
-- [ ] **Real site crawl** — not just homepage; broken links, redirect chains,
-      orphans, title/meta length, canonical issues.
-- [ ] **Keyword table + tracking** — from GSC queries, positions over time.
+1. Stabilize and prove the black-box audit/content loop. **Done 2026-08-22** for
+   Jobright as an external baseline; no external publication occurred.
+2. Use Deployden as the first owned measurement loop: deterministic crawl,
+   PageSpeed/Core Web Vitals, then GSC/GA4 after property access is granted.
+3. Convert verified evidence into task-linked suggestions, selected content
+   variants, reviewed assets, approved publication, and outcome measurement.
+4. Add real, separately labeled AEO engines and multi-CMS adapters only after the
+   first-party loop repeats reliably.
+5. Create Weft only after its PRD. Jobright is the competitor baseline, not an
+   instruction to scaffold the product.
 
-### Phase 2 — Dashboard as the cockpit (partially DONE)
-- [x] Unified brand report page (audit + capabilities + competitors + suggestions
-      + content + history + activity) (DONE)
-- [x] Engagement list cockpit + onboarding wizard (DONE)
-- [x] Content pipeline visible on brand page + preview page (DONE)
-- [x] Competitor page linkage + scan-status explanation (DONE)
-- [ ] Charts: visibility trend, ranking movement, spend per brand (Chart.js)
-- [ ] Per-brand spend breakdown from `token_usage`
-- [ ] Pipeline config UI — `brand_pipelines` table (enabled_stages,
-      schedule_cron, Run Now). Already in DB, not rendered.
-
-### Phase 3 — Execution loop (2-4 weeks, needs client CMS access)
-- [ ] **WordPress publisher** — `publish_content` step in approval-executor.
-      Technoflavour has WP REST API available; missing only the Application
-      Password from the client.
-- [ ] **Content decay detection** — pages older than N months → refresh briefs.
-- [ ] **Findings → suggestions bridge** — defend_audit defects auto-filed.
-- [ ] **Competitor content scan** — wire run_brand_audit competitors to
-      competitor_scan (scan_enabled=true, populate sitemap_url). Only
-      paperboat.com scanned so far.
-- [ ] **Draft variants** — N {title, angle, outline} concepts → pick → draft.
-
-### Phase 4 — AEO + multi-engine (4-8 weeks)
-- [ ] **Real AI-visibility** — ChatGPT/Perplexity/Gemini/Copilot APIs, real
-      citations with word-boundary matching.
-- [ ] **AEO-structured content** — front-loaded answers, FAQ schema, llms.txt.
-- [ ] **Seasonal/event calendar** — Google Trends integration.
-- [ ] **Weekly marketing decision job** — signals + capabilities + gaps +
-      content inventory → prioritized plan into suggestions.
-
-### Parked (deliberate — not until 3+ paying clients)
-- Google/Meta ads automation, social media posting, email campaigns,
-  WhatsApp/RCS, PR marketplace, local SEO/GBP, ecommerce SEO, image generation,
-  multi-tenant SaaS, billing, RBAC, knowledge graph, learning engine.
-- Hearth/Streamwise/old scaffolded apps: archived, excluded from engagement
-  list. Do not revive.
+Campaign automation, multi-tenant SaaS, billing/RBAC, Grafana, and autonomous
+self-fixing remain parked until the core client workflow is dependable.
 
 ## 6. What I need from the human co-CEO (checklist)
 
 ### Immediate (unblocks Phase 1)
-- [ ] **GSC property access** — key file exists (gcs-api-key.json). Now need:
-      (a) a GSC property that can be shared with the service account for ANY
-      brand (technoflavour can't be added by us — it's not your Google account;
-      localfermentco needs the client's verification), or (b) permission to
-      create/verify a property for a domain we control. Until then the GSC
-      connector stays gated. The service-account email must be given the
-      property; DNS TXT verification is the standard path.
-- [ ] **Confirm technoflavour.com status** — real client/prospect? Do they
-      have a GSC property we can access?
-- [ ] **Fund the DeepSeek API account** (optional but recommended) —
-      `deepseek-chat` is the primary raw-completions model; configured
-      fallbacks are rate-limited and lower quality.
+- [ ] Copy the latest verified core backup to the laptop, then run the explicit
+      Saturday acknowledgement command. The VPS must continue nagging until done.
+- [ ] Human-rotate/acknowledge every unrotated central credential. Replace the
+      invalid OpenCode Zen auth only if its free fallback remains desired.
+- [ ] Grant Deployden GSC and GA4 property access to the existing service account.
+      No connector may pretend a property exists before that grant.
+- [ ] Extend the fixed-target sudo audit helper with `backup-core` if root-only
+      Headscale/system state should enter the recovery bundle.
+- [ ] Schedule the pending package upgrade and host reboot with an operator who has
+      the required sudo authority; verify every core service after the reboot.
 
 ### When we have a real client engagement
 - [ ] **WordPress Application Password** from the client (Phase 3 publisher).
@@ -233,42 +165,43 @@ marketplace restrictions) are a feature none of them show.
 - [ ] **OpenAI API key** (optional — real ChatGPT visibility, Phase 4).
 
 ### Strategic decisions only the human can make
-- [ ] **Public domain for the marketing site** — deployden.tech is infra.
-      Separate agency brand domain for public site + free audit lead magnet?
 - [ ] **Pricing model** — retainer vs per-project vs free-audit → paid execution?
-- [ ] **First real client** — technoflavour (your product) as case study, or a
-      real prospect?
+- [ ] **First real client proof** after Deployden — Technoflavour or a prospect?
+- [ ] **Weft PRD** when ready. Until supplied, Weft remains a ledger concept only.
 
 ## 7. Operating rules for the AI co-CEO
 
 1. **Challenge everything.** Don't assume code exists = works. Test it.
-2. **Use subagents for exploration** — keep the main context window for
-   decisions, not file reading.
-3. **Push context to files** — CEO_DIRECTIVE.md, ROADMAP.md. Never hold
-   critical state only in chat. On session start: read CEO_DIRECTIVE.md
-   then ROADMAP.md (ROADMAP has the system state block).
-4. **Deploy deliberately** — jobs 8 and 9 are disabled; do not re-enable
-   them as part of routine work. **WARNING: a manual agency-os deploy restarts
-   the worker and can orphan running tasks — re-queue affected tasks after a
-   deploy.** Deploy scripts SKIP when /home/agency/agency-os has uncommitted
-   changes — commit config drift there first.
-5. **Everything visible on the dashboard** — if it's not on :5001, it doesn't
+2. **Push durable state to the map** — CEO_DIRECTIVE.md, ROADMAP.md, the latest
+   audit execution log, and AGENTS.md. Do not create one-off Markdown handoffs.
+3. **Deploy deliberately** — jobs 8–11 are retired and job 12 stays disabled.
+   A worker restart can interrupt work: capture active tasks, batch source changes,
+   restart once, verify, and safely resume/requeue only after inspecting side effects.
+   Author under `/home/agency/core`; never author in runtime-only
+   `/home/agency/agency-os`.
+4. **Everything visible on the dashboard** — if it's not on :5001, it doesn't
    exist for the human co-CEO.
-6. **Never assume a data source is available** — ask for keys/permissions early.
-7. **Be honest about gaps** — the user respects honesty over false confidence.
-8. **Determinism first, LLM second** — LLMs generate proposals; code validates
-   and executes. Every LLM output passes a deterministic validator.
-9. **Black-box first** — every feature must work without repo/CMS access.
+5. **Never assume a data source is available** — establish keys, ownership,
+   permissions, scope, and a live probe before claiming a capability.
+6. **Be honest about gaps** — the user respects honesty over false confidence.
+7. **Determinism first, LLM second** — models generate bounded proposals/artifacts;
+   code verifies evidence, validates shape, records cost, and executes.
+8. **Black-box first** — every marketing feature must work without repo/CMS access.
    Deeper access unlocks more, but the default path is public-web-only.
-10. **Keep providers separate** — Codex uses `~/.codex/auth.json` for the
-    ChatGPT subscription; DeepSeek keys are for raw completions only and must
-    never be passed to Codex. If DeepSeek is unavailable, configured z.ai and
-    OpenRouter fallbacks keep the pipeline alive, but may be rate-limited.
+9. **Keep providers separate** — Codex uses subscription auth; DeepSeek credentials
+   are raw-completion credentials and must not leak into Codex/OpenCode OAuth.
+   Every fallback transition is attributed and alerts Discord/dashboard.
+10. **Respect core/engagement boundaries** — engagements own their data, secrets,
+    routes, storage, and containers. A parkable engagement can never become a core
+    runtime dependency.
 
-## 8. Parasites killed (2026-08-15)
+## 8. Retired and parked estate (verified 2026-08-22)
 
 | What | Action | Reversible via |
 |---|---|---|
-| Aetheria autonomous dev loop | Cron commented, job 12 disabled, DISPATCH entry removed, nav link removed | Uncomment + re-enable |
-| Job-application automation (7 handlers) | DISPATCH entries commented, /jobs nav removed. Code/tables preserved. | Uncomment DISPATCH block |
-| 7 dead projects | state → 'archived' | UPDATE state back |
+| Aetheria | Recovery bundles verified; live source, routes, containers, volumes, UI, handler, and job 12 removed/retired | Restore only from the recorded recovery bundle as a new isolated engagement |
+| Old jobs/resume SaaS | `/jobs` surfaces/handlers removed; isolated tables dumped then dropped | Restore the dump only into future Weft's separate app/database after its PRD |
+| Autonomous jobs 8–11 | Cron and DB scheduling retired; no deploy/review/merge loop | Reintroduction is a strategic decision, not routine rollback |
+| Hearth | Source/data/context preserved; containers and public routes stopped | Use its recovery refs/manifests for an explicit unpark |
+| Streamwise | Source/data/context preserved; no live containers or DNS route | Use its recovery refs/manifests for an explicit unpark |
+| Other legacy projects/docs | Recovery snapshot retained; live ledger/source clutter removed | Review the archived bundle, never silently re-import it |

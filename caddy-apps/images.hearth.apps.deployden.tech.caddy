@@ -1,3 +1,6 @@
 images.hearth.apps.deployden.tech {
-    reverse_proxy 100.64.0.1:9002
+    # Compatibility alias for URLs already stored in approved content. New
+    # Agency assets use assets.apps.deployden.tech; this no longer depends on
+    # the parked Hearth stack.
+    reverse_proxy 100.64.0.1:9010
 }

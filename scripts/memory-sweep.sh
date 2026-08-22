@@ -28,8 +28,8 @@ if [ "$free_mb" -lt "$THRESHOLD_MB" ]; then
         " 2>/dev/null
         echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) paused: $lru"
     else
-        echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) no preview containers to pause"
+        echo "NOOP low RAM but no preview containers can be paused"
     fi
 else
-    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) RAM ok: ${free_mb}MB free"
+    echo "NOOP RAM ok: ${free_mb}MB free"
 fi

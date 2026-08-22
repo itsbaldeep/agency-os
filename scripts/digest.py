@@ -1,228 +1,278 @@
 #!/usr/bin/env python3
-"""Daily Discord digest — system summary for the last 24h."""
+"""Action-oriented daily Discord digest for Agency OS."""
 
-import json, os, re, subprocess, sys, urllib.request
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
+from pathlib import Path
 
-ENV_PATH = "/home/agency/agency-os/.env"
-LOG = "/home/agency/agency-os/logs/digest.log"
 
-def env_val(key):
-    with open(ENV_PATH) as f:
-        for line in f:
-            line = line.strip()
-            if line.startswith(key + "="):
-                return line.split("=", 1)[1].strip()
-    return ""
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR))
+import ops  # noqa: E402
+
+
+LOG = Path("/home/agency/agency-os/logs/digest.log")
+HOST_HEALTH = Path("/home/agency/.local/state/agency-os/host-health.json")
+
+
+def env_value(key: str) -> str:
+    return ops.core_env().get(key, "")
+
 
 PGHOST = "100.64.0.1"
-PGUSER = "agency"
-PGPASS = env_val("POSTGRES_PASSWORD")
-WEBHOOK = env_val("DISCORD_WEBHOOK_URL")
-DB = "agencyos"
+PGUSER = env_value("POSTGRES_USER") or "agency"
+PGPASS = env_value("POSTGRES_PASSWORD")
+DB = env_value("POSTGRES_DB") or "agencyos"
+WEBHOOK = env_value("DISCORD_WEBHOOK_URL")
 
-def pg(query):
-    cmd = [
+
+def pg(query: str) -> str:
+    command = [
         "psql", "-h", PGHOST, "-U", PGUSER, "-d", DB,
-        "-t", "-A", "-F|", "-c", query,
+        "-t", "-A", "-F|", "-v", "ON_ERROR_STOP=1", "-c", query,
     ]
-    env = os.environ.copy()
-    env["PGPASSWORD"] = PGPASS
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=15, env=env)
-    return r.stdout.strip()
+    environment = os.environ.copy()
+    environment["PGPASSWORD"] = PGPASS
+    result = subprocess.run(
+        command, capture_output=True, text=True, timeout=20, env=environment
+    )
+    if result.returncode:
+        raise RuntimeError((result.stderr or "Postgres query failed").strip()[-300:])
+    return result.stdout.strip()
 
-def ch(query):
-    cmd = [
-        "docker", "exec", "agency-clickhouse",
-        "clickhouse-client", "-q", query,
-    ]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-    return r.stdout.strip()
 
-# ── 1. Spend ──────────────────────────────────────────────────────
-def get_spend():
-    rows_24h = pg("""
+def rows(query: str) -> list[list[str]]:
+    output = pg(query)
+    return [line.split("|") for line in output.splitlines() if line.strip()]
+
+
+def tracked_spend() -> str:
+    result = rows("""
         SELECT
-          COALESCE(ROUND(SUM(j.cost_usd)::numeric,4),0) AS j_usd,
-          COALESCE(ROUND(SUM(j.cost_inr)::numeric,2),0) AS j_inr,
-          COALESCE(ROUND(SUM(t.cost)::numeric,4),0)      AS t_usd
-        FROM job_runs j FULL JOIN tasks t ON false
-        WHERE j.started_at > now() - interval '24 hours'
-           OR t.created_at > now() - interval '24 hours'
-    """)
-    rows_mtd = pg("""
-        SELECT
-          COALESCE(ROUND(SUM(j.cost_usd)::numeric,4),0) AS j_usd,
-          COALESCE(ROUND(SUM(j.cost_inr)::numeric,2),0) AS j_inr,
-          COALESCE(ROUND(SUM(t.cost)::numeric,4),0)      AS t_usd
-        FROM job_runs j FULL JOIN tasks t ON false
-        WHERE j.started_at >= date_trunc('month', now())
-           OR t.created_at >= date_trunc('month', now())
-    """)
-    def parse(row):
-        parts = row.split("|")
-        return float(parts[0]), float(parts[1]), float(parts[2])
-    j24, ji24, t24 = parse(rows_24h)
-    jm, jim, tm = parse(rows_mtd)
-    usd_24 = round(j24 + t24, 4)
-    inr_24 = round(ji24, 2)
-    usd_mtd = round(jm + tm, 4)
-    inr_mtd = round(jim, 2)
-    return (f"24h: ${usd_24} / ₹{inr_24}  |  MTD: ${usd_mtd} / ₹{inr_mtd}", usd_24)
-
-# ── 2. Jobs ───────────────────────────────────────────────────────
-def get_jobs():
-    rows = pg("""
-        SELECT status, count(*) FROM job_runs
-        WHERE started_at > now() - interval '24 hours'
-        GROUP BY status ORDER BY status
-    """)
-    counts = {}
-    for line in rows.split("\n"):
-        line = line.strip()
-        if not line or "|" not in line:
-            continue
-        s, c = line.split("|", 1)
-        counts[s.strip()] = int(c.strip())
-    total = sum(counts.values())
-    failed = counts.get("failed", 0) or counts.get("Failed", 0)
-    parts = [f"**{total}** total"]
-    for s in sorted(counts):
-        c = counts[s]
-        if s == "failed":
-            parts.append(f"⚠️ {c} failed")
-        else:
-            parts.append(f"{c} {s}")
-    alert = ""
-    if failed:
-        alert = f"\n⚠️ **{failed} job(s) failed** — check logs"
-    return "; ".join(parts) + alert
-
-# ── 3. Async tasks ────────────────────────────────────────────────
-def get_tasks():
-    rows = pg("""
-        SELECT status, count(*) FROM tasks
+          COALESCE(ROUND(SUM(cost)::numeric,4),0),
+          COALESCE(SUM(prompt_tokens),0),
+          COALESCE(SUM(completion_tokens),0)
+        FROM tasks
         WHERE created_at > now() - interval '24 hours'
-        GROUP BY status ORDER BY status
     """)
-    counts = {}
-    for line in rows.split("\n"):
-        line = line.strip()
-        if not line or "|" not in line:
-            continue
-        s, c = line.split("|", 1)
-        counts[s.strip()] = int(c.strip())
-    total = sum(counts.values())
-    if total == 0:
-        return "0 (idle)"
-    parts = [f"**{total}** total"]
-    for s in sorted(counts):
-        parts.append(f"{counts[s]} {s}")
-    return "; ".join(parts)
+    usd, prompt, completion = result[0] if result else ("0", "0", "0")
+    return (
+        f"Tracked application work: **${usd}** · {int(prompt):,} input / "
+        f"{int(completion):,} output tokens\n"
+        "_Codex subscription sessions are not API-billed and are intentionally "
+        "outside this application total._"
+    )
 
-# ── 4. Approvals ──────────────────────────────────────────────────
-def get_approvals():
-    rows = pg("""
-        SELECT type, count(*) FROM approvals
-        WHERE status='pending' GROUP BY type ORDER BY type
-    """)
-    counts = {}
-    for line in rows.split("\n"):
-        line = line.strip()
-        if not line or "|" not in line:
-            continue
-        t, c = line.split("|", 1)
-        counts[t.strip()] = int(c.strip())
-    total = sum(counts.values())
-    if total == 0:
-        return "✅ None pending"
-    parts = [f"**{total}** pending"]
-    for t in sorted(counts):
-        parts.append(f"{t}: {counts[t]}")
-    return "; ".join(parts)
 
-# ── 5. Projects + alerts ──────────────────────────────────────────
-def get_projects():
-    rows = pg("""
-        SELECT name, state FROM projects ORDER BY name
+def failure_summary() -> tuple[str, list[str]]:
+    task_rows = rows("""
+        SELECT type, count(*) FILTER (WHERE status='failed'), count(*)
+        FROM tasks
+        WHERE created_at > now() - interval '24 hours'
+        GROUP BY type
+        HAVING count(*) FILTER (WHERE status='failed') > 0
+        ORDER BY count(*) FILTER (WHERE status='failed') DESC, type
     """)
-    lines = []
-    for line in rows.split("\n"):
-        line = line.strip()
-        if not line or "|" not in line:
-            continue
-        n, s = line.split("|", 1)
-        icon = {"live": "🟢", "preview": "🔵", "building": "🟡", "failed": "🔴"}.get(s.strip(), "⚪")
-        lines.append(f"{icon} **{n.strip()}** ({s.strip()})")
-    projects_text = "\n".join(lines) if lines else "None registered"
+    job_rows = rows("""
+        SELECT b.name, count(*) FILTER (WHERE r.status='failed'), count(*)
+        FROM job_runs r JOIN background_jobs b ON b.id=r.job_id
+        WHERE r.started_at > now() - interval '24 hours'
+        GROUP BY b.name
+        HAVING count(*) FILTER (WHERE r.status='failed') > 0
+        ORDER BY count(*) FILTER (WHERE r.status='failed') DESC, b.name
+    """)
+    alerts: list[str] = []
+    lines: list[str] = []
+    for kind, failed, total in task_rows:
+        rate = int(failed) / max(int(total), 1)
+        icon = "🚨" if int(failed) >= 2 or rate >= 0.25 else "⚠️"
+        line = f"{icon} task `{kind}`: {failed}/{total} failed ({rate:.0%})"
+        lines.append(line)
+        if icon == "🚨":
+            alerts.append(line)
+    for name, failed, total in job_rows:
+        rate = int(failed) / max(int(total), 1)
+        icon = "🚨" if int(failed) >= 2 or rate >= 0.25 else "⚠️"
+        line = f"{icon} job `{name}`: {failed}/{total} failed ({rate:.0%})"
+        lines.append(line)
+        if icon == "🚨":
+            alerts.append(line)
+    return ("\n".join(lines) if lines else "✅ No task/job failures in 24h", alerts)
 
-    # security scan findings in last 24h from ClickHouse
-    ch_count = ch("""
-        SELECT count() FROM events
-        WHERE action = 'security_scan'
-          AND ts > now() - INTERVAL 24 HOUR
+
+def work_queue() -> tuple[str, list[str]]:
+    queue = rows("""
+        SELECT status, count(*) FROM tasks
+        WHERE status IN ('queued','running') GROUP BY status ORDER BY status
     """)
+    stale = rows("""
+        SELECT count(*) FROM tasks
+        WHERE (status='running' AND started_at < now() - interval '20 minutes')
+           OR (status='queued' AND created_at < now() - interval '30 minutes')
+    """)
+    pending = rows("SELECT type,count(*) FROM approvals WHERE status='pending' GROUP BY type ORDER BY type")
+    stale_count = int(stale[0][0]) if stale else 0
+    queue_text = "; ".join(f"{count} {status}" for status, count in queue) or "idle"
+    approval_text = "; ".join(f"{count} {kind}" for kind, count in pending) or "none"
+    text = f"Tasks: **{queue_text}** · approvals: **{approval_text}**"
+    alerts = []
+    if stale_count:
+        alert = f"🚨 {stale_count} stale queued/running task(s)"
+        text += f"\n{alert}"
+        alerts.append(alert)
+    return text, alerts
+
+
+def content_pipeline() -> tuple[str, list[str]]:
+    result = rows("""
+        SELECT
+          count(*) FILTER (WHERE status='done'),
+          count(*) FILTER (WHERE status='failed'),
+          count(*)
+        FROM tasks
+        WHERE type IN ('content_research','content_outline','content_compose','generate_draft')
+          AND created_at > now() - interval '30 days'
+    """)
+    done, failed, total = (map(int, result[0]) if result else (0, 0, 0))
+    rate = failed / total if total else 0
+    text = f"30d content tasks: **{done} done · {failed} failed · {total} total**"
+    alerts = []
+    if total and rate >= 0.20:
+        alert = f"🚨 Content failure rate is {rate:.0%}; expansion remains gated"
+        text += f"\n{alert}"
+        alerts.append(alert)
+    elif total:
+        text += f" · failure rate {rate:.0%}"
+    else:
+        text += " · no recent sample"
+    return text, alerts
+
+
+def recovery_and_credentials() -> tuple[str, list[str]]:
+    state = ops.operations_status()
+    backup = state.get("last_backup") or {}
+    offsite = state["offsite"]
+    inventory = ops.credential_inventory()
+    unrotated = [item for item in inventory if not item["human_rotated_at"]]
+    weak = [item for item in inventory if item["placeholder_like"]]
+    alerts: list[str] = []
+    if backup:
+        backup_line = f"Last core backup: `{backup.get('at','unknown')}`"
+        if not backup.get("root_state_included"):
+            root_alert = "⚠️ Root-level system snapshot (units/sudo/firewall) is not yet bundled; application data is included"
+            backup_line += f"\n{root_alert}"
+            alerts.append(root_alert)
+    else:
+        backup_line = "🚨 No successful core backup recorded"
+        alerts.append(backup_line)
+    if offsite["overdue"]:
+        offsite_line = (
+            f"🚨 Laptop/off-site copy is due for Saturday {offsite['required_since']}. "
+            "After SCP, mark it done in Operations."
+        )
+        alerts.append(offsite_line)
+    else:
+        offsite_line = f"✅ Off-site copy acknowledged {offsite['confirmed_on']}"
+    credential_line = f"Credential audit: **{len(unrotated)} not human-rotated**"
+    if weak:
+        names = ", ".join(sorted({item["name"] for item in weak}))
+        weak_line = f"🚨 Weak/placeholder-like credentials: {names}"
+        credential_line += f"\n{weak_line}"
+        alerts.append(weak_line)
+    return "\n".join((backup_line, offsite_line, credential_line)), alerts
+
+
+def system_maintenance() -> tuple[str, list[str]]:
     try:
-        scan_count = int(ch_count.strip())
-    except (ValueError, AttributeError):
-        scan_count = 0
-    alert_line = ""
-    if scan_count > 0:
-        alert_line = f"\n🔍 Security scans ran **{scan_count}x** in 24h"
-    return projects_text + alert_line
+        maintenance = json.loads(HOST_HEALTH.read_text()).get("maintenance") or {}
+    except (OSError, ValueError, TypeError):
+        return "⚠️ Host maintenance state unavailable", ["⚠️ Host maintenance state unavailable"]
+    count = int(maintenance.get("upgradable_count") or 0)
+    reboot = bool(maintenance.get("reboot_required"))
+    names = maintenance.get("reboot_packages") or []
+    lines = [f"Package updates pending: **{count}**"]
+    alerts = []
+    if count:
+        alerts.append(f"⚠️ {count} host package update(s) pending")
+    if reboot:
+        suffix = f" ({', '.join(names[:4])})" if names else ""
+        line = f"🚨 Host reboot required{suffix}"
+        lines.append(line)
+        alerts.append(line)
+    else:
+        lines.append("✅ No reboot pending")
+    return "\n".join(lines), alerts
 
-# ── Discord send ──────────────────────────────────────────────────
-def send_discord(title, fields, color):
+
+def estate_summary() -> str:
+    result = rows("SELECT state,count(*) FROM projects GROUP BY state ORDER BY state")
+    return "; ".join(f"**{count}** {state}" for state, count in result) or "No projects registered"
+
+
+def send_discord(fields: list[dict[str, object]], critical: bool) -> int:
+    if not WEBHOOK:
+        return -1
     embed = {
-        "title": title,
-        "color": color,
+        "title": "Agency OS — action digest",
+        "description": "Stabilization first: exceptions and required decisions only.",
+        "color": 0xFF4757 if critical else 0x2ED573,
         "fields": fields,
-        "footer": {"text": f"Agency OS · {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"},
+        "footer": {"text": f"Agency OS · {datetime.now(timezone.utc):%Y-%m-%d %H:%M UTC}"},
     }
-    body = json.dumps({"embeds": [embed]}).encode()
-    req = urllib.request.Request(WEBHOOK, data=body, method="POST")
-    req.add_header("Content-Type", "application/json")
-    req.add_header("User-Agent", "AgencyOS-Digest/1.0")
+    request = urllib.request.Request(
+        WEBHOOK,
+        data=json.dumps({"embeds": [embed]}).encode(),
+        headers={"Content-Type": "application/json", "User-Agent": "AgencyOS-Digest/2.0"},
+        method="POST",
+    )
     try:
-        resp = urllib.request.urlopen(req, timeout=15)
-        return resp.status
-    except urllib.error.HTTPError as e:
-        return e.code
-    except Exception as e:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            return response.status
+    except urllib.error.HTTPError as exc:
+        return exc.code
+    except Exception:
         return -1
 
-# ── Main ──────────────────────────────────────────────────────────
-def main():
-    with open(LOG, "a") as log:
-        log.write(f"{datetime.now(timezone.utc).isoformat()} digest starting\n")
 
-        spend_text, usd = get_spend()
-        jobs_text = get_jobs()
-        tasks_text = get_tasks()
-        approvals_text = get_approvals()
-        projects_text = get_projects()
-
+def main() -> int:
+    LOG.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        failures, failure_alerts = failure_summary()
+        queue, queue_alerts = work_queue()
+        content, content_alerts = content_pipeline()
+        recovery, recovery_alerts = recovery_and_credentials()
+        maintenance, maintenance_alerts = system_maintenance()
+        alerts = (failure_alerts + queue_alerts + content_alerts
+                  + recovery_alerts + maintenance_alerts)
+        action_text = "\n".join(alerts[:8]) if alerts else "✅ No immediate action required"
         fields = [
-            {"name": "💰 Spend", "value": spend_text, "inline": False},
-            {"name": "⚙️  Scheduled Jobs (24h)", "value": jobs_text, "inline": True},
-            {"name": "🧠 Async Tasks (24h)", "value": tasks_text, "inline": True},
-            {"name": "📋 Approvals", "value": approvals_text, "inline": False},
-            {"name": "📦 Projects", "value": projects_text, "inline": False},
+            {"name": "🚨 Action required", "value": action_text[:1024], "inline": False},
+            {"name": "📝 Content reliability", "value": content[:1024], "inline": False},
+            {"name": "❌ Failures", "value": failures[:1024], "inline": False},
+            {"name": "📥 Work queue", "value": queue[:1024], "inline": False},
+            {"name": "💾 Recovery + credentials", "value": recovery[:1024], "inline": False},
+            {"name": "🛠️ Host maintenance", "value": maintenance[:1024], "inline": False},
+            {"name": "💰 Accounted usage", "value": tracked_spend()[:1024], "inline": False},
+            {"name": "📦 Estate", "value": estate_summary()[:1024], "inline": False},
         ]
+        status = send_discord(fields, bool(alerts))
+        with LOG.open("a", encoding="utf-8") as log:
+            log.write(f"{ops.iso_now()} digest sent status={status} alerts={len(alerts)}\n")
+        print(f"digest status={status} alerts={len(alerts)}")
+        return 0 if 200 <= status < 300 else 1
+    except Exception as exc:
+        with LOG.open("a", encoding="utf-8") as log:
+            log.write(f"{ops.iso_now()} digest failed: {str(exc)[:300]}\n")
+        print(f"digest failed: {str(exc)[:300]}", file=sys.stderr)
+        return 1
 
-        color = 0x00FF00 if usd < 0.1 else 0xFFA500
-        status = send_discord("🌅 Agency OS Daily Digest", fields, color)
-        log.write(f"{datetime.now(timezone.utc).isoformat()} digest sent — HTTP {status}\n")
-
-        # Print for job_runs detail capture
-        print(f"Spend: {spend_text}")
-        print(f"Jobs: {jobs_text}")
-        print(f"Tasks: {tasks_text}")
-        print(f"Approvals: {approvals_text}")
-        print(f"Projects: {projects_text}")
-        print(f"Discord HTTP {status}")
-
-        sys.exit(0 if str(status).startswith("2") else 1)
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

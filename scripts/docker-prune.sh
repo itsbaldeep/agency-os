@@ -14,8 +14,9 @@ SPACE_NOW=$(df -h / | tail -1 | awk '{print $5}')
 
 echo "$DATE reclaimed=$RECLAIMED space=$SPACE_NOW" >> "$LOG_FILE"
 
-# Log to ClickHouse via orch trace
-if command -v orch &>/dev/null; then
+# job_runs already proves the cron executed. Emit an event only when the prune
+# actually reclaimed something; zero-result heartbeats add no operator value.
+if [[ "$RECLAIMED" != "unknown" && ! "$RECLAIMED" =~ ^0+(\.0+)?[[:space:]]*[kMGTP]?B$ ]] && command -v orch &>/dev/null; then
     orch trace "$(cat <<JSON
 {
     "project": "system",

@@ -1,39 +1,48 @@
 #!/bin/bash
-# Health check — probe running containers, write results to Postgres
+# Health check — probe expected active containers; retain changes + hourly heartbeat
 set -e
 
 PGCONN="host=100.64.0.1 port=5432 dbname=agencyos user=agency"
 export PGPASSWORD=$(grep POSTGRES_PASSWORD /home/agency/agency-os/.env | cut -d= -f2)
 
-# Get all running services
-services=$(docker ps --format '{{.Names}}' 2>/dev/null)
+services=$(psql "$PGCONN" -t -A -F'|' -c "
+  SELECT s.id,s.name,s.kind,COALESCE(s.container,'')
+  FROM services s JOIN projects p ON p.id=s.project_id
+  WHERE p.lifecycle='active' AND s.status='running'
+  ORDER BY s.id
+" 2>/dev/null)
 
-while IFS= read -r container; do
-    # Skip control plane containers
-    if [[ "$container" == "agency-postgres" || "$container" == "agency-clickhouse" ]]; then
-        continue
-    fi
-
-    # Check if container is running
-    status=$(docker inspect --format='{{.State.Running}}' "$container" 2>/dev/null || echo "false")
-
-    if [ "$status" = "true" ]; then
+written=0
+while IFS='|' read -r service_id service_name kind container; do
+    [ -z "$service_id" ] && continue
+    if [ -n "$container" ] && [ "$(docker inspect --format='{{.State.Running}}' "$container" 2>/dev/null || true)" = "true" ]; then
         healthy=true
         detail="running"
+    elif [ "$kind" = "systemd" ] && [ "$(systemctl is-active "$service_name" 2>/dev/null || true)" = "active" ]; then
+        healthy=true
+        detail="active"
     else
         healthy=false
-        detail="not running"
+        detail="expected active service is absent"
     fi
-
-    # Write to Postgres
-    psql "$PGCONN" -c "
-        INSERT INTO health_checks (service_id, healthy, detail)
-        SELECT s.id, $healthy, '$detail'
-        FROM services s
-        WHERE s.container = '$container'
-        LIMIT 1;
-    " 2>/dev/null || true
-
+    inserted=$(psql "$PGCONN" -q -t -A -c "
+      INSERT INTO health_checks (service_id,healthy,detail)
+      SELECT $service_id,$healthy,'$detail'
+      WHERE NOT EXISTS (
+        SELECT 1 FROM health_checks h
+        WHERE h.service_id=$service_id AND h.healthy=$healthy
+          AND h.ts > now()-interval '1 hour'
+      ) RETURNING id
+    " 2>/dev/null)
+    [ -n "$inserted" ] && written=$((written + 1))
 done <<< "$services"
 
-echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) health check done"
+# Produce the dashboard's read-only host snapshot. This replaces a Docker
+# control-socket mount inside the web container.
+/usr/bin/python3 /home/agency/agency-os/scripts/collect-host-health.py
+
+if [ "$written" -eq 0 ]; then
+    echo "NOOP health state unchanged"
+else
+    echo "health state recorded for $written service(s)"
+fi
