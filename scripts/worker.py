@@ -3916,6 +3916,9 @@ def handle_publish_content(task):
 
 
 def handle_execute_approval(task):
+    import re as _re
+    import subprocess as _subprocess
+
     params = task.get("params") or {}
     approval_id = params.get("approval_id")
     if not approval_id:
@@ -3950,6 +3953,96 @@ def handle_execute_approval(task):
         result = handle_publish_content(routed)
         result["linked_content_item_id"] = payload["content_item_id"]
         return result
+    if approval["type"] == "dns":
+        return _needs_input(
+            "DNS approval cannot be truthfully executed until a DNS provider and engagement-owned credential reference are supplied.",
+            ["dns_provider", "credential_ref", "zone_or_record_identifier"],
+        )
+    if approval["type"] in ("deploy", "apex-deploy"):
+        entries = []
+        if payload.get("subdomain") and payload.get("port"):
+            entries.append((payload["subdomain"], payload["port"]))
+        for service in payload.get("services") or []:
+            if not isinstance(service, dict):
+                continue
+            entries.append((service.get("dns") or service.get("subdomain") or service.get("name"),
+                            service.get("port")))
+        if approval["type"] == "apex-deploy" and payload.get("domain") and payload.get("port"):
+            entries = [(payload["domain"], payload["port"])]
+        if not entries:
+            return _needs_input("Deploy approval needs at least one hostname and upstream port.",
+                                ["hostname", "port"])
+
+        normalized = []
+        for hostname, raw_port in entries:
+            hostname = str(hostname or "").strip().lower()
+            try:
+                port = int(raw_port)
+            except (TypeError, ValueError):
+                return _needs_input(f"Invalid upstream port for {hostname or 'unnamed service'}.", ["port"])
+            if not _re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?", hostname) or "." not in hostname:
+                return {"ok": False, "error": f"Refusing invalid deploy hostname: {hostname[:100]}"}
+            if not 1 <= port <= 65535:
+                return {"ok": False, "error": f"Refusing invalid deploy port for {hostname}: {port}"}
+            normalized.append((hostname, port))
+
+        caddy_dir = "/home/agency/agency-os/caddy-apps"
+        previous = {}
+        changed = []
+        try:
+            for hostname, port in normalized:
+                path = os.path.join(caddy_dir, f"{hostname}.caddy")
+                previous[path] = open(path).read() if os.path.exists(path) else None
+                body = f"{hostname} {{\n    reverse_proxy 127.0.0.1:{port}\n}}\n"
+                if approval["type"] == "apex-deploy":
+                    body += f"\nwww.{hostname} {{\n    redir https://{hostname}{{uri}} permanent\n}}\n"
+                tmp = path + f".task-{task['id']}.tmp"
+                with open(tmp, "w") as handle:
+                    handle.write(body)
+                os.replace(tmp, path)
+                changed.append(path)
+            validate = _subprocess.run(
+                ["caddy", "validate", "--config", "/etc/caddy/Caddyfile"],
+                capture_output=True, text=True, timeout=30,
+            )
+            if validate.returncode != 0:
+                raise RuntimeError(f"Caddy validation failed: {validate.stderr[-300:]}")
+            reload_result = _subprocess.run(
+                ["sudo", "-n", "/usr/bin/systemctl", "reload", "caddy"],
+                capture_output=True, text=True, timeout=30,
+            )
+            if reload_result.returncode != 0:
+                raise RuntimeError(f"Caddy reload failed: {reload_result.stderr[-300:]}")
+        except Exception as exc:
+            for path in changed:
+                old = previous.get(path)
+                if old is None:
+                    try:
+                        os.unlink(path)
+                    except FileNotFoundError:
+                        pass
+                else:
+                    with open(path, "w") as handle:
+                        handle.write(old)
+            return {"ok": False, "error": f"Deploy approval rolled back: {str(exc)[:350]}"}
+
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            for hostname, _ in normalized:
+                cur.execute("UPDATE dns_records SET state='live' WHERE subdomain IN (%s,%s)",
+                            (hostname, f"www.{hostname}"))
+            conn.commit()
+        finally:
+            conn.close()
+        return {
+            "ok": True,
+            "content": json.dumps({"routes": [host for host, _ in normalized], "caddy_validated": True}),
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "cost": 0,
+            "workflow_status": "deployed",
+        }
     return _needs_input(
         f"Approval type `{approval['type']}` has no deterministic executor mapping.",
         ["executor mapping", "required inputs"],

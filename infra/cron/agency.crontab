@@ -1,9 +1,8 @@
-# Health check every 2 minutes
-*/2 * * * * /home/agency/agency-os/scripts/run-job.sh 1 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
-# Approval executor every minute
-* * * * * /home/agency/agency-os/scripts/run-job.sh 2 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
-# Memory sweep every 2 minutes
-*/2 * * * * /home/agency/agency-os/scripts/run-job.sh 3 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
+# Health state every 15 minutes; the runner drops unchanged/no-op history.
+*/15 * * * * /home/agency/agency-os/scripts/run-job.sh 1 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
+# The approval poller is retired. Dashboard approvals enqueue tracked worker tasks.
+# Memory pressure guard every 5 minutes; healthy/no-op checks are not retained.
+*/5 * * * * /home/agency/agency-os/scripts/run-job.sh 3 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
 # Nightly Postgres dump at 2am
 0 2 * * * /home/agency/agency-os/scripts/run-job.sh 4 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
 # Docker build cache prune — daily at 3am

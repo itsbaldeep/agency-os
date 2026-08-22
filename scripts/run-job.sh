@@ -55,6 +55,15 @@ DURATION=$(( $(date +%s) - START_TS ))
 STATUS="completed"
 [ "$SCRIPT_EXIT" -ne 0 ] && STATUS="failed"
 
+# Scheduled probes may explicitly report that nothing changed. Do not turn a
+# no-op poll into fake operational history; remove its provisional run row.
+if [ "$STATUS" = "completed" ] && [ "$TRIGGER" = "scheduled" ] && [[ "$SCRIPT_OUTPUT" == NOOP* ]]; then
+  psql -h "$PGHOST" -U "$PGUSER" -d agencyos -c "DELETE FROM job_runs WHERE id=$RUN_ID" >/dev/null
+  echo "$JOB_NAME: no change"
+  flock -u 200
+  exit 0
+fi
+
 # Truncate detail to 1000 chars
 DETAIL="${SCRIPT_OUTPUT:0:1000}"
 

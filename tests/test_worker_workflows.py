@@ -86,6 +86,17 @@ class WorkerWorkflowTests(unittest.TestCase):
         self.assertEqual(seen["destination"]["credential_ref"], "WP_APP_PASSWORD")
         self.assertEqual(result["linked_content_item_id"], 22)
 
+    def test_dns_approval_never_claims_live_without_provider(self):
+        conn = FakeConnection({
+            "id": 10,
+            "type": "dns",
+            "payload": {"subdomain": "example.test"},
+        })
+        with mock.patch.object(worker, "get_conn", return_value=conn):
+            result = worker.handle_execute_approval({"id": 31, "params": {"approval_id": 10}})
+        self.assertEqual(result["status"], "needs_input")
+        self.assertIn("dns_provider", result["required_inputs"])
+
     def test_codex_failure_uses_visible_opencode_fallback(self):
         with mock.patch.object(worker, "run_codex", return_value=(1, "codex error", 2, 0)), \
              mock.patch.object(worker, "run_opencode", return_value=(0, "fallback ok", 3, 4)) as run_fb, \
