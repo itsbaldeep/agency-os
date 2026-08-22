@@ -166,12 +166,15 @@ class WorkerWorkflowTests(unittest.TestCase):
         null_wrapper = worker._parse_composed_block('{"content":null,"markdown":"Useful"}', "prose")
         scalar = worker._parse_composed_block('"Useful"', "prose")
         plain = worker._parse_composed_block('Useful plain markdown.', "prose")
+        paragraphs = worker._parse_composed_block('["First paragraph.","Second paragraph."]', "prose")
         self.assertEqual(wrapped, {"markdown": "Useful"})
         self.assertEqual(direct, wrapped)
         self.assertEqual(string_wrapped, wrapped)
         self.assertEqual(null_wrapper, wrapped)
         self.assertEqual(scalar, wrapped)
         self.assertEqual(plain, {"markdown": "Useful plain markdown."})
+        self.assertEqual(paragraphs, {"markdown": "First paragraph.\n\nSecond paragraph."})
+        self.assertEqual(worker._composed_output_shape('[1,2]'), "json_list")
 
     def test_compose_checkpoint_must_match_outline_prefix(self):
         outline = [{"type": "intro"}, {"type": "prose"}]

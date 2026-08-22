@@ -3335,6 +3335,9 @@ def _parse_composed_block(raw_output, block_type):
         scalar = None
     if isinstance(scalar, str) and scalar.strip() and block_type in ("intro", "prose"):
         return {"markdown": scalar.strip()}
+    if (isinstance(scalar, list) and block_type in ("intro", "prose")
+            and scalar and all(isinstance(value, str) and value.strip() for value in scalar)):
+        return {"markdown": "\n\n".join(value.strip() for value in scalar)}
     parsed = _draft_parse_json(raw)
     if not isinstance(parsed, dict):
         # A prose provider occasionally ignores JSON mode entirely. Plain text
@@ -3348,10 +3351,25 @@ def _parse_composed_block(raw_output, block_type):
     # also including a null/string metadata key named content. Prefer a usable
     # wrapper; otherwise validate the direct object shape.
     if not isinstance(generated, dict) and not (isinstance(generated, str) and generated.strip()):
+        if (isinstance(generated, list) and block_type in ("intro", "prose")
+                and generated and all(isinstance(value, str) and value.strip() for value in generated)):
+            return {"markdown": "\n\n".join(value.strip() for value in generated)}
         generated = {k: v for k, v in parsed.items() if k != "content"}
     if isinstance(generated, str) and block_type in ("intro", "prose"):
         generated = {"markdown": generated}
     return generated if isinstance(generated, dict) else None
+
+
+def _composed_output_shape(raw_output):
+    """Describe response structure without persisting generated text."""
+    raw = (raw_output or "").strip()
+    try:
+        value = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        if raw.startswith(("{", "[")):
+            return "malformed_json"
+        return "plain_text" if raw else "empty"
+    return "json_" + type(value).__name__
 
 
 def _content_visible_blob(block):
@@ -3701,7 +3719,9 @@ def handle_content_compose(task):
                 }
             generated = _parse_composed_block(block_result.get("content"), bt)
             if generated is None:
-                local_fails = ["output must be a JSON object with an object-valued content key"]
+                local_fails = [
+                    "unsupported output shape " + _composed_output_shape(block_result.get("content"))
+                ]
                 continue
             composed = {**carry, **generated}
             # The outline/evidence ledger owns these values; model output cannot overwrite them.
