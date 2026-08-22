@@ -1482,6 +1482,24 @@ Homepage excerpt: {crawl['text'][:1000]}"""
                         "VALUES (%s, %s, %s, true) ON CONFLICT DO NOTHING",
                         (brand_id_val, ptype, str(pval)))
 
+        # Reconcile only the previous audit's unscanned auto-proposals. This
+        # prevents repeated audits from accumulating stale direct competitors
+        # while preserving any separately-added or actively-watched rows.
+        current_competitor_domains = [
+            str(c.get("domain") or "").strip().lower() for c in competitors
+            if str(c.get("domain") or "").strip()
+        ]
+        if current_competitor_domains:
+            cur.execute(
+                "DELETE FROM competitors c WHERE c.brand_id=%s AND c.scan_enabled=false "
+                "AND lower(c.domain) <> ALL(%s) AND lower(c.domain) IN ("
+                "SELECT lower(item->>'domain') FROM audits a "
+                "CROSS JOIN LATERAL jsonb_array_elements(a.summary->'competitors') item "
+                "WHERE a.id=(SELECT id FROM audits WHERE brand_id=%s AND audit_type='ai_visibility' "
+                "ORDER BY id DESC LIMIT 1))",
+                (brand_id_val, current_competitor_domains, brand_id_val),
+            )
+
         # Write competitors (dedupe by brand_id+domain, validate domain format)
         for c in competitors:
             cdomain = c.get("domain", "").strip().lower()
