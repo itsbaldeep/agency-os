@@ -3321,8 +3321,27 @@ def _content_block_spec(bt):
 
 def _parse_composed_block(raw_output, block_type):
     """Normalize wrapped and direct JSON block shapes before validation."""
-    parsed = _draft_parse_json(raw_output or "")
+    raw = (raw_output or "").strip()
+    unfenced = raw
+    if unfenced.startswith("```"):
+        lines = unfenced.splitlines()
+        lines = lines[1:] if lines else lines
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        unfenced = "\n".join(lines).strip()
+    try:
+        scalar = json.loads(unfenced)
+    except (TypeError, json.JSONDecodeError):
+        scalar = None
+    if isinstance(scalar, str) and scalar.strip() and block_type in ("intro", "prose"):
+        return {"markdown": scalar.strip()}
+    parsed = _draft_parse_json(raw)
     if not isinstance(parsed, dict):
+        # A prose provider occasionally ignores JSON mode entirely. Plain text
+        # is an equivalent payload for prose, but malformed JSON is not.
+        if (block_type in ("intro", "prose") and unfenced
+                and not unfenced.startswith(("{", "["))):
+            return {"markdown": unfenced}
         return None
     generated = parsed.get("content")
     # Some JSON-mode providers emit the requested fields at top level while
