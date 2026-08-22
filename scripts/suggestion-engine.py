@@ -2,7 +2,7 @@
 """suggestion-engine.py — generate prioritized, source-traced, compliance-checked suggestions from audit data."""
 import json, urllib.request, sys, os, socket, re, time
 
-ENV_PATH = "/home/agency/agency-os/.env"
+ENV_PATH = os.environ.get("AGENCY_ENV_FILE", "/home/agency/.config/agency/core.env")
 for line in open(ENV_PATH):
     lp = line.strip()
     if "=" in lp and not lp.startswith("#"):
@@ -13,7 +13,7 @@ ZEN_URL = OPENAI_BASE_URL + "/chat/completions"
 ZEN_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 
 MODEL_CONFIG = {
-    "quality": "deepseek-chat",             # suggestion generation
+    "quality": "deepseek-v4-pro",           # suggestion generation
     "temp_structured": 0.1,                # low temperature for JSON output
 }
 
@@ -23,13 +23,18 @@ FREE_FALLBACK_MODELS = (
      os.environ.get("OPENROUTER_FREE_MODEL", "deepseek/deepseek-r1:free")),
 )
 
-def zen(prompt, max_tokens=1200, temperature=None, _fb_index=0, _base_url=None, _api_key=None, _model=None):
+def zen(prompt, max_tokens=1200, temperature=None, json_mode=False,
+        _fb_index=0, _base_url=None, _api_key=None, _model=None):
     model = _model or MODEL_CONFIG["quality"]
     base_url = (_base_url or OPENAI_BASE_URL).rstrip("/")
     api_key = ZEN_KEY if _api_key is None else _api_key
     body_dict = {"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": max_tokens}
     if temperature is not None:
         body_dict["temperature"] = temperature
+    if "api.deepseek.com" in base_url:
+        body_dict["thinking"] = {"type": "disabled"}
+        if json_mode:
+            body_dict["response_format"] = {"type": "json_object"}
     body = json.dumps(body_dict).encode()
     req = urllib.request.Request(base_url + "/chat/completions", data=body,
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "User-Agent": "AgencyOS-Suggestions/1.0"})
@@ -55,7 +60,7 @@ def zen(prompt, max_tokens=1200, temperature=None, _fb_index=0, _base_url=None, 
                     print(f"[sug-engine] {fb_key_env} is unset; skipping {fb_model}", flush=True)
                     continue
                 print(f"[sug-engine] LLM {model} blocked, falling back to {fb_model} at {fb_base_url}", flush=True)
-                return zen(prompt, max_tokens=max_tokens, temperature=temperature,
+                return zen(prompt, max_tokens=max_tokens, temperature=temperature, json_mode=json_mode,
                            _fb_index=fb_index + 1, _base_url=fb_base_url,
                            _api_key=fb_key, _model=fb_model)
         return {"ok": False, "error": emsg, "model": model}
@@ -190,37 +195,43 @@ For this channel, HIGH impact = {', '.join(high_for_channel)}. MEDIUM = {', '.jo
 
 Check each for compliance: superlatives without evidence = RED, health claims = RED, incentivized reviews = YELLOW.
 
-Return ONLY a JSON array. Example:
-[{{"title":"Add product schema","rationale":"Structured data helps search engines understand products.","impact":"high","effort":"medium","action_type":"monitor","compliance_flags":[],"sources":[{{"type":"audit_finding","finding":"No schema found on homepage"}}]}}]"""
+Return ONLY a JSON object with a "suggestions" array. Example:
+{{"suggestions":[{{"title":"Add product schema","rationale":"Structured data helps search engines understand products.","impact":"high","effort":"medium","action_type":"monitor","compliance_flags":[],"sources":[{{"type":"audit_finding","finding":"No schema found on homepage"}}]}}]}}"""
 
     suggestions = None
     last_raw = ""
+    total_prompt_tokens = total_completion_tokens = 0
+    total_cost = 0.0
+    last_model = MODEL_CONFIG["quality"]
     for attempt in range(2):
-        r = zen(prompt, max_tokens=1800)
+        r = zen(prompt, max_tokens=1800, json_mode=True)
+        total_prompt_tokens += r.get("prompt_tokens", 0)
+        total_completion_tokens += r.get("completion_tokens", 0)
+        total_cost += r.get("cost", 0)
+        last_model = r.get("model") or last_model
         if not r["ok"]:
             continue
         last_raw = r["content"]
-        print(f"[sug-engine] attempt {attempt+1}: {len(last_raw)} chars, starts=[{last_raw[:20]}], ends=[{last_raw[-30:]}]", flush=True)
         for trim in [last_raw, last_raw[last_raw.find('['):last_raw.rfind(']')+1] if '[' in last_raw else '']:
             trim = trim.strip()
             if not trim:
                 continue
             try:
                 data = json.loads(trim)
-                if isinstance(data, list):
-                    if len(data) == 1 and isinstance(data[0], list):
-                        data = data[0]
-                    suggestions = data
+                if isinstance(data, dict) and isinstance(data.get("suggestions"), list):
+                    suggestions = data["suggestions"]
                     break
             except:
                 continue
         if suggestions:
             break
         if attempt < 1:
-            prompt += "\n\nSTRICT: Return ONLY a JSON array starting with [ and ending with ]. No other text."
+            prompt += "\n\nSTRICT: Return ONLY a JSON object with a suggestions array. No other text."
 
     if suggestions is None:
-        return {"ok": False, "error": f"Could not parse Zen output as JSON after 2 attempts", "raw": last_raw[:600]}
+        return {"ok": False, "error": "Could not parse suggestion output as JSON after 2 attempts",
+                "prompt_tokens": total_prompt_tokens, "completion_tokens": total_completion_tokens,
+                "cost": round(total_cost, 8), "model": last_model}
 
     validated = []
     for s in suggestions:
@@ -268,7 +279,9 @@ Return ONLY a JSON array. Example:
             "sources": s.get("sources", [{"type": "audit_finding", "finding": f"From audit {audit_id}"}]),
         })
 
-    return {"ok": True, "suggestions": validated, "count": len(validated), "tokens": (r.get("prompt_tokens",0), r.get("completion_tokens",0))}
+    return {"ok": True, "suggestions": validated, "count": len(validated),
+            "prompt_tokens": total_prompt_tokens, "completion_tokens": total_completion_tokens,
+            "cost": round(total_cost, 8), "model": last_model}
 
 
 if __name__ == "__main__":

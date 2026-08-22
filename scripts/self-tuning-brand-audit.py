@@ -14,9 +14,10 @@ Steps:
   7. Write results to ClickHouse + update audit record
 """
 import json, os, sys, time, urllib.request, urllib.error, base64, socket, re, subprocess
+import math
 
 # ── config ────────────────────────────────────────────────────────────────────
-ENV_PATH = "/home/agency/agency-os/.env"
+ENV_PATH = os.environ.get("AGENCY_ENV_FILE", "/home/agency/.config/agency/core.env")
 OPENAI_BASE_URL = "https://api.deepseek.com"
 ZEN_URL = ""
 ZEN_KEY = ""
@@ -53,11 +54,17 @@ FREE_FALLBACK_MODELS = (
      os.environ.get("OPENROUTER_FREE_MODEL", "deepseek/deepseek-r1:free")),
 )
 
-def zen(prompt, model="deepseek-chat", max_tokens=800, _fb_index=0, _base_url=None, _api_key=None):
-    model = "deepseek-chat" if model in ("deepseek-v4-flash", "glm-5.2") else model
+def zen(prompt, model="deepseek-v4-flash", max_tokens=800, json_mode=False,
+        _fb_index=0, _base_url=None, _api_key=None):
+    model = "deepseek-v4-flash" if model in ("deepseek-chat", "glm-5.2") else model
     base_url = (_base_url or OPENAI_BASE_URL).rstrip("/")
     api_key = ZEN_KEY if _api_key is None else _api_key
-    body = json.dumps({"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": max_tokens}).encode()
+    body_dict = {"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": max_tokens}
+    if "api.deepseek.com" in base_url:
+        body_dict["thinking"] = {"type": "disabled"}
+        if json_mode:
+            body_dict["response_format"] = {"type": "json_object"}
+    body = json.dumps(body_dict).encode()
     req = urllib.request.Request(base_url + "/chat/completions", data=body,
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "User-Agent": "AgencyOS-Audit/1.0"})
     try:
@@ -82,7 +89,7 @@ def zen(prompt, model="deepseek-chat", max_tokens=800, _fb_index=0, _base_url=No
                     print(f"[audit] {fb_key_env} is unset; skipping {fb_model}", flush=True)
                     continue
                 print(f"[audit] LLM {model} blocked, falling back to {fb_model} at {fb_base_url}", flush=True)
-                return zen(prompt, model=fb_model, max_tokens=max_tokens,
+                return zen(prompt, model=fb_model, max_tokens=max_tokens, json_mode=json_mode,
                            _fb_index=fb_index + 1, _base_url=fb_base_url, _api_key=fb_key)
         return {"ok": False, "error": emsg, "model": model}
 
@@ -134,11 +141,13 @@ Output ONLY a JSON object with these fields:
 
 Homepage text:
 {homepage_text[:2000]}"""
-    r = zen(prompt)
+    r = zen(prompt, json_mode=True)
     if not r["ok"]: return r
     try:
         data = json.loads(r["content"])
-        return {"ok": True, "category": data.get("category","unknown"), "positioning": data.get("positioning",""), "confidence": data.get("confidence","medium"), "tokens": (r.get("prompt_tokens",0), r.get("completion_tokens",0))}
+        return {"ok": True, "category": data.get("category","unknown"), "positioning": data.get("positioning",""),
+                "confidence": data.get("confidence","medium"), "prompt_tokens": r.get("prompt_tokens",0),
+                "completion_tokens": r.get("completion_tokens",0), "cost": r.get("cost",0), "model": r.get("model")}
     except:
         return {"ok": True, "category": "unknown", "positioning": r["content"][:200], "confidence": "low", "raw": r["content"]}
 
@@ -157,17 +166,20 @@ Then name exactly 3 competitors a REAL buyer would cross-shop — same price poi
 
 Respond ONLY with a valid JSON object (no markdown, no code fences):
 {{"pricing_model":"...","target_customer":"...","go_to_market":"self-serve","competitors":[{{"name":"Company","domain":"company.com","why":"reason"}}]}}"""
-    r = zen(prompt, max_tokens=1000)
+    r = zen(prompt, max_tokens=1000, json_mode=True)
     if not r["ok"]: return r
     raw = r["content"]
-    print(f"      [DEBUG] Raw Zen response (first 500 chars): {raw[:500]}", flush=True)
     json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', raw)
     json_str = json_match.group(1) if json_match else raw
     for attempt_raw in [json_str, raw]:
         try:
             data = json.loads(attempt_raw)
             comps = data.get("competitors", [])
-            return {"ok": True, "pricing_model": data.get("pricing_model","unknown"), "target_customer": data.get("target_customer","unknown"), "go_to_market": data.get("go_to_market","unknown"), "competitors": comps[:3], "raw": raw}
+            return {"ok": True, "pricing_model": data.get("pricing_model","unknown"),
+                    "target_customer": data.get("target_customer","unknown"),
+                    "go_to_market": data.get("go_to_market","unknown"), "competitors": comps[:3],
+                    "prompt_tokens": r.get("prompt_tokens",0), "completion_tokens": r.get("completion_tokens",0),
+                    "cost": r.get("cost",0), "model": r.get("model")}
         except: pass
     comps = []
     for line in raw.split("\n"):
@@ -177,7 +189,10 @@ Respond ONLY with a valid JSON object (no markdown, no code fences):
                 name = line.replace(prefix, "").strip().split("(")[0].strip()
                 if name and len(name) < 60:
                     comps.append({"name": name, "domain": "", "why": ""})
-    return {"ok": True, "competitors": comps[:3], "raw": raw, "pricing_model": "unknown", "target_customer": "unknown", "go_to_market": "unknown"}
+    return {"ok": True, "competitors": comps[:3], "pricing_model": "unknown",
+            "target_customer": "unknown", "go_to_market": "unknown",
+            "prompt_tokens": r.get("prompt_tokens",0), "completion_tokens": r.get("completion_tokens",0),
+            "cost": r.get("cost",0), "model": r.get("model")}
 
 def generate_prompts(category, positioning):
     prompt = f"""You are generating 15 brand-neutral buying-intent search prompts for market research on the category "{category}".
@@ -187,14 +202,13 @@ RULES (non-negotiable):
 - NEVER include any brand name in any prompt
 - Each prompt must be a realistic question a buyer would type into a search engine or AI
 - Span the category's main concern areas (pricing, features, comparisons, use cases, integrations, alternatives, reviews, getting started)
-- Output ONLY a JSON array of 15 strings, one per line
+- Output ONLY a JSON object with one key, "prompts", containing an array of 15 strings
 
 Example format for "email marketing":
-["best email marketing tool for small business", "cheapest email automation for startups", ...]"""
-    r = zen(prompt, max_tokens=1200)
+{{"prompts":["best email marketing tool for small business", "cheapest email automation for startups"]}}"""
+    r = zen(prompt, max_tokens=1200, json_mode=True)
     if not r["ok"]: return r
     raw = r["content"]
-    print(f"      [DEBUG] Prompts raw (first 300): {raw[:300]}", flush=True)
     json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', raw)
     json_str = json_match.group(1) if json_match else raw
     for attempt_raw in [json_str, raw]:
@@ -203,16 +217,20 @@ Example format for "email marketing":
             if isinstance(data, list):
                 prompts = data
             elif isinstance(data, dict):
-                prompts = list(data.values())[0] if data else []
+                prompts = data.get("prompts") or []
             else:
                 prompts = data
             if isinstance(prompts, list) and len(prompts) >= 5:
-                return {"ok": True, "prompts": prompts[:15], "count": min(len(prompts), 15), "raw": raw}
+                return {"ok": True, "prompts": prompts[:15], "count": min(len(prompts), 15),
+                        "prompt_tokens": r.get("prompt_tokens",0), "completion_tokens": r.get("completion_tokens",0),
+                        "cost": r.get("cost",0), "model": r.get("model")}
         except: pass
     # Line-by-line fallback
     prompts = [l.strip().strip('"').strip("'").strip("[").strip("]").strip(",") for l in raw.split("\n") if l.strip().startswith('"') or (l.strip() and l.strip()[0].isdigit() and "." in l.strip()[:3])]
     prompts = [p for p in prompts if len(p) > 15]
-    return {"ok": True, "prompts": prompts[:15], "count": min(len(prompts), 15), "raw": raw}
+    return {"ok": True, "prompts": prompts[:15], "count": min(len(prompts), 15),
+            "prompt_tokens": r.get("prompt_tokens",0), "completion_tokens": r.get("completion_tokens",0),
+            "cost": r.get("cost",0), "model": r.get("model")}
 
 def run_audit(domain, brand_id, category, competitors, prompts, market_tier=None, brand_name="Brand", crawl_text=None):
     brand_lower = brand_name.lower()
@@ -224,12 +242,23 @@ def run_audit(domain, brand_id, category, competitors, prompts, market_tier=None
     
     results = []
     ch_failures = 0
+    query_failures = 0
+    total_prompt_tokens = total_completion_tokens = 0
+    total_cost = 0.0
+    models_used = []
     for i, prompt in enumerate(prompts):
         print(f"    [{i+1}/{len(prompts)}] Querying...", end=" ", flush=True)
         r = zen(prompt)
+        total_prompt_tokens += r.get("prompt_tokens", 0)
+        total_completion_tokens += r.get("completion_tokens", 0)
+        total_cost += r.get("cost", 0)
         if not r["ok"]:
+            query_failures += 1
             print(f"ERROR: {r.get('error','')}", flush=True)
             continue
+        engine = r.get("model") or "unknown"
+        if engine not in models_used:
+            models_used.append(engine)
         content = r["content"].lower()
         b = brand_lower in content
         brands_cited = []
@@ -239,10 +268,12 @@ def run_audit(domain, brand_id, category, competitors, prompts, market_tier=None
                 brands_cited.append(comp.get("name","?"))
         cited_comps = ",".join(brands_cited) if brands_cited else "none"
         print(f"cited={int(b)} others={cited_comps}", flush=True)
-        results.append({"prompt": prompt, "cited": int(b), "competitors": cited_comps, "content": r["content"][:200]})
+        results.append({"prompt": prompt, "cited": int(b), "competitors": cited_comps,
+                        "content": r["content"][:200], "model": engine})
         detail = r["content"][:200].replace('\t',' ').replace('\n',' ')
         prompt_escaped = prompt.replace('\t',' ').replace('\n',' ')
-        sql = f"INSERT INTO default.ai_visibility_checks (brand_id, engine, prompt, cited, position, competitors_cited, detail) FORMAT TabSeparated\n{brand_id}\tdeepseek/deepseek-chat\t{prompt_escaped}\t{int(b)}\t{i+1}\t{cited_comps}\t{detail}"
+        engine_escaped = str(engine).replace('\t', ' ').replace('\n', ' ')
+        sql = f"INSERT INTO default.ai_visibility_checks (brand_id, engine, prompt, cited, position, competitors_cited, detail) FORMAT TabSeparated\n{brand_id}\t{engine_escaped}\t{prompt_escaped}\t{int(b)}\t{i+1}\t{cited_comps}\t{detail}"
         try:
             req = urllib.request.Request(f"{CH_HOST}/", data=sql.encode(), headers={"Authorization": f"Basic {CH_AUTH}"})
             urllib.request.urlopen(req, timeout=10)
@@ -252,6 +283,15 @@ def run_audit(domain, brand_id, category, competitors, prompts, market_tier=None
         time.sleep(0.3)
     
     total = len(results)
+    required = max(5, math.ceil(len(prompts) * 0.8))
+    if total < required:
+        return {
+            "ok": False,
+            "error": f"visibility sample incomplete: {total}/{len(prompts)} succeeded; need {required}",
+            "prompt_tokens": total_prompt_tokens, "completion_tokens": total_completion_tokens,
+            "cost": round(total_cost, 8), "model": ",".join(models_used) or "unknown",
+            "query_failures": query_failures, "ch_insert_failures": ch_failures,
+        }
     brand_cited = sum(r["cited"] for r in results)
     comp_cited_counts = {}
     for r in results:
@@ -271,16 +311,18 @@ def run_audit(domain, brand_id, category, competitors, prompts, market_tier=None
         for cname, cnt in comp_cited_counts.items():
             comp_citation_data[cname] = cnt
         summary = json.dumps({
-            "status":"completed","engine":"deepseek/deepseek-chat","methodology":"Self-tuning audit. Category auto-detected from crawl. Competitors auto-proposed. 15 brand-neutral prompts auto-generated.",
+            "status":"completed","engine":"agency-llm-gateway","models_used":models_used,
+            "methodology":"Self-tuning audit. Category auto-detected from crawl. Competitors auto-proposed. 15 brand-neutral prompts auto-generated.",
             "domain":domain,"category":category,
             "market_tier":market_tier or {"pricing_model":"?","target_customer":"?","go_to_market":"?"},
             "competitors":[{"name":c["name"],"domain":c.get("domain",""),"why":c.get("why","")} for c in competitors],
             "prompts_used":prompts,
-            "prompts_queried":total,"brand_cited":brand_cited,
+            "prompts_queried":total,"brand_cited_count":brand_cited,
             "brand_share_of_voice_pct":round(brand_cited/total*100) if total else 0,
             "competitor_citation_counts":comp_citation_data,
             "all_competitors_total_citations":sum(comp_cited_counts.values()),
             "note":"Training-knowledge proxy — not live web AI-visibility. All prompts brand-neutral (no brand names in prompts). Competitors auto-proposed — verify before relying on.",
+            "query_failures": query_failures,
             "ch_insert_failures": ch_failures
         })
         sources = json.dumps([{"type":"self_tuning_audit","domain":domain,"category":category,"methodology":"auto-detect category → auto-propose competitors → auto-generate prompts → run queries"}])
@@ -290,7 +332,11 @@ def run_audit(domain, brand_id, category, competitors, prompts, market_tier=None
         print(f"  Audit record {audit_id} created.", flush=True)
     finally:
         conn.close()
-    return {"audit_id": audit_id, "summary": json.loads(summary), "brand_cited": brand_cited, "total": total, "competitor_citation_counts": dict(comp_cited_counts)}
+    return {"ok": True, "audit_id": audit_id, "summary": json.loads(summary),
+            "brand_cited": brand_cited, "total": total,
+            "competitor_citation_counts": dict(comp_cited_counts),
+            "prompt_tokens": total_prompt_tokens, "completion_tokens": total_completion_tokens,
+            "cost": round(total_cost, 8), "model": ",".join(models_used) or "unknown"}
 
 def main(domain, brand_id=None):
     print(f"\n{'='*60}", flush=True)

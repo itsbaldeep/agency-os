@@ -40,8 +40,8 @@ content_research ──> content_outline ──> [human inspects] ──> conten
 Params: `{"target_keyword": str, "competitor_urls": [str], "keyword_id": ?int}`
 
 Deterministic work (stdlib only), the LLM reads the markup:
-1. For each URL: fetch, strip `<script>/<style>`, collapse whitespace, truncate
-   to ~6000 chars, record a raw word count.
+1. Deduplicate and cap at five URLs. Fetch each, strip `<script>/<style>`,
+   collapse whitespace, truncate to ~6000 chars, and record a word count.
 2. One `call_zen` (quality) reads all cleaned sources and returns:
    ```json
    {
@@ -49,13 +49,13 @@ Deterministic work (stdlib only), the LLM reads the markup:
      "strongest": [{"element", "from_url", "why"}],
      "weaknesses": ["2-3 things competitors do badly"],
      "gaps": [{"gap", "opportunity"}],
-     "element_strategy": "one short instr: which block types to lead with"
+     "element_strategy": "one short instruction: which block types to lead with",
+     "facts": [{"id": "fact-1", "claim", "source_url", "evidence_snippet"}]
    }
    ```
-Stored in `content_research`. `element_strategy` is the decisive field: it is
-the "if they use a table, we use a chart" choice, made **once** with all
-competitors in view, then handed to the outliner so it executes a strategy
-rather than guesses structure from the keyword.
+Each evidence snippet must be an exact 8-25-word span in the fetched page.
+Unverified facts are dropped, never promoted. Invalid structured output gets
+one correction attempt and then fails visibly; there is no generic fake result.
 
 ## Stage 2 — content_outline
 Params: `{"research_id": int, "brand_id": ?int, "title": ?str}`
@@ -69,8 +69,11 @@ word count (more thorough — but no filler), and use `image_slot` at most 2-3.
 Validated by the outline validator: any number/order of any block type (no
 template, no minimum per type); unknown type / missing brief / bad `chart_type`
 / `image_slot` without `alt`+`prompt` / `faq` without `answer_pointer` are
-rejected; `intro` is auto-forced `keyword_target: true` and at least one block
-must target the keyword. Stored as `content_items(structured={"blocks":[...]},
+rejected. Maximum 18 blocks. Tables, charts, and callouts require valid
+`fact_ids`; they are prohibited when research found no verified facts.
+`intro` is auto-forced `keyword_target: true` and exactly one prose block also
+targets the keyword. Stored as `content_items(structured={"blocks":[...],
+"facts":[...],"research_id":...},
 status='outline')`, returning `content_item_id`.
 
 ## Stage 3 — content_compose
@@ -79,22 +82,23 @@ Params: `{"content_item_id": int, "target_keyword": str, "model": ?str}`
 - Runs **on demand**, only after the human approves the outline.
 - One `call_zen` (quality) **per content block**. `heading` and `image_slot`
   are pure carries (already fully specified by the outline) and skip the LLM.
-- Every block call receives: the full outline + its position + a **running
-  2-3 sentence summary of prior blocks** (each call returns a `summary` key
-  consumed by the next call), so the article is one coherent piece.
+- Every block call receives a compact outline, its position, the prior two
+  filled blocks, and only the verified facts referenced by that block.
 - Each block type has its own required return contract (a table asks for
   columns + rows, a chart for a titled data series, a callout for one stat +
   label) — never a generic "write this section".
 - The **Voice rules are injected into every intro/prose/faq call**.
-- Validator rejects: placeholders, meta-language, uniform paragraph lengths,
-  keyword-stuffing.
+- Each failed block is retried once locally; accepted earlier blocks are never
+  regenerated. The whole compose task has a 24,000-token ceiling.
+- Validator rejects placeholders, meta-language, malformed type payloads,
+  unsupported data blocks, and keyword-stuffing.
 - Assembled into `content_items.content_blocks` (jsonb), status → `draft`,
   plus a plain markdown `body`.
 
 ### Keyword contract
 - Blocks flagged `keyword_target: true` MUST contain the target keyword verbatim,
   placed naturally (no stuffing).
-- Blocks not flagged read naturally without forcing it.
+- Blocks not flagged must not repeat the exact keyword.
 - Validator enforces: keyword appears in the **intro** AND at least one other
   flagged block, and appears no more than ~**once per 150 words** overall
   (density ceiling). Natural placement, not saturation.
@@ -110,16 +114,16 @@ fully dynamic — any number of any type, freely repeated and interleaved.
 | `prose` | `brief`, `keyword_target?` | `markdown` |
 | `key_takeaways` | `brief` | `points[]` |
 | `steps` | `brief` | `steps[]` |
-| `table` | `brief` (columns/compare) | `columns[]`, `rows[][]` (first row = header) |
-| `chart` | `brief`, `chart_type` (`bar\|line\|pie`) | `data_series{labels[],values[]}`, `chart_type`, `title` |
-| `callout` | `brief` | `stat`, `label` |
+| `table` | `brief`, `fact_ids[]` | `columns[]`, `rows[][]`, carried sources |
+| `chart` | `brief`, `chart_type` (`bar\|line\|pie`), `fact_ids[]` | `data_series{labels[],values[]}`, `chart_type`, `title`, carried sources |
+| `callout` | `brief`, `fact_ids[]` | `stat`, `label`, carried sources |
 | `image_slot` | `brief`, `alt`, `prompt` | `alt`, `prompt` (carried) |
 | `faq` | `brief`, `answer_pointer` | `answer` |
 
 ## Data model
 - `content_research`: `id, task_id, keyword_id, target_keyword, competitors
   jsonb, elements jsonb, strongest jsonb, weaknesses jsonb, gaps jsonb,
-  element_strategy text, created_at`
+  element_strategy text, facts jsonb, created_at`
 - `content_items`: `structured jsonb` holds the outline (`{"blocks":[...]}`);
   `content_blocks jsonb` holds the composed blocks; `body` is the plain render;
   `status` = `outline` → `draft` → (`approved` via the normal content gate).
@@ -137,8 +141,9 @@ generate marketing prose.*
    with longer multi-clause ones (20-30). No two consecutive sentences with the
    same shape.
 3. **One idea per paragraph.** If a paragraph carries two ideas, split it.
-4. **Prefer concrete specifics over abstractions.** Real numbers, named things,
-   tangible steps. Replace vague phrasing with specifics.
+4. **Prefer grounded specifics over abstractions.** Numbers, names, dates,
+   quotes, rankings, and product claims are allowed only when supplied in the
+   verified facts. Otherwise write useful qualitative guidance.
 5. **Banned connectors & filler:** never open a sentence with *in conclusion,
    moreover, furthermore, it's worth noting, however, in today's world, in
    today's digital age, as we all know*. Delete, don't substitute.
@@ -151,26 +156,25 @@ generate marketing prose.*
 Weak — generic, abstract, no stakes:
 > There are many factors to consider when choosing a clinic.
 
-Strong — specific, opinionated, names the stakes:
-> Three things decide whether a clinic keeps a patient: wait time, follow-up,
-> and whether the front desk remembers their name.
+Strong — specific, opinionated, names the decision criteria without inventing data:
+> Judge a clinic on wait time, follow-up, and whether the front desk remembers
+> the patient—not on the polish of its waiting room.
 
 Weak — hedged, filler-opened:
 > In today's fast-paced world, businesses need to ensure they have the right
 > tools in place to succeed.
 
-Strong — direct, concrete:
-> A clinic that books your next visit before you leave the exam room keeps 23%
-> more patients. Ours does both in one thread.
+Strong — direct, concrete, qualitative when no source supplies a number:
+> Book the next visit before the patient leaves. The handoff is easier to miss
+> once they are back at work.
 
 Weak — uniform, passive:
 > It is important to consider quality and cost when evaluating a provider.
 > Reliability is also a key factor. Communication matters as well.
 
 Strong — varied rhythm, one idea per paragraph, opinionated:
-> Quality is table stakes. The real metric is whether they pick up the phone.
-> We did the math: returning same-day answer time alone added nine reviews last
-> quarter.
+> Quality is table stakes. The revealing metric is whether they pick up the
+> phone when a patient needs an answer.
 
 Weak — vague "we help you":
 > We help businesses improve their customer experience and grow their revenue.

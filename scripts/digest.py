@@ -165,7 +165,7 @@ def recovery_and_credentials() -> tuple[str, list[str]]:
     if backup:
         backup_line = f"Last core backup: `{backup.get('at','unknown')}`"
         if not backup.get("root_state_included"):
-            root_alert = "⚠️ Root-only Headscale/OpenCode state is not yet bundled"
+            root_alert = "⚠️ Root-level system snapshot (units/sudo/firewall) is not yet bundled; application data is included"
             backup_line += f"\n{root_alert}"
             alerts.append(root_alert)
     else:

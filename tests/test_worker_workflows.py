@@ -1,6 +1,8 @@
 import sys
+import json
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 
@@ -37,6 +39,83 @@ class FakeConnection:
 
 
 class WorkerWorkflowTests(unittest.TestCase):
+    def test_retired_deepseek_aliases_route_to_current_models(self):
+        self.assertEqual(worker._normalise_api_model("deepseek-chat"), "deepseek-v4-flash")
+        self.assertEqual(worker._normalise_api_model("deepseek-reasoner"), "deepseek-v4-pro")
+
+    def test_deepseek_json_request_is_explicit_and_priced(self):
+        response = SimpleNamespace(read=lambda: json.dumps({
+            "choices": [{"message": {"content": "{}"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 20,
+                      "prompt_cache_hit_tokens": 40, "prompt_cache_miss_tokens": 60},
+        }).encode())
+        with mock.patch.object(worker.urllib.request, "urlopen", return_value=response) as opened:
+            result = worker.call_zen("Return JSON", model="deepseek-chat", json_mode=True)
+        request = opened.call_args.args[0]
+        body = json.loads(request.data)
+        self.assertEqual(body["model"], "deepseek-v4-flash")
+        self.assertEqual(body["response_format"], {"type": "json_object"})
+        self.assertEqual(body["thinking"], {"type": "disabled"})
+        self.assertTrue(result["ok"])
+        self.assertGreater(result["cost"], 0)
+
+    def test_raw_opencode_command_disables_tools(self):
+        proc = SimpleNamespace(returncode=0, stdout='{"part":{"type":"text","text":"ok"}}\n', stderr="")
+        with mock.patch("subprocess.run", return_value=proc) as run:
+            worker.run_opencode("answer", "/tmp", model="opencode/deepseek-v4-flash", allow_tools=False)
+        cmd = run.call_args.args[0]
+        self.assertIn("--pure", cmd)
+        self.assertNotIn("--auto", cmd)
+        self.assertNotIn("--dangerously-skip-permissions", cmd)
+
+    def test_raw_fallback_skips_provider_error_then_uses_subscription(self):
+        provider_error = json.dumps({
+            "type": "error", "error": {"data": {"message": "Invalid API key."}}
+        })
+        success = json.dumps({"type": "text", "part": {"type": "text", "text": "{\"ok\":true}"}})
+        with mock.patch.object(worker, "run_opencode", side_effect=[
+                (0, provider_error, 0, 0), (0, success, 10, 3)]), \
+             mock.patch.object(worker, "post_discord") as notify:
+            result = worker._raw_opencode_fallback("Return JSON", True, 30, "deepseek-v4-pro", "probe")
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["model"], "openai/gpt-5.4-mini-fast")
+        self.assertEqual(notify.call_count, 2)
+
+    def test_research_facts_require_exact_fetched_evidence(self):
+        fetched = [{
+            "url": "https://example.test/a", "extract_ok": True, "word_count": 20,
+            "plain_text": "This exact source sentence contains enough words to verify a useful claim today.",
+        }]
+        payload = {
+            "elements": [{"url": "https://example.test/a", "headings": [], "elements_used": [],
+                          "word_count": 20, "freshness": "unknown"}],
+            "strongest": [], "weaknesses": [], "gaps": [], "element_strategy": "use prose",
+            "facts": [{"claim": "A useful claim", "source_url": "https://example.test/a",
+                       "evidence_snippet": "This exact source sentence contains enough words to verify a useful claim"}],
+        }
+        safe, failures = worker._validate_research_payload(payload, fetched)
+        self.assertEqual(failures, [])
+        self.assertEqual(safe["facts"][0]["id"], "fact-1")
+        payload["facts"][0]["evidence_snippet"] = "These invented words are nowhere within the fetched page source at all"
+        safe, failures = worker._validate_research_payload(payload, fetched)
+        self.assertEqual(safe["facts"], [])
+        self.assertTrue(any("not present" in failure for failure in failures))
+
+    def test_data_blocks_require_known_fact_ids(self):
+        blocks = [
+            {"type": "intro", "brief": "Open directly"},
+            {"type": "prose", "brief": "Explain", "keyword_target": True},
+            {"type": "chart", "brief": "Show data", "chart_type": "bar", "fact_ids": ["fact-9"]},
+        ]
+        failures = worker._content_outline_validate(blocks, [{"id": "fact-1"}])
+        self.assertTrue(any("unknown fact_ids" in failure for failure in failures))
+
+    def test_compose_block_keyword_contract_is_local(self):
+        block = {"type": "prose", "brief": "Explain", "markdown": "Useful qualitative advice.",
+                 "keyword_target": True, "fact_ids": [], "sources": []}
+        self.assertIn("target_keyword missing from keyword_target block",
+                      worker._content_block_validate(block, "job search automation"))
+
     def test_failure_first_aid_is_deterministic(self):
         category, action = worker.classify_failure("draft failed validation: invalid JSON")
         self.assertEqual(category, "deterministic validation")

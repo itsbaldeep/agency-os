@@ -191,6 +191,7 @@ def esc(x):
 
 def render_content_blocks(blocks, title="Untitled"):
     parts = [f"<article><h1>{esc(title)}</h1>"]
+    sources = []
     for i, b in enumerate(blocks):
         if not isinstance(b, dict):
             continue
@@ -219,7 +220,7 @@ def render_content_blocks(blocks, title="Untitled"):
             rows = b.get("rows") or []
             if rows:
                 hdr = "".join(f"<th>{esc(c)}</th>" for c in (cols or rows[0]))
-                body = "".join("<tr>" + "".join(f"<td>{esc(c)}</td>" for c in r) + "</tr>" for r in rows[1:])
+                body = "".join("<tr>" + "".join(f"<td>{esc(c)}</td>" for c in r) + "</tr>" for r in rows)
                 parts.append(f"<table><thead><tr>{hdr}</tr></thead><tbody>{body}</tbody></table>")
         elif t == "chart":
             parts.append(_render_chart(b))
@@ -238,6 +239,15 @@ def render_content_blocks(blocks, title="Untitled"):
             a = b.get("answer", "")
             if q and a:
                 parts.append(f"<details class='faq'><summary>{esc(q)}</summary><div>{_md(a)}</div></details>")
+        for source in b.get("sources") or []:
+            if isinstance(source, str) and source.startswith(("https://", "http://")) and source not in sources:
+                sources.append(source)
+    if sources:
+        links = "".join(
+            f"<li><a href='{esc(url)}' target='_blank' rel='noopener noreferrer'>{esc(url)}</a></li>"
+            for url in sources
+        )
+        parts.append(f"<section class='sources'><h2>Sources</h2><ol>{links}</ol></section>")
     parts.append("</article>")
     return "".join(parts)
 
@@ -295,4 +305,5 @@ def render_pipeline_css():
 .pipeline-article .imgph{aspect-ratio:16/9;background:linear-gradient(135deg,#1f2937,#3b82f6);border-radius:8px;display:flex;align-items:center;justify-content:center;color:#e5e7eb;padding:20px;text-align:center}
 .pipeline-article details.faq{border:1px solid #e5e7eb;border-radius:6px;margin:8px 0;padding:8px 12px}
 .pipeline-article details.faq summary{cursor:pointer;font-weight:600}
+.pipeline-article .sources{font-size:.88em;color:#4b5563;overflow-wrap:anywhere}
 </style>"""

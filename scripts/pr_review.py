@@ -13,7 +13,7 @@ CLI:  pr_review.py <repo> <pr_number>
 """
 import os, sys, json, urllib.request, urllib.error
 
-ENV_PATH = "/home/agency/agency-os/.env"
+ENV_PATH = os.environ.get("AGENCY_ENV_FILE", "/home/agency/.config/agency/core.env")
 
 
 def load_env():
@@ -34,12 +34,12 @@ ZEN_URL = os.environ.get("OPENAI_BASE_URL", "https://api.deepseek.com").rstrip("
 ZEN_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 
 # Fixer first, independent critic second — heterogeneous ensemble.
-REVIEW_MODELS = ["deepseek-chat", "deepseek-reasoner"]
+REVIEW_MODELS = ["deepseek-v4-flash", "deepseek-v4-pro"]
 
 # Rough USD pricing for cost accounting.
 _PRICES = {
-    "deepseek-chat": {"in": 0.27 / 1_000_000, "out": 1.10 / 1_000_000},
-    "deepseek-reasoner": {"in": 0.55 / 1_000_000, "out": 2.19 / 1_000_000},
+    "deepseek-v4-flash": {"in": 0.14 / 1_000_000, "out": 0.28 / 1_000_000},
+    "deepseek-v4-pro": {"in": 0.435 / 1_000_000, "out": 0.87 / 1_000_000},
 }
 
 REVIEW_PROMPT = (
@@ -64,6 +64,7 @@ def call_zen(prompt, model, max_tokens=4000, timeout=90):
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": max_tokens,
+        "thinking": {"type": "disabled"},
     }).encode()
     req = urllib.request.Request(
         ZEN_URL, data=body,

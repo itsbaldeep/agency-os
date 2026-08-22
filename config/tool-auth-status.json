@@ -1,0 +1,10 @@
+{
+  "OPENAI_OAUTH": {
+    "last_checked": "2026-08-22T19:20:20Z",
+    "status": "verified"
+  },
+  "OPENCODE_ZEN_AUTH": {
+    "last_checked": "2026-08-22T19:19:50Z",
+    "status": "invalid"
+  }
+}

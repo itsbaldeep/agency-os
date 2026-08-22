@@ -2,14 +2,15 @@
 -- PostgreSQL database dump
 --
 
-\restrict Xd1z1MNkhDGI1wvtY1hOrCDwGlmdRAeZ2Nhzsu98zKvoYvxc6mfLhxGcsoesMp5
+\restrict jKsvVvJh2HvL4eKK8tmdNhjp6G2La8v8HjBJ2m7sh23u2pJOEN8VlrsP5jrU89G
 
 -- Dumped from database version 16.14
--- Dumped by pg_dump version 16.14
+-- Dumped by pg_dump version 18.6 (Ubuntu 18.6-0ubuntu0.26.04.1)
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
 SET idle_in_transaction_session_timeout = 0;
+SET transaction_timeout = 0;
 SET client_encoding = 'UTF8';
 SET standard_conforming_strings = on;
 SELECT pg_catalog.set_config('search_path', '', false);
@@ -136,39 +137,6 @@ ALTER SEQUENCE public.approvals_id_seq OWNED BY public.approvals.id;
 
 
 --
--- Name: assistant_messages; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.assistant_messages (
-    id integer NOT NULL,
-    role text NOT NULL,
-    content text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    channel_id bigint DEFAULT 0
-);
-
-
---
--- Name: assistant_messages_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.assistant_messages_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: assistant_messages_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.assistant_messages_id_seq OWNED BY public.assistant_messages.id;
-
-
---
 -- Name: audits; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -238,40 +206,6 @@ CREATE SEQUENCE public.background_jobs_id_seq
 --
 
 ALTER SEQUENCE public.background_jobs_id_seq OWNED BY public.background_jobs.id;
-
-
---
--- Name: brand_embeddings; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.brand_embeddings (
-    id integer NOT NULL,
-    brand_id integer NOT NULL,
-    chunk_text text NOT NULL,
-    embedding public.vector(1536),
-    metadata jsonb DEFAULT '{}'::jsonb,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
--- Name: brand_embeddings_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.brand_embeddings_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: brand_embeddings_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.brand_embeddings_id_seq OWNED BY public.brand_embeddings.id;
 
 
 --
@@ -622,7 +556,8 @@ CREATE TABLE public.content_research (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     weaknesses jsonb DEFAULT '[]'::jsonb NOT NULL,
     gaps jsonb DEFAULT '[]'::jsonb NOT NULL,
-    element_strategy text DEFAULT ''::text NOT NULL
+    element_strategy text DEFAULT ''::text NOT NULL,
+    facts jsonb DEFAULT '[]'::jsonb NOT NULL
 );
 
 
@@ -786,41 +721,6 @@ CREATE SEQUENCE public.keywords_id_seq
 --
 
 ALTER SEQUENCE public.keywords_id_seq OWNED BY public.keywords.id;
-
-
---
--- Name: mentions; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.mentions (
-    id integer NOT NULL,
-    brand_id integer NOT NULL,
-    source_url text NOT NULL,
-    source_type text,
-    snippet text,
-    sentiment text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
--- Name: mentions_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.mentions_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: mentions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.mentions_id_seq OWNED BY public.mentions.id;
 
 
 --
@@ -1051,13 +951,6 @@ ALTER TABLE ONLY public.approvals ALTER COLUMN id SET DEFAULT nextval('public.ap
 
 
 --
--- Name: assistant_messages id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.assistant_messages ALTER COLUMN id SET DEFAULT nextval('public.assistant_messages_id_seq'::regclass);
-
-
---
 -- Name: audits id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -1069,13 +962,6 @@ ALTER TABLE ONLY public.audits ALTER COLUMN id SET DEFAULT nextval('public.audit
 --
 
 ALTER TABLE ONLY public.background_jobs ALTER COLUMN id SET DEFAULT nextval('public.background_jobs_id_seq'::regclass);
-
-
---
--- Name: brand_embeddings id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.brand_embeddings ALTER COLUMN id SET DEFAULT nextval('public.brand_embeddings_id_seq'::regclass);
 
 
 --
@@ -1177,13 +1063,6 @@ ALTER TABLE ONLY public.keywords ALTER COLUMN id SET DEFAULT nextval('public.key
 
 
 --
--- Name: mentions id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.mentions ALTER COLUMN id SET DEFAULT nextval('public.mentions_id_seq'::regclass);
-
-
---
 -- Name: projects id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -1227,14 +1106,6 @@ ALTER TABLE ONLY public.approvals
 
 
 --
--- Name: assistant_messages assistant_messages_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.assistant_messages
-    ADD CONSTRAINT assistant_messages_pkey PRIMARY KEY (id);
-
-
---
 -- Name: audits audits_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1256,14 +1127,6 @@ ALTER TABLE ONLY public.background_jobs
 
 ALTER TABLE ONLY public.background_jobs
     ADD CONSTRAINT background_jobs_pkey PRIMARY KEY (id);
-
-
---
--- Name: brand_embeddings brand_embeddings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.brand_embeddings
-    ADD CONSTRAINT brand_embeddings_pkey PRIMARY KEY (id);
 
 
 --
@@ -1411,14 +1274,6 @@ ALTER TABLE ONLY public.keywords
 
 
 --
--- Name: mentions mentions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.mentions
-    ADD CONSTRAINT mentions_pkey PRIMARY KEY (id);
-
-
---
 -- Name: ports ports_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1554,14 +1409,6 @@ ALTER TABLE ONLY public.approvals
 
 ALTER TABLE ONLY public.audits
     ADD CONSTRAINT audits_brand_id_fkey FOREIGN KEY (brand_id) REFERENCES public.brands(id) ON DELETE CASCADE;
-
-
---
--- Name: brand_embeddings brand_embeddings_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.brand_embeddings
-    ADD CONSTRAINT brand_embeddings_brand_id_fkey FOREIGN KEY (brand_id) REFERENCES public.brands(id) ON DELETE CASCADE;
 
 
 --
@@ -1749,14 +1596,6 @@ ALTER TABLE ONLY public.keywords
 
 
 --
--- Name: mentions mentions_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.mentions
-    ADD CONSTRAINT mentions_brand_id_fkey FOREIGN KEY (brand_id) REFERENCES public.brands(id) ON DELETE CASCADE;
-
-
---
 -- Name: ports ports_project_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1824,4 +1663,4 @@ ALTER TABLE ONLY public.token_usage
 -- PostgreSQL database dump complete
 --
 
-\unrestrict Xd1z1MNkhDGI1wvtY1hOrCDwGlmdRAeZ2Nhzsu98zKvoYvxc6mfLhxGcsoesMp5
+\unrestrict jKsvVvJh2HvL4eKK8tmdNhjp6G2La8v8HjBJ2m7sh23u2pJOEN8VlrsP5jrU89G

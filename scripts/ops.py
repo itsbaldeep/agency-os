@@ -35,6 +35,7 @@ BACKUP_DIR = Path(
 )
 OPS_STATE = STATE_DIR / "operations.json"
 ROTATION_STATE = STATE_DIR / "credential-rotations.json"
+TOOL_AUTH_STATUS = CREDENTIAL_DIR / "tool-auth-status.json"
 ROOT_BACKUP_DIR = AGENCY_HOME / "backups/system"
 ROOT_HELPER = "/usr/local/sbin/codex-system-audit"
 SENSITIVE_NAME = re.compile(r"(TOKEN|KEY|SECRET|PASSWORD|PASS|ACCESS|WEBHOOK|AUTH)")
@@ -418,6 +419,21 @@ def credential_inventory() -> list[dict[str, Any]]:
                 "source": gsc.name,
                 "placeholder_like": False,
                 "human_rotated_at": (rotations.get(key) or {}).get("at"),
+            }
+        )
+    for name, state in sorted(read_json(TOOL_AUTH_STATUS, {}).items()):
+        if not isinstance(state, dict):
+            continue
+        key = f"tool-auth-status.json:{name}"
+        records.append(
+            {
+                "id": key,
+                "name": name,
+                "source": "tool-auth-status.json",
+                "placeholder_like": state.get("status") in ("invalid", "missing", "stale"),
+                "human_rotated_at": (rotations.get(key) or {}).get("at"),
+                "health_status": state.get("status", "unknown"),
+                "last_checked": state.get("last_checked"),
             }
         )
     return records
