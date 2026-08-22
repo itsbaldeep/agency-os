@@ -3319,6 +3319,17 @@ def _content_block_spec(bt):
     }.get(bt)
 
 
+def _parse_composed_block(raw_output, block_type):
+    """Normalize wrapped and direct JSON block shapes before validation."""
+    parsed = _draft_parse_json(raw_output or "")
+    if not isinstance(parsed, dict):
+        return None
+    generated = parsed.get("content", parsed)
+    if isinstance(generated, str) and block_type in ("intro", "prose"):
+        generated = {"markdown": generated}
+    return generated if isinstance(generated, dict) else None
+
+
 def _content_visible_blob(block):
     """Serialize only reader-visible fields, excluding control/evidence metadata."""
     hidden = {"brief", "keyword_target", "fact_ids", "sources", "prompt"}
@@ -3664,11 +3675,8 @@ def handle_content_compose(task):
                     "prompt_tokens": total_pt, "completion_tokens": total_ct, "cost": round(total_cost, 8),
                     "model": last_model,
                 }
-            parsed = _draft_parse_json(block_result.get("content") or "")
-            generated = parsed.get("content") if isinstance(parsed, dict) else None
-            if isinstance(generated, str) and bt in ("intro", "prose"):
-                generated = {"markdown": generated}
-            if not isinstance(generated, dict):
+            generated = _parse_composed_block(block_result.get("content"), bt)
+            if generated is None:
                 local_fails = ["output must be a JSON object with an object-valued content key"]
                 continue
             composed = {**carry, **generated}

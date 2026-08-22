@@ -159,6 +159,14 @@ class WorkerWorkflowTests(unittest.TestCase):
             worker._content_block_validate(block, "AI job search assistant"),
         )
 
+    def test_compose_parser_accepts_wrapped_and_direct_block_json(self):
+        wrapped = worker._parse_composed_block('{"content":{"markdown":"Useful"}}', "prose")
+        direct = worker._parse_composed_block('{"markdown":"Useful"}', "prose")
+        string_wrapped = worker._parse_composed_block('{"content":"Useful"}', "prose")
+        self.assertEqual(wrapped, {"markdown": "Useful"})
+        self.assertEqual(direct, wrapped)
+        self.assertEqual(string_wrapped, wrapped)
+
     def test_compose_checkpoint_must_match_outline_prefix(self):
         outline = [{"type": "intro"}, {"type": "prose"}]
         checkpoint = [{"type": "heading", "heading": "Wrong block"}]
