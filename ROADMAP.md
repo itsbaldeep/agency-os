@@ -32,13 +32,11 @@ State locked: 2026-08-16 (fresh-context handoff).
 - [x] Suggestion semantics: black-box → instructions only (no approve/reject buttons,
       "Requires Code Access" gates, how-to steps); code brands → "Implement Now"
       creates dev task; content suggestions → "Generate Content" → /content/new
-- [x] **Free-model fallback (2026-08-16):** credits exhausted on opencode workspace
-      (HTTP 401 CreditsError). Added fallback chain to call_zen (worker.py) + zen
-      (self-tuning-brand-audit.py, suggestion-engine.py):
-      hy3-free → laguna-s-2.1-free → nemotron-3-ultra-free → deepseek-v4-flash-free
-      → mimo-v2.5-free. All $0. Verified: content_compose task 270 ran 17 blocks
-      entirely on hy3-free at $0. hy3-free/laguna-s-2.1-free/nemotron-3-ultra-free
-      tested working; deepseek-v4-flash-free + mimo-v2.5-free currently rate-limited.
+- [x] **Model-stack migration (2026-08-22):** Codex CLI replaces OpenCode for
+      worker coding tasks and Discord `!run`/`!ask`; it uses subscription auth,
+      not API keys. Raw LLM calls use DeepSeek `deepseek-chat` with
+      `DEEPSEEK_API_KEY`, then z.ai GLM-4.5-Flash and a configurable OpenRouter
+      `:free` model as cross-host fallbacks. `OPENCODE_FALLBACK=1` is rollback.
 - [ ] Wire suggestion Approve → creates a task (still a no-op status flip; buttons
       hidden for black-box brands, but /api/suggestions/<id>/approve endpoint exists)
 - [ ] Fix activity timeline query (events traced with project="brands", not brand name)
@@ -112,8 +110,8 @@ State locked: 2026-08-16 (fresh-context handoff).
 - ClickHouse ai_visibility_checks: brand 1=60, 2=60, 4=15 rows.
 - Worker: systemd agency-worker, restarts on deploy (orphans running tasks —
   re-queue after each agency-os push). Deploy jobs: 8 (agency-os, 2min),
-  9 (dashboard, 3min) — both enabled. Deploy scripts SKIP when the deployed repo
+  9 (dashboard, 3min) — both disabled; do not re-enable them. Deploy scripts SKIP when the deployed repo
   /home/agency/agency-os has uncommitted changes (commit config drift there first).
-- Dashboard: 100.64.0.1:5001. OpenCode: 100.64.0.1:4096.
-- Credits: exhausted as of 2026-08-16; free fallback active. Paid model
-  deepseek-v4-flash resumes when workspace is topped up.
+- Dashboard: 100.64.0.1:5001. Codex CLI is the agent harness; OpenCode is
+  retained only behind `OPENCODE_FALLBACK=1`.
+- Raw completions: DeepSeek `deepseek-chat`, then z.ai/OpenRouter fallback.

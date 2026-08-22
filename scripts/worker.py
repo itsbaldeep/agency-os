@@ -483,6 +483,85 @@ def call_zen(prompt, model="deepseek-chat", max_tokens=1500, temperature=None, t
     except Exception as e:
         return {"ok": False, "error": str(e)[:500], "model": model}
 
+
+def _codex_env():
+    """Return an environment that forces Codex CLI to use subscription auth."""
+    env = {**os.environ, "HOME": "/home/agency", "NO_COLOR": "1"}
+    # The worker has these for DeepSeek raw completions. Passing either lets
+    # Codex use the API key instead of ~/.codex/auth.json.
+    env.pop("OPENAI_API_KEY", None)
+    env.pop("OPENAI_BASE_URL", None)
+    env.pop("DEEPSEEK_API_KEY", None)
+    env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
+    return env
+
+
+def _codex_tokens(json_stream):
+    """Best-effort token accounting across Codex CLI JSON event versions."""
+    tokens_in = tokens_out = 0
+    for line in (json_stream or "").splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        # CLI releases have exposed usage on either a completed turn or its
+        # nested result. Count at most one usage object per event.
+        result = event.get("result") if isinstance(event.get("result"), dict) else {}
+        turn = event.get("turn") if isinstance(event.get("turn"), dict) else {}
+        candidates = (event.get("usage"), result.get("usage"), turn.get("usage"))
+        usage = next((u for u in candidates if isinstance(u, dict)), None)
+        if not usage:
+            continue
+        tokens_in += int(usage.get("input_tokens", usage.get("prompt_tokens", 0)) or 0)
+        tokens_out += int(usage.get("output_tokens", usage.get("completion_tokens", 0)) or 0)
+    return tokens_in, tokens_out
+
+
+def run_codex(prompt, workdir, model=None, timeout=300):
+    """Run Codex in a worktree and return (exit code, JSONL output, token use)."""
+    import subprocess
+    cmd = ["codex", "exec", "--json", "-C", workdir, "--sandbox", "workspace-write",
+           "--skip-git-repo-check"]
+    if model:
+        cmd.extend(["--model", model])
+    cmd.append(prompt)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=_codex_env())
+    except subprocess.TimeoutExpired:
+        return 124, "codex timed out", 0, 0
+    output = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
+    tokens_in, tokens_out = _codex_tokens(proc.stdout)
+    return proc.returncode, output, tokens_in, tokens_out
+
+
+def run_opencode(prompt, workdir, model=None, timeout=300):
+    """Legacy escape hatch; use only when OPENCODE_FALLBACK is explicitly set."""
+    import subprocess
+    cmd = ["/home/agency/.opencode/bin/opencode", "run", "--dir", workdir, prompt,
+           "--dangerously-skip-permissions", "--format", "json"]
+    if model:
+        cmd.extend(["--model", model])
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env={**os.environ, "HOME": "/home/agency"})
+    except subprocess.TimeoutExpired:
+        return 124, "opencode timed out", 0, 0
+    tokens_in = tokens_out = 0
+    for line in (proc.stdout or "").splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        usage = event.get("part", {}).get("tokens", {}) if event.get("type") == "step_finish" else {}
+        tokens_in += usage.get("input", 0)
+        tokens_out += usage.get("output", 0)
+    return proc.returncode, (proc.stdout or ""), tokens_in, tokens_out
+
+
+def run_agent_harness(prompt, workdir, model=None, timeout=300):
+    if os.environ.get("OPENCODE_FALLBACK", "").lower() in ("1", "true", "yes"):
+        return run_opencode(prompt, workdir, model=model, timeout=timeout)
+    return run_codex(prompt, workdir, model=model, timeout=timeout)
+
 def handle_onboard_project(task):
     """Deterministic repo onboarding. Never invokes opencode."""
     import re as _re, subprocess, os as _os
@@ -550,7 +629,7 @@ def handle_propose_fix(task):
     params = task["params"] or {}
     repo = params.get("repo", "")
     description = params.get("description", "")
-    model = params.get("model") or "deepseek-chat"
+    model = params.get("model")
     timeout_s = int(params.get("timeout") or 600)
 
     proj = get_project(repo)
@@ -614,42 +693,15 @@ def handle_propose_fix(task):
 
     try:
         # ── Iterative agentic fix loop ───────────────────────────────────
-        # opencode produces a change; a multi-model ensemble critiques it;
-        # findings are fed back and opencode re-runs until CLEAN or the
+        # Codex produces a change; a multi-model ensemble critiques it;
+        # findings are fed back and Codex re-runs until CLEAN or the
         # round cap is hit. Everything happens BEFORE the PR is opened so
         # we never burn PR round-trips on a poor first pass.
         ponytail_prefix = ("[PONYTAIL full] Apply lazy senior dev principles: "
                            "question whether this needs to exist (YAGNI), prefer standard "
                            "library over custom code, native features over dependencies, "
                            "one line over fifty. ")
-        opencode_bin = "/home/agency/.opencode/bin/opencode"
-
-        def run_opencode(prompt):
-            oc_env = {**os.environ, "HOME": "/home/agency",
-                      "OPENAI_BASE_URL": ZEN_URL.rsplit("/chat", 1)[0],
-                      "OPENAI_API_KEY": ZEN_KEY}
-            oc_env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
-            oc = subprocess.run(
-                [opencode_bin, "run", "--dir", wk, prompt,
-                 "--dangerously-skip-permissions", "--format", "json",
-                 "--model", model],
-                capture_output=True, text=True, timeout=timeout_s, env=oc_env)
-            tin = tout = 0
-            for line in (oc.stdout or "").splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    ev = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if ev.get("type") == "step_finish":
-                    t = ev.get("part", {}).get("tokens", {})
-                    tin += t.get("input", 0)
-                    tout += t.get("output", 0)
-            return oc.returncode, oc.stdout or "", tin, tout
-
-        prices = MODEL_PRICING.get(model, {"in": INPUT_COST_PER_TOKEN, "out": OUTPUT_COST_PER_TOKEN})
+        prices = MODEL_PRICING["codex"]
         total_in = 0
         total_out = 0
         cost = 0.0
@@ -660,23 +712,23 @@ def handle_propose_fix(task):
         for round_i in range(1, max_rounds + 1):
             _pct = 10 if max_rounds <= 1 else min(75, 10 + round((round_i - 1) * (65 / (max_rounds - 1))))
             set_task_progress(task["id"], _pct,
-                              f"round {round_i}/{max_rounds}: running opencode self-fix")
+                              f"round {round_i}/{max_rounds}: running Codex self-fix")
             prompt = ponytail_prefix + description
             if problem:
                 prompt += ("\n\nYour earlier attempt was reviewed and flagged these "
                            "issues. Address them; keep what already works:\n" + problem)
-            rc, out, tin, tout = run_opencode(prompt)
+            rc, out, tin, tout = run_agent_harness(prompt, wk, model=model, timeout=timeout_s)
             total_in += tin
             total_out += tout
             cost = total_in * prices["in"] + total_out * prices["out"]
             if rc != 0:
                 if not produced:
-                    raise RuntimeError(f"opencode exited {rc} | {out[:400]}")
+                    raise RuntimeError(f"agent harness exited {rc} | {out[:400]}")
                 break
             status = git("status", "--porcelain")
             if not status.stdout.strip():
                 if not produced:
-                    raise RuntimeError("no changes produced by opencode")
+                    raise RuntimeError("no changes produced by Codex")
                 break
             git("add", "-A")
             c = git("commit", "--no-verify", "-m",
@@ -825,7 +877,7 @@ def handle_propose_fix(task):
             _tu = get_conn()
             _tuc = _tu.cursor()
             _tuc.execute("INSERT INTO token_usage (model, tokens_in, tokens_out, cost_usd) VALUES (%s, %s, %s, %s)",
-                         (model, total_in, total_out, round(cost, 8)))
+                         ("codex" if not os.environ.get("OPENCODE_FALLBACK") else (model or "opencode"), total_in, total_out, round(cost, 8)))
             _tu.commit()
             _tu.close()
         except Exception as e:
@@ -851,7 +903,7 @@ def handle_agent_task(task):
     params = task["params"] or {}
     repo = params.get("repo", "")
     prompt = (params.get("prompt") or "").strip()
-    model = params.get("model") or "deepseek-chat"
+    model = params.get("model")
     timeout_s = int(params.get("timeout") or 300)
 
     proj = get_project(repo)
@@ -863,34 +915,16 @@ def handle_agent_task(task):
     import subprocess, os as _os, re
     repo_path = proj["local_path"]
     log_path = f"/home/agency/agency-os/logs/task-{task['id']}.log"
-    oc_env = {**os.environ, "HOME": "/home/agency",
-              "OPENAI_BASE_URL": ZEN_URL.rsplit("/chat", 1)[0],
-              "OPENAI_API_KEY": ZEN_KEY, "NO_COLOR": "1"}
-    oc_env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
     _os.makedirs("/home/agency/agency-os/logs", exist_ok=True)
-    proc = subprocess.Popen(
-        ["/home/agency/.opencode/bin/opencode", "run", prompt,
-         "--auto",
-         "--model", model],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-        cwd=repo_path, env=oc_env,
-    )
-    lines = []
-    try:
-        with open(log_path, "w") as f:
-            for line in proc.stdout:
-                f.write(line)
-                f.flush()
-                lines.append(line)
-            proc.wait(timeout=timeout_s)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
+    rc, raw_out, tokens_in, tokens_out = run_agent_harness(prompt, repo_path, model=model, timeout=timeout_s)
+    with open(log_path, "w") as f:
+        f.write(raw_out)
+    if rc == 124:
         return {"ok": False, "error": f"agent task timed out after {timeout_s}s"}
-    out = redact_secrets(re.sub(r'\x1b\[[0-9;]*m', '', "".join(lines)).strip())
+    out = redact_secrets(re.sub(r'\x1b\[[0-9;]*m', '', raw_out).strip())
     if not out:
-        out = f"(opencode exited {proc.returncode}, no output)"
-    if proc.returncode != 0:
+        out = f"(agent harness exited {rc}, no output)"
+    if rc != 0:
         return {"ok": False, "error": out[-500:]}
 
     # Ensemble review of any working-tree changes the run produced.
@@ -908,19 +942,19 @@ def handle_agent_task(task):
     except Exception:
         pass
 
-    return {"ok": True, "content": out[-1500:], "prompt_tokens": 0, "completion_tokens": 0, "cost": 0}
+    return {"ok": True, "content": out[-1500:], "prompt_tokens": tokens_in, "completion_tokens": tokens_out, "cost": 0}
 
 
 def handle_ask(task):
     params = task["params"] or {}
     question = (params.get("question") or "").strip()
-    model = params.get("model") or "deepseek-chat"
+    model = params.get("model")
     timeout_s = int(params.get("timeout") or 300)
 
     if not question:
         return {"ok": False, "error": "question is required"}
 
-    import subprocess, os as _os, re
+    import re
     sys_ctx = ("You are the operations assistant for this VPS (Agency OS). Answer using LIVE data by "
                "running read-only commands: docker ps, systemctl list-units --type=service --state=running, "
                "ss -tlnp, df -h, free -h, crontab -l, reading files under /home/agency/agency-os and "
@@ -932,32 +966,15 @@ def handle_ask(task):
                "contents of .env files; use credentials silently.")
     prompt = f"{sys_ctx}\n\nQuestion: {question}"
 
-    oc_env = {**os.environ, "HOME": "/home/agency",
-              "OPENAI_BASE_URL": ZEN_URL.rsplit("/chat", 1)[0],
-              "OPENAI_API_KEY": ZEN_KEY, "NO_COLOR": "1"}
-    oc_env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
-    proc = subprocess.Popen(
-        ["/home/agency/.opencode/bin/opencode", "run", prompt,
-         "--auto",
-         "--model", model],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-        cwd="/home/agency", env=oc_env,
-    )
-    lines = []
-    try:
-        for line in proc.stdout:
-            lines.append(line)
-        proc.wait(timeout=timeout_s)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
+    rc, raw_out, tokens_in, tokens_out = run_agent_harness(prompt, "/home/agency", model=model, timeout=timeout_s)
+    if rc == 124:
         return {"ok": False, "error": f"ask timed out after {timeout_s}s"}
-    out = redact_secrets(re.sub(r'\x1b\[[0-9;]*m', '', "".join(lines)).strip())
+    out = redact_secrets(re.sub(r'\x1b\[[0-9;]*m', '', raw_out).strip())
     if not out:
-        out = f"(opencode exited {proc.returncode}, no output)"
-    if proc.returncode != 0:
+        out = f"(agent harness exited {rc}, no output)"
+    if rc != 0:
         return {"ok": False, "error": out[-500:]}
-    return {"ok": True, "content": out, "prompt_tokens": 0, "completion_tokens": 0, "cost": 0}
+    return {"ok": True, "content": out, "prompt_tokens": tokens_in, "completion_tokens": tokens_out, "cost": 0}
 
 
 def slug(text):

@@ -21,7 +21,7 @@
 # for client marketing work; game stays running, agent no longer grinds on it).
 # To resume: uncomment and set background_jobs.id=12 enabled=true.
 # */30 * * * * /home/agency/agency-os/scripts/run-job.sh 12 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
-# Competitor scan enqueue — Mondays 08:00 IST (02:30 UTC)
-30 2 * * 1 /home/agency/agency-os/scripts/run-job.sh 13 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
+# Competitor scan enqueue — Mondays 10:00 IST (04:30 UTC; outside DeepSeek peak windows)
+30 4 * * 1 /home/agency/agency-os/scripts/run-job.sh 13 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
 # Competitor digest — Mondays 09:35 IST (04:05 UTC)
 5 4 * * 1 /home/agency/agency-os/scripts/run-job.sh 14 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
