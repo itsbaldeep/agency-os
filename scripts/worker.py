@@ -3171,7 +3171,8 @@ def handle_content_outline(task):
                  "The user provided a draft title: use it as-is if it is already grammatically "
                  "correct and reads well. If it has clear grammatical errors (e.g. broken word "
                  "order, nonsensical phrases), fix ONLY the errors while preserving the wording "
-                 "and intent as closely as possible. Do not rewrite a provided title freely."
+                 "and intent as closely as possible. Do not rewrite a provided title freely. "
+                 f"PROVIDED TITLE: {json.dumps(str(params.get('title')))}"
                  if params.get("title")
                  else "No title was provided — generate a fresh, compelling one from the "
                       "keyword and competitive strategy."))
@@ -3318,13 +3319,19 @@ def _content_block_spec(bt):
     }.get(bt)
 
 
+def _content_visible_blob(block):
+    """Serialize only reader-visible fields, excluding control/evidence metadata."""
+    hidden = {"brief", "keyword_target", "fact_ids", "sources", "prompt"}
+    return json.dumps({k: v for k, v in block.items() if k not in hidden}, default=str)
+
+
 def _content_block_validate(block, keyword=""):
     """Validate one composed block so retries can be local and cheap."""
     if not isinstance(block, dict):
         return ["not an object"]
     bt = block.get("type")
     fails = []
-    blob = json.dumps(block, default=str)
+    blob = _content_visible_blob(block)
     low = blob.casefold()
     if "[placeholder" in low:
         fails.append("contains a placeholder token")
@@ -3396,9 +3403,9 @@ def _content_compose_validate(filled, keyword):
     # keyword placement contract
     if target:
         has_kw = [i for i, b in enumerate(filled) if isinstance(b, dict) and b.get("keyword_target")
-                  and target in json.dumps(b).lower()]
+                  and target in _content_visible_blob(b).lower()]
         intro_idx = next((i for i, b in enumerate(filled) if isinstance(b, dict) and b.get("type") == "intro"), None)
-        if intro_idx is not None and target not in json.dumps(filled[intro_idx]).lower():
+        if intro_idx is not None and target not in _content_visible_blob(filled[intro_idx]).lower():
             fails.append("target_keyword missing from intro block")
         if len([i for i in has_kw if i != intro_idx]) < 1:
             fails.append("target_keyword must appear in intro AND at least one other keyword_target block")
@@ -3487,6 +3494,43 @@ def _content_assemble_plain(filled):
     return "\n\n".join(parts).rstrip()
 
 
+def _compose_checkpoint_validate(outline, checkpoint, keyword):
+    """A checkpoint is usable only when it is a valid prefix of this outline."""
+    if not isinstance(checkpoint, list):
+        return ["checkpoint is not an array"]
+    if len(checkpoint) > len(outline):
+        return ["checkpoint is longer than the outline"]
+    fails = []
+    for idx, block in enumerate(checkpoint):
+        if not isinstance(block, dict):
+            fails.append(f"checkpoint block {idx + 1} is not an object")
+            continue
+        if block.get("type") != outline[idx].get("type"):
+            fails.append(f"checkpoint block {idx + 1} type does not match outline")
+            continue
+        fails.extend(
+            f"checkpoint block {idx + 1}: {reason}"
+            for reason in _content_block_validate(block, keyword)
+        )
+    return fails
+
+
+def _store_compose_checkpoint(content_item_id, filled):
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE content_items SET content_blocks=%s, updated_at=now() "
+            "WHERE id=%s AND status='outline'",
+            (json.dumps(filled), content_item_id),
+        )
+        if cur.rowcount != 1:
+            raise RuntimeError("content item left outline state during compose")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def handle_content_compose(task):
     """Compose an approved outline with evidence and spend boundaries.
 
@@ -3501,7 +3545,7 @@ def handle_content_compose(task):
     conn = get_conn()
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("SELECT id, brand_id, structured FROM content_items WHERE id=%s AND status='outline'", (ci_id,))
+        cur.execute("SELECT id, brand_id, structured, content_blocks FROM content_items WHERE id=%s AND status='outline'", (ci_id,))
         row = cur.fetchone()
     finally:
         conn.close()
@@ -3525,13 +3569,18 @@ def handle_content_compose(task):
     total_cost = 0.0
     total_pt = 0
     total_ct = 0
-    filled = []
+    filled = list(row.get("content_blocks") or [])
+    checkpoint_fails = _compose_checkpoint_validate(outline, filled, keyword)
+    if checkpoint_fails:
+        return {"ok": False, "error": "content_compose: invalid checkpoint: " + "; ".join(checkpoint_fails)}
     last_model = params.get("model") or MODEL_CONFIG["quality"]
     compact_outline = [
         {k: b.get(k) for k in ("type", "brief", "keyword_target", "fact_ids") if b.get(k) not in (None, False, [])}
         for b in outline
     ]
     for idx, block in enumerate(outline, 1):
+        if idx <= len(filled):
+            continue
         bt = block.get("type")
         set_task_progress(task["id"], int(15 + 80 * (idx - 1) / n), f"compose: {bt} {idx}/{n}")
         refs = [str(v) for v in (block.get("fact_ids") or [])]
@@ -3544,9 +3593,11 @@ def handle_content_compose(task):
         }
         if bt == "heading":
             filled.append({**carry, "heading": block.get("brief") or "Untitled section"})
+            _store_compose_checkpoint(ci_id, filled)
             continue
         if bt == "image_slot":
             filled.append({**carry, "alt": block.get("alt", ""), "prompt": block.get("prompt", "")})
+            _store_compose_checkpoint(ci_id, filled)
             continue
         if bt not in LLM_BLOCK_TYPES:
             return {"ok": False, "error": f"content_compose: unsupported block type {bt}"}
@@ -3629,6 +3680,7 @@ def handle_content_compose(task):
             local_fails = _content_block_validate(composed, keyword)
             if not local_fails:
                 filled.append(composed)
+                _store_compose_checkpoint(ci_id, filled)
                 break
         else:
             return {

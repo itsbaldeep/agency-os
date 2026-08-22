@@ -150,6 +150,21 @@ class WorkerWorkflowTests(unittest.TestCase):
         self.assertIn("target_keyword missing from keyword_target block",
                       worker._content_block_validate(block, "job search automation"))
 
+    def test_hidden_brief_does_not_trigger_keyword_stuffing(self):
+        block = {"type": "prose", "brief": "Explain the AI job search assistant category",
+                 "markdown": "Compare the tools by workflow and evidence.",
+                 "keyword_target": False, "fact_ids": [], "sources": []}
+        self.assertNotIn(
+            "target_keyword appears in an unflagged block",
+            worker._content_block_validate(block, "AI job search assistant"),
+        )
+
+    def test_compose_checkpoint_must_match_outline_prefix(self):
+        outline = [{"type": "intro"}, {"type": "prose"}]
+        checkpoint = [{"type": "heading", "heading": "Wrong block"}]
+        failures = worker._compose_checkpoint_validate(outline, checkpoint, "keyword")
+        self.assertTrue(any("does not match outline" in failure for failure in failures))
+
     def test_failure_first_aid_is_deterministic(self):
         category, action = worker.classify_failure("draft failed validation: invalid JSON")
         self.assertEqual(category, "deterministic validation")
