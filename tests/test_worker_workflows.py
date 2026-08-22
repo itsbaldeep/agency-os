@@ -59,6 +59,24 @@ class WorkerWorkflowTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertGreater(result["cost"], 0)
 
+    def test_truncated_primary_usage_survives_failed_fallback(self):
+        response = SimpleNamespace(read=lambda: json.dumps({
+            "choices": [{"message": {"content": "partial"}, "finish_reason": "length"}],
+            "usage": {"prompt_tokens": 25, "completion_tokens": 400,
+                      "prompt_cache_hit_tokens": 0, "prompt_cache_miss_tokens": 25},
+        }).encode())
+        with mock.patch.object(worker.urllib.request, "urlopen", return_value=response), \
+             mock.patch.object(worker, "_raw_opencode_fallback", return_value={
+                 "ok": False, "error": "fallback failed", "prompt_tokens": 7,
+                 "completion_tokens": 3, "cost": 0.0, "model": "fallback",
+             }):
+            result = worker.call_zen("A verbose prompt", model="deepseek-v4-flash")
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["prompt_tokens"], 32)
+        self.assertEqual(result["completion_tokens"], 403)
+        self.assertGreater(result["cost"], 0)
+        self.assertEqual(result["incomplete_primary_model"], "deepseek-v4-flash")
+
     def test_raw_opencode_command_disables_tools(self):
         proc = SimpleNamespace(returncode=0, stdout='{"part":{"type":"text","text":"ok"}}\n', stderr="")
         with mock.patch("subprocess.run", return_value=proc) as run, \

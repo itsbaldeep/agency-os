@@ -643,11 +643,6 @@ def call_zen(prompt, model="deepseek-v4-flash", max_tokens=1500, temperature=Non
         choice = data.get("choices", [{}])[0]
         content = choice.get("message", {}).get("content", "")
         finish_reason = choice.get("finish_reason")
-        if not content or finish_reason == "length":
-            return _raw_opencode_fallback(
-                prompt, json_mode, timeout, model,
-                f"empty or incomplete completion (finish_reason={finish_reason})",
-            )
         usage = data.get("usage", {})
         pt = usage.get("prompt_tokens", 0)
         ct = usage.get("completion_tokens", 0)
@@ -655,9 +650,22 @@ def call_zen(prompt, model="deepseek-v4-flash", max_tokens=1500, temperature=Non
         cache_miss = usage.get("prompt_cache_miss_tokens", pt - cache_hit)
         is_free = _fb_index > 0
         pricing = MODEL_PRICING.get(model, MODEL_PRICING["deepseek-v4-flash"])
-        cost = 0.0 if is_free else (cache_hit * pricing.get("cache", pricing["in"])
-                                    + cache_miss * pricing["in"] + ct * pricing["out"])
-        return {"ok": True, "content": content, "prompt_tokens": pt, "completion_tokens": ct, "cost": round(cost, 8), "model": model}
+        api_cost = 0.0 if is_free else (cache_hit * pricing.get("cache", pricing["in"])
+                                        + cache_miss * pricing["in"] + ct * pricing["out"])
+        if not content or finish_reason == "length":
+            fallback = _raw_opencode_fallback(
+                prompt, json_mode, timeout, model,
+                f"empty or incomplete completion (finish_reason={finish_reason})",
+            )
+            # A rejected/truncated completion is still provider-billed usage.
+            # Preserve it in the task ledger even when a fallback supplies the
+            # usable answer (or every fallback also fails).
+            fallback["prompt_tokens"] = fallback.get("prompt_tokens", 0) + pt
+            fallback["completion_tokens"] = fallback.get("completion_tokens", 0) + ct
+            fallback["cost"] = round(fallback.get("cost", 0.0) + api_cost, 8)
+            fallback["incomplete_primary_model"] = model
+            return fallback
+        return {"ok": True, "content": content, "prompt_tokens": pt, "completion_tokens": ct, "cost": round(api_cost, 8), "model": model}
     except urllib.error.HTTPError as e:
         body = e.read().decode()[:500] if hasattr(e, 'read') else str(e)
         error_text = body.lower()
