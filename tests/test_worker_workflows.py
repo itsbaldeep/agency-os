@@ -205,6 +205,17 @@ class WorkerWorkflowTests(unittest.TestCase):
         rejected = worker.handle_operator_chore({"params": {"action": "run_any_shell"}})
         self.assertFalse(rejected["ok"])
 
+    def test_operator_chore_marks_credential_and_refreshes_snapshot(self):
+        with mock.patch.object(worker.agency_ops, "mark_credential", return_value=[] ) as mark, \
+             mock.patch.object(worker, "_refresh_alert_snapshot") as refresh:
+            result = worker.handle_operator_chore({
+                "type": "operator_chore",
+                "params": {"action": "mark_credential", "credential_id": "core.env:SAFE"},
+            })
+        self.assertTrue(result["ok"])
+        mark.assert_called_once_with("core.env:SAFE")
+        refresh.assert_called_once_with()
+
     def test_task_usage_has_one_central_insert(self):
         cursor = FakeCursor()
         worker.record_task_usage(
