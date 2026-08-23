@@ -1,4 +1,4 @@
-# Agency OS — CEO Directive (state verified 2026-08-22)
+# Agency OS — CEO Directive (state verified 2026-08-23)
 
 Authority: human co-CEO + AI co-CEO (Codex CLI). This file is the persistent
 strategic context — read it on every session start. It supersedes informal
@@ -76,6 +76,10 @@ report → repeat.** Every step visible on the dashboard.
   RAM, disk, container use, pending packages, and reboot state. The daily Discord
   digest surfaces task/content failure rates, recovery/credential debt, package
   debt, and required reboot state rather than repeating routine success noise.
+- Dashboard Alerts (`:5001/alerts`) is now the single human chore inbox. It exposes
+  the latest backup/SCP/SHA evidence, weekly off-site acknowledgement, credential
+  names/rotation state, exact host-maintenance commands, and silent whitelisted
+  rechecks. Discord deep-links there. Operations approvals are core/system-only.
 - Core and engagement resources are separate. Hearth and Streamwise are soft
   parked; Aetheria and the old jobs/resume stack are hard parked; Deployden is
   non-parkable core; Weft is reserved and not created.
@@ -146,8 +150,9 @@ self-fixing remain parked until the core client workflow is dependable.
 ## 6. What I need from the human co-CEO (checklist)
 
 ### Immediate (unblocks Phase 1)
-- [ ] Copy the latest verified core backup to the laptop, then run the explicit
-      Saturday acknowledgement command. The VPS must continue nagging until done.
+- [ ] In Dashboard → Alerts, copy the latest verified core backup to the laptop,
+      verify the displayed SHA-256, then mark the Saturday acknowledgement. The
+      VPS must continue nagging until done.
 - [ ] Human-rotate/acknowledge every unrotated central credential. Replace the
       invalid OpenCode Zen auth only if its free fallback remains desired.
 - [ ] Grant Deployden GSC and GA4 property access to the existing service account.

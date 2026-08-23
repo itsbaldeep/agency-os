@@ -40,6 +40,7 @@ done <<< "$services"
 # Produce the dashboard's read-only host snapshot. This replaces a Docker
 # control-socket mount inside the web container.
 /usr/bin/python3 /home/agency/agency-os/scripts/collect-host-health.py
+/usr/bin/python3 /home/agency/agency-os/scripts/collect-alert-state.py
 
 if [ "$written" -eq 0 ]; then
     echo "NOOP health state unchanged"
