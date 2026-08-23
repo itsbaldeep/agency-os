@@ -4,7 +4,7 @@ Mission: operate a truthful, service-based development, design, marketing,
 SEO/AEO, and content agency from one VPS. Deterministic code owns evidence and
 execution; models propose bounded artifacts; humans approve material actions.
 
-State verified: 2026-08-22. Read `CEO_DIRECTIVE.md` first and the latest audit
+State verified: 2026-08-23. Read `CEO_DIRECTIVE.md` first and the latest audit
 execution log second.
 
 ## Current reality
@@ -31,6 +31,11 @@ execution log second.
   copy and Saturday acknowledgement are still human actions.
 - Dashboard Resources and the daily Discord digest now expose host maintenance.
   Twenty-three package updates and a required kernel reboot remain operator work.
+- Dashboard Alerts at `:5001/alerts` is the human chore inbox: it shows the latest
+  backup/SCP/SHA evidence, weekly laptop acknowledgement, name-only credential
+  rotation state, exact package commands, and silent deterministic rechecks.
+  Discord digests deep-link there. Operations approvals are core/system-only;
+  engagement/content decisions stay in their own workflow.
 
 ## Stabilization completed on 2026-08-22
 
@@ -55,6 +60,8 @@ execution log second.
 - [x] Proved a black-box Jobright baseline: audit task 287 completed 15/15 bounded
       samples; research 288, outline 291, and compose 297 produced draft 20 with
       18 validated blocks and four reverified public sources. Nothing was published.
+- [x] Added the Alerts control plane and Tools registry; production recheck task 298
+      and backup verification task 299 completed with zero model tokens.
 
 ## Next focus — real first-party SEO on Deployden
 
@@ -101,7 +108,8 @@ execution log second.
 
 ## Human gates still open
 
-- [ ] Copy the latest core backup to the laptop and mark the Saturday acknowledgement.
+- [ ] In Dashboard → Alerts, copy the latest core backup to the laptop, verify the
+      displayed SHA-256, and mark the Saturday acknowledgement.
 - [ ] Human-rotate every unacknowledged core credential; replace invalid OpenCode Zen
       auth if free fallback is still desired.
 - [ ] Add fixed-target `backup-core` support to `/usr/local/sbin/codex-system-audit`.
