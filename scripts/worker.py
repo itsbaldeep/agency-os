@@ -4,6 +4,7 @@ import json, os, sys, time, urllib.request, urllib.error, base64, socket, psycop
 import math, re
 from datetime import datetime, timezone
 import pr_review  # bounded machine review for explicitly requested proposal tasks
+import ops as agency_ops
 
 ENV_PATH = os.environ.get("AGENCY_ENV_FILE", "/home/agency/.config/agency/core.env")
 
@@ -137,6 +138,9 @@ def classify_failure(error):
 
 
 def notify_task_failure(task, error):
+    params = task.get("params") or {}
+    if task.get("type") == "operator_chore" and isinstance(params, dict) and params.get("silent"):
+        return
     category, action = classify_failure(error)
     now = time.time()
     task_type = task.get("type", "unknown")
@@ -4511,6 +4515,62 @@ def handle_execute_approval(task):
     )
 
 
+def _refresh_alert_snapshot(refresh_host=False):
+    import subprocess as _subprocess
+    scripts = "/home/agency/agency-os/scripts"
+    if refresh_host:
+        result = _subprocess.run(
+            ["/usr/bin/python3", f"{scripts}/collect-host-health.py"],
+            capture_output=True, text=True, timeout=45,
+        )
+        if result.returncode:
+            raise RuntimeError(f"host recheck failed: {result.stderr[-300:]}")
+    result = _subprocess.run(
+        ["/usr/bin/python3", f"{scripts}/collect-alert-state.py"],
+        capture_output=True, text=True, timeout=45,
+    )
+    if result.returncode:
+        raise RuntimeError(f"alert recheck failed: {result.stderr[-300:]}")
+
+
+def handle_operator_chore(task):
+    """Whitelisted dashboard chores; no arbitrary commands or secret values."""
+    params = task.get("params") or {}
+    action = params.get("action")
+    if action == "mark_offsite":
+        if params.get("confirmed") is not True:
+            return _needs_input(
+                "Confirm that the laptop copy exists and its SHA-256 matches before acknowledging it.",
+                ["confirmed laptop copy and matching SHA-256"],
+            )
+        result = agency_ops.mark_offsite(str(params.get("note") or "Dashboard acknowledgement"))
+        _refresh_alert_snapshot()
+    elif action == "mark_credential":
+        identifier = str(params.get("credential_id") or "")
+        result = agency_ops.mark_credential(identifier)
+        _refresh_alert_snapshot()
+    elif action == "verify_backup":
+        status = agency_ops.operations_status()
+        path = (status.get("last_backup") or {}).get("path")
+        if not path:
+            return {"ok": False, "error": "No recorded backup is available to verify"}
+        result = agency_ops.verify_and_record_backup(agency_ops.Path(path))
+        _refresh_alert_snapshot()
+    elif action in ("recheck_all", "recheck_system", "recheck_credentials"):
+        _refresh_alert_snapshot(refresh_host=action in ("recheck_all", "recheck_system"))
+        result = {"rechecked": action}
+    else:
+        return {"ok": False, "error": "Unsupported operator chore"}
+    return {
+        "ok": True,
+        "content": json.dumps({"action": action, "result": result}, default=str)[:20000],
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "cost": 0,
+        "model": "deterministic",
+    }
+
+
 DISPATCH = {
     "defend_audit": handle_defend_audit,
     "content_research": handle_content_research,
@@ -4529,6 +4589,7 @@ DISPATCH = {
     "execute_suggestion": handle_execute_suggestion,
     "publish_content": handle_publish_content,
     "execute_approval": handle_execute_approval,
+    "operator_chore": handle_operator_chore,
 }
 
 def poll():

@@ -193,6 +193,18 @@ class WorkerWorkflowTests(unittest.TestCase):
         self.assertEqual(result["status"], "needs_input")
         self.assertEqual(result["required_inputs"], ["credential_ref"])
 
+    def test_operator_chore_is_whitelisted_and_silent(self):
+        with mock.patch.object(worker, "_refresh_alert_snapshot") as refresh:
+            result = worker.handle_operator_chore({
+                "id": 99,
+                "type": "operator_chore",
+                "params": {"action": "recheck_credentials", "silent": True},
+            })
+        self.assertTrue(result["ok"])
+        refresh.assert_called_once_with(refresh_host=False)
+        rejected = worker.handle_operator_chore({"params": {"action": "run_any_shell"}})
+        self.assertFalse(rejected["ok"])
+
     def test_task_usage_has_one_central_insert(self):
         cursor = FakeCursor()
         worker.record_task_usage(

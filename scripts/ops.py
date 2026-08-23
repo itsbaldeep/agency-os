@@ -376,6 +376,7 @@ def operations_status(today: date | None = None) -> dict[str, Any]:
         confirmed = None
     return {
         "last_backup": last_backup,
+        "last_verification": state.get("last_verification") or {},
         "offsite": {
             "required_since": required_since.isoformat(),
             "confirmed_on": confirmed.isoformat() if confirmed else None,
@@ -452,9 +453,11 @@ def credential_looks_weak(value: str) -> bool:
 
 
 def mark_credential(identifier: str) -> list[dict[str, Any]]:
-    valid = {item["id"] for item in credential_inventory()}
-    if identifier not in valid:
+    current = {item["id"]: item for item in credential_inventory()}
+    if identifier not in current:
         raise OpsError("unknown credential identifier; run credentials first")
+    if current[identifier].get("placeholder_like"):
+        raise OpsError("credential is still weak, placeholder-like, or unhealthy; replace/re-authenticate it before acknowledging rotation")
     rotations = read_json(ROTATION_STATE, {})
     rotations[identifier] = {"at": iso_now(), "acknowledged_by": "human"}
     write_json(ROTATION_STATE, rotations)
@@ -489,6 +492,19 @@ def verify_backup(path: Path) -> dict[str, Any]:
     }
 
 
+def verify_and_record_backup(path: Path) -> dict[str, Any]:
+    result = verify_backup(path)
+    state = read_json(OPS_STATE, {})
+    state["last_verification"] = {
+        "at": iso_now(),
+        "path": str(path),
+        "bundle_sha256": result["bundle_sha256"],
+        "ok": bool(result["ok"]),
+    }
+    write_json(OPS_STATE, state)
+    return result
+
+
 def print_json(payload: Any) -> None:
     print(json.dumps(payload, indent=2, sort_keys=True))
 
@@ -518,7 +534,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "mark-credential":
             result = mark_credential(args.identifier)
         elif args.command == "verify":
-            result = verify_backup(args.bundle)
+            result = verify_and_record_backup(args.bundle)
         else:
             raise OpsError("unsupported command")
         print_json(result)

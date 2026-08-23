@@ -20,6 +20,7 @@ import ops  # noqa: E402
 
 LOG = Path("/home/agency/agency-os/logs/digest.log")
 HOST_HEALTH = Path("/home/agency/.local/state/agency-os/host-health.json")
+ALERTS_URL = os.environ.get("AGENCY_ALERTS_URL", "http://100.64.0.1:5001/alerts")
 
 
 def env_value(key: str) -> str:
@@ -117,7 +118,13 @@ def work_queue() -> tuple[str, list[str]]:
         WHERE (status='running' AND started_at < now() - interval '20 minutes')
            OR (status='queued' AND created_at < now() - interval '30 minutes')
     """)
-    pending = rows("SELECT type,count(*) FROM approvals WHERE status='pending' GROUP BY type ORDER BY type")
+    pending = rows("""
+        SELECT a.type,count(*) FROM approvals a
+        LEFT JOIN projects p ON p.id=a.project_id
+        WHERE a.status='pending'
+          AND (a.project_id IS NULL OR p.classification='core')
+        GROUP BY a.type ORDER BY a.type
+    """)
     stale_count = int(stale[0][0]) if stale else 0
     queue_text = "; ".join(f"{count} {status}" for status, count in queue) or "idle"
     approval_text = "; ".join(f"{count} {kind}" for kind, count in pending) or "none"
@@ -175,7 +182,7 @@ def recovery_and_credentials() -> tuple[str, list[str]]:
     if offsite["overdue"]:
         offsite_line = (
             f"🚨 Laptop/off-site copy is due for Saturday {offsite['required_since']}. "
-            "After SCP, mark it done in Operations."
+            f"After SCP and checksum verification, mark it done in Alerts: {ALERTS_URL}"
         )
         alerts.append(offsite_line)
     else:
@@ -221,7 +228,8 @@ def send_discord(fields: list[dict[str, object]], critical: bool) -> int:
         return -1
     embed = {
         "title": "Agency OS — action digest",
-        "description": "Stabilization first: exceptions and required decisions only.",
+        "url": ALERTS_URL,
+        "description": f"Exceptions and required decisions only. [Open Alerts]({ALERTS_URL})",
         "color": 0xFF4757 if critical else 0x2ED573,
         "fields": fields,
         "footer": {"text": f"Agency OS · {datetime.now(timezone.utc):%Y-%m-%d %H:%M UTC}"},

@@ -57,6 +57,20 @@ class OpsTests(unittest.TestCase):
         self.assertTrue(record["placeholder_like"])
         self.assertNotIn("value", record)
 
+    def test_weak_credential_cannot_be_acknowledged(self):
+        (self.credentials / "core.env").write_text(
+            "CLICKHOUSE_PASSWORD=changeme\n", encoding="utf-8"
+        )
+        with self.assertRaises(self.ops.OpsError):
+            self.ops.mark_credential("core.env:CLICKHOUSE_PASSWORD")
+
+    def test_strong_credential_can_be_acknowledged(self):
+        (self.credentials / "core.env").write_text(
+            "API_TOKEN=q9M!2xL#7vP@4sD$8nK\n", encoding="utf-8"
+        )
+        records = self.ops.mark_credential("core.env:API_TOKEN")
+        self.assertTrue(records[0]["human_rotated_at"])
+
     def test_project_named_password_is_treated_as_weak(self):
         self.assertTrue(self.ops.credential_looks_weak("agency_clickhouse_2026"))
         self.assertFalse(self.ops.credential_looks_weak("q9M!2xL#7vP@4sD$8nK"))
@@ -93,6 +107,11 @@ class OpsTests(unittest.TestCase):
             archive.add(manifest_path, arcname="manifest.json")
         result = self.ops.verify_backup(bundle)
         self.assertTrue(result["ok"])
+
+        recorded = self.ops.verify_and_record_backup(bundle)
+        self.assertTrue(recorded["ok"])
+        status = self.ops.operations_status(date(2026, 8, 22))
+        self.assertEqual(status["last_verification"]["bundle_sha256"], result["bundle_sha256"])
 
 
 if __name__ == "__main__":
