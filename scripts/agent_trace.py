@@ -299,22 +299,23 @@ def record(args: argparse.Namespace) -> int:
     return 0
 
 
-def _raw_lines_reverse(path: Path):
+def _raw_lines_reverse(path: Path, max_bytes: int = MAX_TRACE_FILE_BYTES):
     with path.open("rb") as handle:
         handle.seek(0, os.SEEK_END)
         position = handle.tell()
+        floor = max(0, position - max_bytes)
         remainder = b""
-        while position:
-            block_size = min(64 * 1024, position)
+        while position > floor:
+            block_size = min(64 * 1024, position - floor)
             position -= block_size
             handle.seek(position)
             chunks = (handle.read(block_size) + remainder).split(b"\n")
             remainder = chunks[0]
             for line in reversed(chunks[1:]):
                 if line:
-                    yield line.decode("utf-8")
-        if remainder:
-            yield remainder.decode("utf-8")
+                    yield line.decode("utf-8", errors="replace")
+        if remainder and floor == 0:
+            yield remainder.decode("utf-8", errors="replace")
 
 
 def _iter_recent(days: int):
@@ -336,7 +337,7 @@ def _iter_recent(days: int):
                     decoded = handle.read(MAX_TRACE_FILE_BYTES + 1)
                 if len(decoded) > MAX_TRACE_FILE_BYTES:
                     continue
-                lines = (line.decode("utf-8") for line in reversed(decoded.splitlines()))
+                lines = (line.decode("utf-8", errors="replace") for line in reversed(decoded.splitlines()))
             else:
                 lines = _raw_lines_reverse(path)
             for line in lines:
@@ -346,7 +347,7 @@ def _iter_recent(days: int):
                         yield value
                 except (ValueError, TypeError):
                     continue
-        except OSError:
+        except (OSError, UnicodeError):
             continue
 
 
@@ -370,7 +371,7 @@ def _iter_all_chronological():
                             yield value
                     except (ValueError, TypeError):
                         continue
-        except OSError:
+        except (OSError, UnicodeError):
             continue
 
 

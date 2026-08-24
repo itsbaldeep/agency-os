@@ -10,6 +10,7 @@ from unittest import mock
 
 
 OPS_PATH = Path(__file__).parents[1] / "scripts" / "ops.py"
+SEED_PATH = Path(__file__).parents[1] / "infra" / "seed.sql"
 
 
 def load_ops(home: Path):
@@ -48,6 +49,11 @@ class OpsTests(unittest.TestCase):
         encoded = json.dumps(records)
         self.assertEqual([record["name"] for record in records], ["API_TOKEN"])
         self.assertNotIn(secret_value, encoded)
+
+    def test_background_job_seed_uses_sql_boolean_literals(self):
+        seed = SEED_PATH.read_text(encoding="utf-8")
+        self.assertNotRegex(seed, r",\s*[tf],\s*[tf]\)")
+        self.assertIn("TRUE, FALSE", seed)
 
     def test_placeholder_is_flagged_without_disclosure(self):
         (self.credentials / "core.env").write_text(
