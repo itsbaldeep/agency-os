@@ -195,35 +195,9 @@ def handle_hook() -> int:
         base = _base_from_hook(payload)
 
         if event == "UserPromptSubmit":
-            prompt = str(payload.get("prompt") or "")
-            base["trace_id"] = trace_id()
-            current = {
-                "trace_id": base["trace_id"],
-                "turn_id": base["turn_id"],
-                "started_at": iso_now(),
-            }
-            _write_current(base["session_id"], current)
-            _append({
-                **base,
-                "kind": "prompt",
-                "status": "received",
-                "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
-                "prompt_chars": len(prompt),
-                "redacted": True,
-            })
-            context = (
-                f"Agency trace {base['trace_id']}. Judge routing first: greetings, acknowledgements, "
-                "and no-tool conversational answers stay with Sol and must not spawn a subagent. "
-                "For substantive inspection, research, changes, or verification, route one bounded "
-                "task to Luna. Treat trace summaries as stale hints; record material evidence only. "
-                "Never put prompts, model output, or secrets in traces."
-            )
-            print(json.dumps({
-                "hookSpecificOutput": {
-                    "hookEventName": "UserPromptSubmit",
-                    "additionalContext": context,
-                }
-            }))
+            # Per-prompt tracing and routing injection are intentionally disabled.
+            # Impact classification lives in AGENTS.md; material work uses `record`.
+            print("{}")
             return 0
 
         record: dict[str, Any] = {**base, "kind": event, "status": "observed"}

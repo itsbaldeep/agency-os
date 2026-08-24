@@ -19,11 +19,13 @@ execution log second.
   Core development is manual edit → test → review → commit → deliberate deploy.
 - Core credentials live under `/home/agency/.config/agency`; engagement credentials
   stay with their owner. Credential values never enter logs, chat, Git, or traces.
-- Operator work uses Sol/xhigh for judgment and bounded Luna subagents for intake,
-  exploration, implementation, and verification. Secret-free lifecycle traces are
-  dashboard-visible hints, never an authority or substitute for fresh evidence.
-  Raw traces remain exact for 90 days; job 15 then compacts routine lifecycle noise
-  while retaining decisions/results/alerts. Job 16 retries deduplicated urgent Discord
+- Operator routing is impact-based. Sol/xhigh handles routine status, navigation,
+  non-impactful reconnaissance, and bounded low-risk work directly. Bounded Luna
+  subagents support consequential engagement, production, core, security, and
+  material decision work. Automatic tracing is limited to compaction, actual
+  subagent lifecycle, and session errors; curated traces retain material
+  decisions/results/alerts without recording every prompt or tool call. Job 15
+  compacts retained lifecycle noise and job 16 retries deduplicated urgent Discord
   delivery; Dashboard Alerts remains the single human source of truth.
 - Deployden is core and active. Technoflavour is a live no-code/no-access engagement.
   Hearth and Streamwise are recoverable soft parks. Aetheria and the old jobs SaaS

@@ -39,7 +39,7 @@ class AgentTraceTests(unittest.TestCase):
         path = next(self.trace_dir.glob("????-??-??.jsonl"))
         return [json.loads(line) for line in path.read_text().splitlines()]
 
-    def test_prompt_hook_stores_hash_not_prompt_and_returns_trace_context(self):
+    def test_prompt_hook_is_a_noop(self):
         payload = {
             "hook_event_name": "UserPromptSubmit",
             "session_id": "session-1",
@@ -51,14 +51,8 @@ class AgentTraceTests(unittest.TestCase):
         with mock.patch("sys.stdin", io.StringIO(json.dumps(payload))), \
              mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
             self.assertEqual(agent_trace.handle_hook(), 0)
-        output = json.loads(stdout.getvalue())
-        context = output["hookSpecificOutput"]["additionalContext"]
-        self.assertIn("atr_", context)
-        self.assertIn("must not spawn a subagent", context)
-        self.assertIn("For substantive", context)
-        raw = next(self.trace_dir.glob("????-??-??.jsonl")).read_text()
-        self.assertNotIn(payload["prompt"], raw)
-        self.assertEqual(self._records()[0]["prompt_chars"], len(payload["prompt"]))
+        self.assertEqual(json.loads(stdout.getvalue()), {})
+        self.assertFalse(self.trace_dir.exists())
 
     def test_record_refuses_credential_like_summary(self):
         args = mock.Mock(
