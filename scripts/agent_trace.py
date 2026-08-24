@@ -212,10 +212,11 @@ def handle_hook() -> int:
                 "redacted": True,
             })
             context = (
-                f"Agency trace {base['trace_id']}. Before substantive work, route at least one "
-                "bounded task to a Luna subagent. Search only a few relevant prior trace summaries; "
-                "treat them as stale hints. Record material decisions, evidence, and completion with "
-                "agent_trace.py record. Never put prompts, model output, or secrets in traces."
+                f"Agency trace {base['trace_id']}. Judge routing first: greetings, acknowledgements, "
+                "and no-tool conversational answers stay with Sol and must not spawn a subagent. "
+                "For substantive inspection, research, changes, or verification, route one bounded "
+                "task to Luna. Treat trace summaries as stale hints; record material evidence only. "
+                "Never put prompts, model output, or secrets in traces."
             )
             print(json.dumps({
                 "hookSpecificOutput": {

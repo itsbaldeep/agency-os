@@ -54,6 +54,8 @@ class AgentTraceTests(unittest.TestCase):
         output = json.loads(stdout.getvalue())
         context = output["hookSpecificOutput"]["additionalContext"]
         self.assertIn("atr_", context)
+        self.assertIn("must not spawn a subagent", context)
+        self.assertIn("For substantive", context)
         raw = next(self.trace_dir.glob("????-??-??.jsonl")).read_text()
         self.assertNotIn(payload["prompt"], raw)
         self.assertEqual(self._records()[0]["prompt_chars"], len(payload["prompt"]))
