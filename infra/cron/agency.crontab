@@ -23,3 +23,7 @@
 30 4 * * 1 /home/agency/agency-os/scripts/run-job.sh 13 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
 # Competitor digest — Mondays 09:35 IST (04:05 UTC)
 5 4 * * 1 /home/agency/agency-os/scripts/run-job.sh 14 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
+# Compact only routine lifecycle noise after 90 days; Sunday after backups.
+15 4 * * 0 /home/agency/agency-os/scripts/run-job.sh 15 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
+# Catch urgent agent alerts missed by the immediate notifier; sent events are deduplicated.
+* * * * * /home/agency/agency-os/scripts/run-job.sh 16 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1

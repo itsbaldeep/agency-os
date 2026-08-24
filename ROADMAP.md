@@ -22,6 +22,9 @@ execution log second.
 - Operator work uses Sol/xhigh for judgment and bounded Luna subagents for intake,
   exploration, implementation, and verification. Secret-free lifecycle traces are
   dashboard-visible hints, never an authority or substitute for fresh evidence.
+  Raw traces remain exact for 90 days; job 15 then compacts routine lifecycle noise
+  while retaining decisions/results/alerts. Job 16 retries deduplicated urgent Discord
+  delivery; Dashboard Alerts remains the single human source of truth.
 - Deployden is core and active. Technoflavour is a live no-code/no-access engagement.
   Hearth and Streamwise are recoverable soft parks. Aetheria and the old jobs SaaS
   are hard parked. `Weft` is a reserved future product; do not scaffold it without
