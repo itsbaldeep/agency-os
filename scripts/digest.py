@@ -16,6 +16,7 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 import ops  # noqa: E402
+import agent_trace  # noqa: E402
 
 
 LOG = Path("/home/agency/agency-os/logs/digest.log")
@@ -218,6 +219,22 @@ def system_maintenance() -> tuple[str, list[str]]:
     return "\n".join(lines), alerts
 
 
+def agent_attention() -> tuple[str, list[str]]:
+    items = agent_trace.active_alerts(days=30, limit=8)
+    if not items:
+        return "✅ No agent decision or blocker waiting", []
+    lines = []
+    alerts = []
+    for item in items:
+        severity = item.get("severity") or "warning"
+        icon = "🚨" if severity == "urgent" else "⚠️"
+        summary = str(item.get("summary") or "Agent work needs human input")[:240]
+        line = f"{icon} {summary}"
+        lines.append(line)
+        alerts.append(line)
+    return "\n".join(lines), alerts
+
+
 def estate_summary() -> str:
     result = rows("SELECT state,count(*) FROM projects GROUP BY state ORDER BY state")
     return "; ".join(f"**{count}** {state}" for state, count in result) or "No projects registered"
@@ -257,8 +274,9 @@ def main() -> int:
         content, content_alerts = content_pipeline()
         recovery, recovery_alerts = recovery_and_credentials()
         maintenance, maintenance_alerts = system_maintenance()
+        agent_work, agent_alerts = agent_attention()
         alerts = (failure_alerts + queue_alerts + content_alerts
-                  + recovery_alerts + maintenance_alerts)
+                  + recovery_alerts + maintenance_alerts + agent_alerts)
         action_text = "\n".join(alerts[:8]) if alerts else "✅ No immediate action required"
         fields = [
             {"name": "🚨 Action required", "value": action_text[:1024], "inline": False},
@@ -267,6 +285,7 @@ def main() -> int:
             {"name": "📥 Work queue", "value": queue[:1024], "inline": False},
             {"name": "💾 Recovery + credentials", "value": recovery[:1024], "inline": False},
             {"name": "🛠️ Host maintenance", "value": maintenance[:1024], "inline": False},
+            {"name": "🧭 Agent decisions", "value": agent_work[:1024], "inline": False},
             {"name": "💰 Accounted usage", "value": tracked_spend()[:1024], "inline": False},
             {"name": "📦 Estate", "value": estate_summary()[:1024], "inline": False},
         ]

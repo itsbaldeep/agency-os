@@ -1,4 +1,4 @@
-# Agency OS — CEO Directive (state verified 2026-08-23)
+# Agency OS — CEO Directive (state verified 2026-08-24)
 
 Authority: human co-CEO + AI co-CEO (Codex CLI). This file is the persistent
 strategic context — read it on every session start. It supersedes informal
@@ -199,6 +199,11 @@ self-fixing remain parked until the core client workflow is dependable.
 10. **Respect core/engagement boundaries** — engagements own their data, secrets,
     routes, storage, and containers. A parkable engagement can never become a core
     runtime dependency.
+11. **Use the operator hierarchy** — the human owns product and material risk;
+    GPT-5.6 Sol owns judgment and acceptance; bounded GPT-5.6 Luna workers handle
+    clear execution. Durable rules live in the VPS map, compact traces are stale
+    navigation hints, and reviewable decisions use the private dashboard/Lavish
+    surfaces. No agent fleet may reintroduce autonomous deploy, review, or merge.
 
 ## 8. Retired and parked estate (verified 2026-08-22)
 

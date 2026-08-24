@@ -113,6 +113,25 @@ class OpsTests(unittest.TestCase):
         status = self.ops.operations_status(date(2026, 8, 22))
         self.assertEqual(status["last_verification"]["bundle_sha256"], result["bundle_sha256"])
 
+    def test_export_configs_includes_global_agent_rules_and_trace_state(self):
+        (self.home / "core/agency-os").mkdir(parents=True)
+        (self.home / "core/agency-os/CEO_DIRECTIVE.md").write_text("directive\n")
+        (self.home / "core/agency-os/ROADMAP.md").write_text("roadmap\n")
+        (self.home / "AGENTS.md").write_text("global rules\n")
+        trace_dir = self.ops.STATE_DIR / "agent-traces"
+        trace_dir.mkdir(parents=True)
+        (trace_dir / "2026-08-24.jsonl").write_text("{}\n")
+        destination = self.home / "configs.tar.gz"
+
+        result = self.ops.export_configs(destination)
+
+        self.assertTrue(result["root-agents"])
+        self.assertTrue(result["agent-traces"])
+        with tarfile.open(destination, "r:gz") as archive:
+            member = archive.extractfile("root-agents")
+            self.assertIsNotNone(member)
+            self.assertEqual(member.read().decode(), "global rules\n")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -4,7 +4,7 @@ Mission: operate a truthful, service-based development, design, marketing,
 SEO/AEO, and content agency from one VPS. Deterministic code owns evidence and
 execution; models propose bounded artifacts; humans approve material actions.
 
-State verified: 2026-08-23. Read `CEO_DIRECTIVE.md` first and the latest audit
+State verified: 2026-08-24. Read `CEO_DIRECTIVE.md` first and the latest audit
 execution log second.
 
 ## Current reality
@@ -19,6 +19,9 @@ execution log second.
   Core development is manual edit → test → review → commit → deliberate deploy.
 - Core credentials live under `/home/agency/.config/agency`; engagement credentials
   stay with their owner. Credential values never enter logs, chat, Git, or traces.
+- Operator work uses Sol/xhigh for judgment and bounded Luna subagents for intake,
+  exploration, implementation, and verification. Secret-free lifecycle traces are
+  dashboard-visible hints, never an authority or substitute for fresh evidence.
 - Deployden is core and active. Technoflavour is a live no-code/no-access engagement.
   Hearth and Streamwise are recoverable soft parks. Aetheria and the old jobs SaaS
   are hard parked. `Weft` is a reserved future product; do not scaffold it without
