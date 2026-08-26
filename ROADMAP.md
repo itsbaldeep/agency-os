@@ -81,7 +81,8 @@ Deployden task 316 and audit 33 completed the first production measurement on
 2026-08-26: five canonical pages, zero broken links, zero deterministic findings,
 mobile PageSpeed 100 with 1.01 s LCP, and available zero-traffic GSC/GA4 evidence.
 The source-backed pre-change baseline had one page, no canonical/schema/sitemap,
-mobile PageSpeed 80, and 4.07 s LCP.
+mobile PageSpeed 80, and 4.07 s LCP. The sitemap was submitted to the verified GSC
+domain property at 2026-08-26 18:06 UTC and is pending Google's processing.
 
 1. **Done for the first Deployden run.** Add a polite deterministic multi-page crawl: status, redirects, canonicals,
    titles/meta, headings, schema, broken links, indexability, and sitemap coverage.
