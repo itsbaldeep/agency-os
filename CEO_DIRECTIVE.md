@@ -86,10 +86,11 @@ report → repeat.** Every step visible on the dashboard.
 
 ### What's broken or missing (the real gap)
 
-1. **The first-party SEO outcome loop is not deployed yet.** Deployden GSC/GA4
-   access and bounded read-only queries were verified on 2026-08-26, with honest
-   zero-traffic results. The production multi-page crawl/PageSpeed collector and
-   post-fix measurement run are still pending deployment.
+1. **The first-party SEO loop has one remaining proof gap.** Deployden task 316
+   and audit 33 proved the production five-page crawl, PageSpeed, GSC, and GA4
+   collectors on 2026-08-26, with honest zero-traffic results and no post-fix
+   technical findings. The next real defect must still prove the complete
+   evidence-linked suggestion, approved fix, and post-fix comparison path.
 2. **AI visibility is still a proxy.** It is DeepSeek training-knowledge sampling,
    not live-web ChatGPT/Perplexity/Gemini/Copilot or first-party search visibility.
 3. **The content tournament is incomplete.** One evidence-gated outline and draft
@@ -113,10 +114,11 @@ report → repeat.** Every step visible on the dashboard.
 
 ### The honest bottom line
 
-Agency OS now has a proven black-box audit and evidence-gated draft baseline, not a
-complete marketing agency. The next leap is measured first-party SEO on Deployden:
-deterministic crawl + PageSpeed + GSC/GA4, then linked suggestions and verified
-execution. Do not expand into Weft or campaign automation before that loop repeats.
+Agency OS now has a proven black-box audit, evidence-gated draft baseline, and first
+production Deployden SEO measurement. It is not yet a complete marketing agency.
+The next leap is repeating the loop against a real defect: linked suggestion,
+approved fix, post-fix comparison, then outcome measurement. Do not expand into
+Weft or campaign automation before that loop repeats.
 
 ## 4. Competitive position (vs SearchAtlas, Synscribe, Alli AI)
 

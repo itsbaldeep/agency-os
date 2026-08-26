@@ -77,16 +77,20 @@ execution log second.
 
 ## Next focus — real first-party SEO on Deployden
 
-Deployden GSC/GA4 access and zero-traffic read-only queries were verified on
-2026-08-26. The source changes for the first vertical slice are tested but remain
-undeployed until the controlled release and post-deploy measurement complete.
+Deployden task 316 and audit 33 completed the first production measurement on
+2026-08-26: five canonical pages, zero broken links, zero deterministic findings,
+mobile PageSpeed 100 with 1.01 s LCP, and available zero-traffic GSC/GA4 evidence.
+The source-backed pre-change baseline had one page, no canonical/schema/sitemap,
+mobile PageSpeed 80, and 4.07 s LCP.
 
-1. Add a polite deterministic multi-page crawl: status, redirects, canonicals,
+1. **Done for the first Deployden run.** Add a polite deterministic multi-page crawl: status, redirects, canonicals,
    titles/meta, headings, schema, broken links, indexability, and sitemap coverage.
-2. Add PageSpeed/Core Web Vitals and render evidence on the brand report.
-3. Connect Deployden GSC and GA4 once the human grants property access; collect
+2. **Done for the first Deployden run.** Add PageSpeed/Core Web Vitals and render evidence on the brand report.
+3. **Done for the first Deployden run.** Connect Deployden GSC and GA4 once the human grants property access; collect
    queries, impressions, clicks, CTR, position, landing pages, and conversions.
-4. Turn verified defects and content gaps into linked suggestions and measured tasks.
+4. Turn the next real verified defect or content gap into a linked suggestion and
+   measured task. Deterministic linkage is tested, but the post-deploy run was clean,
+   so no synthetic defect was introduced merely to manufacture production evidence.
 5. Exercise research → outline choice → draft choice → images → approval on Deployden,
    then prove publish plus rollback on a real destination.
 
