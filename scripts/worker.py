@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """agency-worker — async task worker. Polls tasks table, dispatches by type."""
-import json, os, sys, time, urllib.request, urllib.error, base64, socket, psycopg2, psycopg2.extras
+import json, os, sys, time, urllib.request, urllib.error, urllib.parse, base64, socket, hashlib, psycopg2, psycopg2.extras
 import math, re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import pr_review  # bounded machine review for explicitly requested proposal tasks
 import ops as agency_ops
+import seo_measurement
 
 ENV_PATH = os.environ.get("AGENCY_ENV_FILE", "/home/agency/.config/agency/core.env")
 
@@ -2705,6 +2706,75 @@ def handle_defend_audit(task):
             "cost": result.get("cost", 0), "model": result.get("model", MODEL_CONFIG["cheap"])}
 
 
+def _seo_run_id(task_id, brand_id, url):
+    return "seo-" + hashlib.sha256((str(task_id or "") + "|" + str(brand_id) + "|" + str(url)).encode()).hexdigest()[:24]
+
+
+def handle_seo_measurement(task):
+    """Read-only bounded crawl and external measurement, with immutable evidence."""
+    p = task.get("params") or {}; brand_id = p.get("brand_id")
+    if not brand_id: return {"ok": False, "error": "seo_measurement: brand_id is required"}
+    conn = get_conn()
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT id,project_id,name FROM brands WHERE id=%s", (brand_id,)); brand = cur.fetchone()
+        if not brand: return {"ok": False, "error": "seo_measurement: brand not found"}
+        cur.execute("SELECT property_type,value FROM brand_properties WHERE brand_id=%s", (brand_id,)); props = {r["property_type"]: r["value"] for r in cur.fetchall()}
+        url = p.get("url") or props.get("domain"); url = url if not url or str(url).startswith(("http://", "https://")) else "https://" + str(url)
+        project_id = p.get("project_id") or brand.get("project_id")
+        if not url: return {"ok": False, "error": "seo_measurement: url or domain is required"}
+        if not project_id: return {"ok": False, "error": "seo_measurement: project_id is required for capabilities"}
+        captured = datetime.now(timezone.utc).isoformat(); run_id = _seo_run_id(task.get("id"), brand_id, url)
+        cur.execute("SELECT id,raw_data FROM audits WHERE brand_id=%s AND audit_type='seo_measurement' AND raw_data->>'run_id'=%s LIMIT 1", (brand_id, run_id))
+        existing = cur.fetchone()
+        if existing:
+            raw = existing.get("raw_data") or {}
+            if isinstance(raw, str):
+                try: raw = json.loads(raw)
+                except ValueError: raw = {}
+            safe = {k: raw.get(k) for k in ("run_id", "captured_at", "counts", "finding_ids") if k in raw}
+            return {"ok": True, "content": json.dumps({"audit_id": existing["id"], **safe}, separators=(",", ":")), "prompt_tokens": 0, "completion_tokens": 0, "cost": 0, "model": "deterministic"}
+        crawl = seo_measurement.crawl(url, p.get("max_pages", seo_measurement.MAX_PAGES)); findings = seo_measurement.make_findings(crawl)
+        counts = {"pages":len(crawl["pages"]),"broken_links":len(crawl["broken_links"]),"findings":len(findings)}
+        for f in findings: f["audit_id"] = None; f["run_id"] = run_id; f["timestamp"] = captured
+        ps = seo_measurement.query_pagespeed(url)
+        access = seo_measurement.google_access(); token = access.get("token") if access.get("status") == "available" else None
+        end = datetime.now(timezone.utc).date() - timedelta(days=3); start = end - timedelta(days=27); base = {"startDate":str(start),"endDate":str(end)}
+        gsc_prop = p.get("gsc_property") or props.get("gsc_property") or "sc-domain:" + urllib.parse.urlsplit(url).hostname
+        if token:
+            gsc_q = {**base,"dimensions":["query"],"rowLimit":250}; gsc_p = {**base,"dimensions":["page"],"rowLimit":250}
+            gsc = seo_measurement.google_metric("https://searchconsole.googleapis.com/webmasters/v3/sites/"+urllib.parse.quote(gsc_prop,safe="")+"/searchAnalytics/query",token,gsc_q)
+            gsc_page = seo_measurement.google_metric("https://searchconsole.googleapis.com/webmasters/v3/sites/"+urllib.parse.quote(gsc_prop,safe="")+"/searchAnalytics/query",token,gsc_p)
+            query_metrics=seo_measurement.normalize_gsc(gsc.get("data")) if gsc.get("status")=="available" else gsc
+            page_metrics=seo_measurement.normalize_gsc(gsc_page.get("data")) if gsc_page.get("status")=="available" else gsc_page
+            google_states={query_metrics.get("status"),page_metrics.get("status")}
+            gsc={"status":"available" if google_states=={"available"} else "partial" if "available" in google_states else "source_unavailable","query":query_metrics,"page":page_metrics}
+            ga4_prop=p.get("ga4_property_id") or props.get("ga4_property_id")
+            if ga4_prop:
+                traffic=seo_measurement.google_metric("https://analyticsdata.googleapis.com/v1beta/properties/"+str(ga4_prop)+":runReport",token,{"dateRanges":[base],"dimensions":[{"name":"landingPagePlusQueryString"}],"metrics":[{"name":"sessions"},{"name":"totalUsers"},{"name":"keyEvents"}],"limit":250})
+                leads=seo_measurement.google_metric("https://analyticsdata.googleapis.com/v1beta/properties/"+str(ga4_prop)+":runReport",token,{"dateRanges":[base],"dimensions":[{"name":"eventName"}],"metrics":[{"name":"eventCount"}],"dimensionFilter":{"filter":{"fieldName":"eventName","stringFilter":{"value":"generate_lead"}}},"limit":250})
+                traffic_metrics=seo_measurement.normalize_ga4(traffic.get("data")) if traffic.get("status")=="available" else traffic
+                lead_metrics=seo_measurement.normalize_ga4(leads.get("data")) if leads.get("status")=="available" else leads
+                analytics_states={traffic_metrics.get("status"),lead_metrics.get("status")}
+                ga4={"status":"available" if analytics_states=={"available"} else "partial" if "available" in analytics_states else "source_unavailable","traffic":traffic_metrics,"generate_lead":lead_metrics}
+            else: ga4={"status":"source_unavailable","error":"property not configured"}
+        else: gsc={"status":"source_unavailable","error":"access unavailable"}; ga4={"status":"source_unavailable","error":"access unavailable"}
+        sources={"crawl":crawl,"pagespeed":ps,"gsc":gsc,"ga4":ga4}; evidence={"run_id":run_id,"captured_at":captured,"parser_version":seo_measurement.PARSER_VERSION,"sources":sources,"counts":counts,"finding_ids":[f["evidence_id"] for f in findings],"findings":findings}
+        cur.execute("SELECT raw_data FROM audits WHERE brand_id=%s AND audit_type='seo_measurement' ORDER BY created_at DESC LIMIT 1",(brand_id,)); prior=cur.fetchone(); previous=prior.get("raw_data") if prior else None
+        comparison=seo_measurement.compare_runs(previous,evidence); statuses={k:v.get("status") for k,v in sources.items()}
+        cur.execute("INSERT INTO audits (brand_id,audit_type,summary,raw_data,sources) VALUES (%s,'seo_measurement',%s,%s,%s) RETURNING id",(brand_id,json.dumps({"source_statuses":statuses,"counts":counts,"comparison":comparison}),json.dumps(evidence),json.dumps([{"name":k,"status":v.get("status")} for k,v in sources.items()])))
+        audit_id=cur.fetchone()["id"]
+        for f in findings: f["audit_id"] = audit_id
+        for cap,source in sources.items(): cur.execute("INSERT INTO capabilities (project_id,capability,status,evidence,checked_at) VALUES (%s,%s,%s,%s,now()) ON CONFLICT (project_id,capability) DO UPDATE SET status=EXCLUDED.status,evidence=EXCLUDED.evidence,checked_at=now()",(project_id,cap,source.get("status","source_unavailable"),json.dumps({"status":source.get("status"),"run_id":run_id})))
+        titles={"missing_title":"Add a unique page title","missing_description":"Add a unique meta description","h1_count":"Make the page contain one H1","missing_jsonld":"Add valid JSON-LD structured data","invalid_jsonld":"Repair invalid JSON-LD structured data","canonical_mismatch":"Set the canonical URL to this page","indexable_absent_sitemap":"Add the indexable page to the sitemap","broken_internal_link":"Fix the broken internal link","sitemap_missing":"Publish an XML sitemap","sitemap_unavailable":"Restore the unavailable sitemap","sitemap_redirect":"Replace a redirected sitemap URL"}
+        for f in findings:
+            cur.execute("SELECT 1 FROM suggestions WHERE brand_id=%s AND status IN ('pending','approved','executing') AND sources @> %s::jsonb LIMIT 1",(brand_id,json.dumps([{ "evidence_id":f["evidence_id"]}])))
+            if not cur.fetchone(): cur.execute("INSERT INTO suggestions (brand_id,audit_id,title,rationale,sources,action_type,status) VALUES (%s,%s,%s,%s,%s,'propose_fix','pending')",(brand_id,audit_id,titles.get(f["rule"],"Review deterministic SEO defect"),f["rule"]+" observed at "+f["url"]+"; observed "+str(f["observed"])+", expected "+str(f["expected"])+".",json.dumps([f])))
+        conn.commit(); result={"audit_id":audit_id,"run_id":run_id,"source_statuses":statuses,"counts":counts,"comparison":comparison}
+        return {"ok":True,"content":json.dumps(result,separators=(",",":")),"prompt_tokens":0,"completion_tokens":0,"cost":0,"model":"deterministic"}
+    finally: conn.close()
+
+
 # ── Multi-stage content pipeline: Stage 1 content_research ───────────
 def _fetch_clean(url, max_chars=6000, timeout=25):
     """Deterministic fetch + light cleanup.
@@ -4572,6 +4642,7 @@ def handle_operator_chore(task):
 
 
 DISPATCH = {
+    "seo_measurement": handle_seo_measurement,
     "defend_audit": handle_defend_audit,
     "content_research": handle_content_research,
     "content_outline": handle_content_outline,

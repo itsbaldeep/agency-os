@@ -39,6 +39,40 @@ class FakeConnection:
 
 
 class WorkerWorkflowTests(unittest.TestCase):
+    def test_seo_run_id_is_stable_per_task(self):
+        self.assertEqual(worker._seo_run_id(7, 2, "https://example.test"), worker._seo_run_id(7, 2, "https://example.test"))
+        self.assertNotEqual(worker._seo_run_id(7, 2, "https://example.test"), worker._seo_run_id(8, 2, "https://example.test"))
+
+    def test_seo_dedupe_uses_jsonb_and_executing_status(self):
+        # Keep this acceptance check close to the fake-DB workflow contract.
+        source = Path(worker.__file__).read_text()
+        self.assertIn("sources @> %s::jsonb", source)
+        self.assertIn("'executing'", source)
+
+    def test_seo_handler_fake_db_keeps_sources_explicit_and_result_bounded(self):
+        class Cursor(FakeCursor):
+            def fetchone(self):
+                sql = self.calls[-1][0]
+                if "FROM brands" in sql: return {"id": 2, "project_id": 9, "name": "Test"}
+                if "RETURNING id" in sql: return {"id": 44}
+                return None
+            def fetchall(self): return []
+        class Conn:
+            def __init__(self): self.c = Cursor()
+            def cursor(self, **_): return self.c
+            def commit(self): pass
+            def close(self): pass
+        crawl = {"status": "available", "pages": [], "broken_links": [], "sitemap": {"status": "available", "members": [], "unavailable": []}, "excluded": [], "bounded": {}}
+        with mock.patch.object(worker, "get_conn", return_value=Conn()), \
+             mock.patch.object(worker.seo_measurement, "crawl", return_value=crawl), \
+             mock.patch.object(worker.seo_measurement, "make_findings", return_value=[]), \
+             mock.patch.object(worker.seo_measurement, "query_pagespeed", return_value={"status": "source_unavailable"}), \
+             mock.patch.object(worker.seo_measurement, "google_access", return_value={"status": "source_unavailable"}):
+            result = worker.handle_seo_measurement({"id": 77, "params": {"brand_id": 2, "url": "https://example.test"}})
+        self.assertTrue(result["ok"])
+        self.assertEqual(json.loads(result["content"])["source_statuses"]["gsc"], "source_unavailable")
+        self.assertLess(len(result["content"]), 20000)
+
     def test_retired_deepseek_aliases_route_to_current_models(self):
         self.assertEqual(worker._normalise_api_model("deepseek-chat"), "deepseek-v4-flash")
         self.assertEqual(worker._normalise_api_model("deepseek-reasoner"), "deepseek-v4-pro")
