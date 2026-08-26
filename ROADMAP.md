@@ -4,7 +4,7 @@ Mission: operate a truthful, service-based development, design, marketing,
 SEO/AEO, and content agency from one VPS. Deterministic code owns evidence and
 execution; models propose bounded artifacts; humans approve material actions.
 
-State verified: 2026-08-24. Read `CEO_DIRECTIVE.md` first and the latest audit
+State verified: 2026-08-26. Read `CEO_DIRECTIVE.md` first and the latest audit
 execution log second.
 
 ## Current reality
@@ -33,12 +33,16 @@ execution log second.
   the PRD.
 - OpenCode web remains core for mobile/web agent access. Codex is the normal coding
   harness; DeepSeek V4 Flash/Pro handle raw completions; OpenCode/OpenAI OAuth is the
-  last subscription fallback. The OpenCode Zen credential is currently invalid.
-- A checksummed daily core recovery bundle exists. Root-only system state is absent
-  until the fixed-target sudo helper grows `backup-core`; the first laptop/off-site
-  copy and Saturday acknowledgement are still human actions.
+  last subscription fallback. The human confirmed on 2026-08-26 that OpenCode Zen
+  remains required as free-capacity fallback; its credential is currently invalid.
+- A checksummed daily core recovery bundle exists. The 2026-08-26 bundle was
+  server-verified, and the weekly laptop acknowledgement is current through
+  2026-08-29. Root-only system state remains absent until the fixed-target sudo
+  helper grows `backup-core`.
 - Dashboard Resources and the daily Discord digest now expose host maintenance.
-  Twenty-three package updates and a required kernel reboot remain operator work.
+  Fourteen package updates were pending on 2026-08-26; no reboot was required
+  before applying them. The maintenance window and post-upgrade check remain
+  operator work.
 - Dashboard Alerts at `:5001/alerts` is the human chore inbox: it shows the latest
   backup/SCP/SHA evidence, weekly laptop acknowledgement, name-only credential
   rotation state, exact package commands, and silent deterministic rechecks.
@@ -72,6 +76,10 @@ execution log second.
       and backup verification task 299 completed with zero model tokens.
 
 ## Next focus — real first-party SEO on Deployden
+
+Deployden GSC/GA4 access and zero-traffic read-only queries were verified on
+2026-08-26. The source changes for the first vertical slice are tested but remain
+undeployed until the controlled release and post-deploy measurement complete.
 
 1. Add a polite deterministic multi-page crawl: status, redirects, canonicals,
    titles/meta, headings, schema, broken links, indexability, and sitemap coverage.
@@ -116,14 +124,16 @@ execution log second.
 
 ## Human gates still open
 
-- [ ] In Dashboard → Alerts, copy the latest core backup to the laptop, verify the
-      displayed SHA-256, and mark the Saturday acknowledgement.
-- [ ] Human-rotate every unacknowledged core credential; replace invalid OpenCode Zen
-      auth if free fallback is still desired.
+- [x] The latest core backup was server-verified on 2026-08-26, and the laptop
+      acknowledgement is current through 2026-08-29.
+- [ ] Human-rotate every unacknowledged core credential and re-authenticate OpenCode
+      Zen, which remains the approved free-capacity fallback.
 - [ ] Add fixed-target `backup-core` support to `/usr/local/sbin/codex-system-audit`.
-- [ ] Apply the 23 pending host package updates and perform the required controlled
-      reboot, then re-verify all core services, routes, firewall, and task state.
-- [ ] Grant Deployden GSC/GA4 property access and later a real CMS destination.
+- [ ] Apply the 14 host package updates reported on 2026-08-26 during the approved
+      maintenance window. Reboot only if required afterward, then re-verify all
+      core services, routes, firewall, and task state.
+- [x] Grant and verify Deployden GSC/GA4 property access.
+- [ ] Provide a real CMS destination when publication testing is authorized.
 - [ ] Provide the Weft PRD when ready; Jobright is the baseline, not a build request.
 
 ## Non-goals until the core path is repeatable

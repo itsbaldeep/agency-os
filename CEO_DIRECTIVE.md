@@ -86,24 +86,30 @@ report → repeat.** Every step visible on the dashboard.
 
 ### What's broken or missing (the real gap)
 
-1. **No first-party SEO outcome loop yet.** No Deployden GSC/GA4 property is
-   connected, and there is no production multi-page crawl/PageSpeed collector.
+1. **The first-party SEO outcome loop is not deployed yet.** Deployden GSC/GA4
+   access and bounded read-only queries were verified on 2026-08-26, with honest
+   zero-traffic results. The production multi-page crawl/PageSpeed collector and
+   post-fix measurement run are still pending deployment.
 2. **AI visibility is still a proxy.** It is DeepSeek training-knowledge sampling,
    not live-web ChatGPT/Perplexity/Gemini/Copilot or first-party search visibility.
 3. **The content tournament is incomplete.** One evidence-gated outline and draft
    work; multiple outline/draft variants with human selection are still planned.
 4. **Publication breadth is narrow.** WordPress has a tracked adapter but needs a
    live credential/destination proof. Git/PHP/Java/Next.js adapters do not exist.
-5. **Recovery has two honest gaps.** The sudo helper lacks fixed-target
-   `backup-core` support for root-only state, and the first laptop copy/ack is due.
-6. **Fallback is degraded.** OpenCode OpenAI OAuth succeeds, but the desired free
-   OpenCode Zen credential is invalid; configured free API providers depend on
-   their own present credentials/rate limits.
+5. **Recovery has one remaining system-state gap.** The application backup was
+   server-verified on 2026-08-26 and the weekly laptop acknowledgement is current
+   through 2026-08-29. The sudo helper still lacks fixed-target `backup-core`
+   support for root-only state.
+6. **Fallback is degraded.** OpenCode OpenAI OAuth succeeds. The human confirmed
+   on 2026-08-26 that OpenCode Zen remains required as free-capacity fallback,
+   but its current credential is invalid and must be re-authenticated. Configured
+   free API providers depend on their own present credentials/rate limits.
 7. **Soft parks retain rollback weight.** Hearth's stopped containers/layers and a
    root-owned `.next` build remain intentionally preserved until a later cleanup.
-8. **Host maintenance is due.** Twenty-three packages are upgradable and the host
-   requires a reboot for the installed kernel; Codex lacks passwordless authority
-   for package upgrades/reboot, so this remains visible rather than silently run.
+8. **Host maintenance is due.** Fourteen packages were upgradable on 2026-08-26;
+   the host did not require a reboot before the upgrade. Codex lacks passwordless
+   authority for package upgrades/reboot, so this remains visible rather than
+   silently run.
 
 ### The honest bottom line
 
@@ -150,13 +156,14 @@ self-fixing remain parked until the core client workflow is dependable.
 ## 6. What I need from the human co-CEO (checklist)
 
 ### Immediate (unblocks Phase 1)
-- [ ] In Dashboard → Alerts, copy the latest verified core backup to the laptop,
-      verify the displayed SHA-256, then mark the Saturday acknowledgement. The
-      VPS must continue nagging until done.
-- [ ] Human-rotate/acknowledge every unrotated central credential. Replace the
-      invalid OpenCode Zen auth only if its free fallback remains desired.
-- [ ] Grant Deployden GSC and GA4 property access to the existing service account.
-      No connector may pretend a property exists before that grant.
+- [x] The latest core backup was server-verified on 2026-08-26, and the laptop
+      acknowledgement is current through 2026-08-29. The VPS must resume nagging
+      when the next weekly acknowledgement becomes due.
+- [ ] Human-rotate/acknowledge every unrotated central credential. Re-authenticate
+      OpenCode Zen; the human confirmed on 2026-08-26 that this free fallback is
+      retained for periods when OpenAI capacity is unavailable.
+- [x] Deployden GSC and GA4 property access was granted and verified through
+      bounded read-only API queries on 2026-08-26.
 - [ ] Extend the fixed-target sudo audit helper with `backup-core` if root-only
       Headscale/system state should enter the recovery bundle.
 - [ ] Schedule the pending package upgrade and host reboot with an operator who has
