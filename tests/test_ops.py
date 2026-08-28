@@ -72,6 +72,24 @@ class OpsTests(unittest.TestCase):
         self.assertFalse(records[0]["placeholder_like"])
         self.assertNotIn("human_rotated_at", records[0])
 
+    def test_known_compromise_is_reported_by_identifier_without_a_value(self):
+        secret_value = "q9M!2xL#7vP@4sD$8nK"
+        (self.credentials / "core.env").write_text(
+            f"API_TOKEN={secret_value}\n", encoding="utf-8"
+        )
+        self.ops.STATE_DIR.mkdir(parents=True)
+        self.ops.write_json(self.ops.CREDENTIAL_INCIDENTS, {
+            "core.env:API_TOKEN": {
+                "status": "active",
+                "at": "2026-08-28T18:01:03+00:00",
+            },
+        })
+
+        record = self.ops.credential_inventory()[0]
+
+        self.assertEqual(record["compromised_at"], "2026-08-28T18:01:03+00:00")
+        self.assertNotIn(secret_value, json.dumps(record))
+
     def test_project_named_password_is_treated_as_weak(self):
         self.assertTrue(self.ops.credential_looks_weak("agency_clickhouse_2026"))
         self.assertFalse(self.ops.credential_looks_weak("q9M!2xL#7vP@4sD$8nK"))

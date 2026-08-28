@@ -34,6 +34,7 @@ BACKUP_DIR = Path(
     os.environ.get("AGENCY_BACKUP_DIR", AGENCY_HOME / "backups/core")
 )
 OPS_STATE = STATE_DIR / "operations.json"
+CREDENTIAL_INCIDENTS = STATE_DIR / "credential-incidents.json"
 TOOL_AUTH_STATUS = CREDENTIAL_DIR / "tool-auth-status.json"
 ROOT_BACKUP_DIR = Path("/var/backups/agency-os")
 ROOT_HELPER = "/usr/local/sbin/codex-system-audit"
@@ -413,41 +414,48 @@ def mark_offsite(note: str = "") -> dict[str, Any]:
 
 
 def credential_inventory() -> list[dict[str, Any]]:
+    incidents = read_json(CREDENTIAL_INCIDENTS, {})
     records: list[dict[str, Any]] = []
     for env_path in sorted(CREDENTIAL_DIR.glob("*.env")):
         for name, value in sorted(parse_env(env_path).items()):
             if not SENSITIVE_NAME.search(name):
                 continue
             key = f"{env_path.name}:{name}"
+            incident = incidents.get(key) or {}
             records.append(
                 {
                     "id": key,
                     "name": name,
                     "source": env_path.name,
                     "placeholder_like": credential_looks_weak(value),
+                    "compromised_at": incident.get("at") if incident.get("status") == "active" else None,
                 }
             )
     gsc = CREDENTIAL_DIR / "gsc-service-account.json"
     if gsc.exists():
         key = "gsc-service-account.json:GSC_SERVICE_ACCOUNT"
+        incident = incidents.get(key) or {}
         records.append(
             {
                 "id": key,
                 "name": "GSC_SERVICE_ACCOUNT",
                 "source": gsc.name,
                 "placeholder_like": False,
+                "compromised_at": incident.get("at") if incident.get("status") == "active" else None,
             }
         )
     for name, state in sorted(read_json(TOOL_AUTH_STATUS, {}).items()):
         if not isinstance(state, dict):
             continue
         key = f"tool-auth-status.json:{name}"
+        incident = incidents.get(key) or {}
         records.append(
             {
                 "id": key,
                 "name": name,
                 "source": "tool-auth-status.json",
                 "placeholder_like": state.get("status") in ("invalid", "missing", "stale"),
+                "compromised_at": incident.get("at") if incident.get("status") == "active" else None,
                 "health_status": state.get("status", "unknown"),
                 "last_checked": state.get("last_checked"),
             }

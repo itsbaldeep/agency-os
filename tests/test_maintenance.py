@@ -97,6 +97,18 @@ class MaintenanceTests(unittest.TestCase):
         self.assertNotIn(canonical, json.dumps(result))
         self.assertEqual((self.creds / "caddy-ask.env").stat().st_mode & 0o777, 0o400)
 
+    def test_successful_rotation_resolves_only_fixed_internal_incidents(self):
+        self.m._write_json(self.m.CREDENTIAL_INCIDENTS, {
+            "core.env:POSTGRES_PASSWORD": {"status": "active", "at": "x"},
+            "core.env:EXTERNAL_API_KEY": {"status": "active", "at": "y"},
+        })
+
+        self.m._resolve_internal_incidents()
+
+        incidents = self.m._json(self.m.CREDENTIAL_INCIDENTS, {})
+        self.assertEqual(incidents["core.env:POSTGRES_PASSWORD"]["status"], "resolved")
+        self.assertEqual(incidents["core.env:EXTERNAL_API_KEY"]["status"], "active")
+
     def test_rotation_command_does_not_put_password_in_argv_or_state(self):
         for name, content in {"core.env": "POSTGRES_USER=agency\nPOSTGRES_DB=agencyos\nPOSTGRES_PASSWORD=old\nCLICKHOUSE_PASSWORD=old2\nMINIO_ROOT_PASSWORD=old3\n", "bot.env": "PGPASSWORD=old\n", "caddy-ask.env": "POSTGRES_PASSWORD=old\n"}.items():
             (self.creds / name).write_text(content)
@@ -141,6 +153,9 @@ class MaintenanceTests(unittest.TestCase):
             "bot.env": "PGPASSWORD=old\n",
         }.items():
             (self.creds / name).write_text(content)
+        self.m._write_json(self.m.CREDENTIAL_INCIDENTS, {
+            "core.env:POSTGRES_PASSWORD": {"status": "active", "at": "x"},
+        })
         commands = []
 
         def fake_run(command, **kwargs):
@@ -158,6 +173,33 @@ class MaintenanceTests(unittest.TestCase):
         self.assertNotIn(["sudo", "-n", self.m.ROOT_HELPER, "maintenance-resume"], commands)
         self.assertEqual(self.m._state()["phase"], "active")
         self.assertFalse(self.m._state()["services_resumed"])
+        incidents = self.m._json(self.m.CREDENTIAL_INCIDENTS, {})
+        self.assertEqual(incidents["core.env:POSTGRES_PASSWORD"]["status"], "active")
+
+    def test_final_alert_refresh_failure_restores_active_incidents(self):
+        for name, content in {
+            "core.env": "POSTGRES_USER=agency\nPOSTGRES_DB=agencyos\nPOSTGRES_PASSWORD=old\nCLICKHOUSE_PASSWORD=old2\nMINIO_ROOT_PASSWORD=old3\n",
+            "bot.env": "PGPASSWORD=old\n",
+        }.items():
+            (self.creds / name).write_text(content)
+        self.m._write_json(self.m.CREDENTIAL_INCIDENTS, {
+            "core.env:POSTGRES_PASSWORD": {"status": "active", "at": "x"},
+        })
+
+        def fake_run(command, **kwargs):
+            if command[-1].endswith("collect-alert-state.py"):
+                raise self.m.MaintenanceError("refresh failed")
+            return CompletedProcess([], 0, b"", b"")
+
+        with mock.patch.object(self.m, "begin"), \
+             mock.patch.object(self.m, "resume", return_value={}), \
+             mock.patch.object(self.m, "_run", side_effect=fake_run), \
+             mock.patch.object(self.m, "_set_postgres_password"):
+            with self.assertRaises(self.m.MaintenanceError):
+                self.m.rotate_internal(True)
+
+        incidents = self.m._json(self.m.CREDENTIAL_INCIDENTS, {})
+        self.assertEqual(incidents["core.env:POSTGRES_PASSWORD"]["status"], "active")
 
 
 if __name__ == "__main__": unittest.main()

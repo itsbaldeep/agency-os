@@ -169,6 +169,7 @@ def recovery_and_credentials() -> tuple[str, list[str]]:
     offsite = state["offsite"]
     inventory = ops.credential_inventory()
     weak = [item for item in inventory if item["placeholder_like"]]
+    compromised = [item for item in inventory if item.get("compromised_at")]
     alerts: list[str] = []
     if backup:
         backup_line = f"Last core backup: `{backup.get('at','unknown')}`"
@@ -187,7 +188,15 @@ def recovery_and_credentials() -> tuple[str, list[str]]:
         alerts.append(offsite_line)
     else:
         offsite_line = f"✅ Off-site copy acknowledged {offsite['confirmed_on']}"
-    credential_line = f"Credential health: **{len(inventory)} checked, {len(weak)} weak or unhealthy**"
+    credential_line = (
+        f"Credential health: **{len(inventory)} checked, {len(weak)} weak or unhealthy, "
+        f"{len(compromised)} known compromised**"
+    )
+    if compromised:
+        names = ", ".join(sorted({item["name"] for item in compromised}))
+        compromised_line = f"🚨 Known-compromised credentials: {names}"
+        credential_line += f"\n{compromised_line}"
+        alerts.append(compromised_line)
     if weak:
         names = ", ".join(sorted({item["name"] for item in weak}))
         weak_line = f"🚨 Weak/placeholder-like credentials: {names}"

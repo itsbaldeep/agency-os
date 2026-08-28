@@ -52,14 +52,18 @@ def failed_units() -> list[str]:
 def credential_action(item: dict[str, Any]) -> dict[str, Any]:
     item = dict(item)
     weak = bool(item.get("placeholder_like"))
+    compromised = bool(item.get("compromised_at"))
     health = item.get("health_status") or "not_probed"
-    item["status"] = "action_required" if weak else "clear"
+    item["status"] = "action_required" if weak or compromised else "clear"
     item["source_path"] = (
         f"/home/agency/.config/agency/{item['source']}"
         if item.get("source") != "tool-auth-status.json"
         else "/home/agency/.config/agency/tool-auth-status.json"
     )
-    if weak and health in ("invalid", "missing", "stale"):
+    if compromised:
+        item["next_action"] = "Replace this known-compromised internal set through the controlled maintenance command, then recheck."
+        item["command"] = "python3 /home/agency/agency-os/scripts/maintenance.py rotate-internal --compromised"
+    elif weak and health in ("invalid", "missing", "stale"):
         item["next_action"] = "Re-authenticate this provider, then recheck."
         item["command"] = "opencode auth login"
     elif weak:
@@ -132,7 +136,7 @@ def build_alert_state(today: date | None = None) -> dict[str, Any]:
     open_count = sum(groups.values())
     critical_count = sum((
         bool(offsite.get("overdue")),
-        any(item.get("placeholder_like") for item in credentials),
+        any(item.get("placeholder_like") or item.get("compromised_at") for item in credentials),
         reboot_required,
     ))
     return {
@@ -148,6 +152,7 @@ def build_alert_state(today: date | None = None) -> dict[str, Any]:
             "total": len(credentials),
             "open": credential_open,
             "weak_or_unhealthy": sum(bool(item.get("placeholder_like")) for item in credentials),
+            "compromised": sum(bool(item.get("compromised_at")) for item in credentials),
         },
         "maintenance": maintenance,
         "root_recovery": {

@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +38,7 @@ ROUTES = {
 CORE_COMPOSE = AGENCY_HOME / "agency-os/docker-compose.yml"
 DASHBOARD_COMPOSE = AGENCY_HOME / "core/agency-dashboard/docker-compose.yml"
 OPS_STATE = STATE_DIR / "operations.json"
+CREDENTIAL_INCIDENTS = STATE_DIR / "credential-incidents.json"
 
 
 class MaintenanceError(RuntimeError):
@@ -59,9 +61,9 @@ def _json(path: Path, default: Any = None) -> Any:
         return default
 
 
-def _write_state(data: dict[str, Any]) -> None:
-    STATE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
-    fd, name = tempfile.mkstemp(prefix=".maintenance.", dir=STATE_DIR)
+def _write_json(path: Path, data: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd, name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(data, fh, sort_keys=True, indent=2)
@@ -69,9 +71,13 @@ def _write_state(data: dict[str, Any]) -> None:
             fh.flush()
             os.fsync(fh.fileno())
         os.chmod(name, 0o600)
-        os.replace(name, STATE_FILE)
+        os.replace(name, path)
     finally:
         Path(name).unlink(missing_ok=True)
+
+
+def _write_state(data: dict[str, Any]) -> None:
+    _write_json(STATE_FILE, data)
 
 
 def _active_tasks() -> list[str]:
@@ -269,6 +275,28 @@ def sync_service_env() -> dict[str, Any]:
     }
 
 
+def _resolve_internal_incidents() -> dict[str, Any]:
+    incidents = _json(CREDENTIAL_INCIDENTS, {}) or {}
+    previous = json.loads(json.dumps(incidents))
+    resolved_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    for identifier in (
+        "core.env:POSTGRES_PASSWORD",
+        "bot.env:PGPASSWORD",
+        "core.env:CLICKHOUSE_PASSWORD",
+        "core.env:MINIO_ROOT_PASSWORD",
+    ):
+        incident = incidents.get(identifier)
+        if isinstance(incident, dict) and incident.get("status") == "active":
+            incidents[identifier] = {
+                **incident,
+                "status": "resolved",
+                "resolved_at": resolved_at,
+                "resolution": "verified_compromised_only_rotation",
+            }
+    _write_json(CREDENTIAL_INCIDENTS, incidents)
+    return previous
+
+
 def rotate_internal(compromised: bool) -> dict[str, Any]:
     if not compromised:
         raise MaintenanceError("rotate-internal requires --compromised")
@@ -282,6 +310,7 @@ def rotate_internal(compromised: bool) -> dict[str, Any]:
     postgres_changed = False
     files_write_started = False
     dashboard_stopped = False
+    services_resumed = False
     old: dict[str, str] = {}
     try:
         for path in paths:
@@ -325,6 +354,16 @@ def rotate_internal(compromised: bool) -> dict[str, Any]:
             "dashboard",
         ])
         result = resume()
+        services_resumed = True
+        incident_snapshot = _resolve_internal_incidents()
+        try:
+            _run([
+                "python3",
+                str(AGENCY_HOME / "agency-os/scripts/collect-alert-state.py"),
+            ], timeout=60)
+        except MaintenanceError:
+            _write_json(CREDENTIAL_INCIDENTS, incident_snapshot)
+            raise
         result["legacy_cleanup"] = "complete" if legacy_cleanup else "pending"
         if not legacy_cleanup:
             state = _state()
@@ -363,7 +402,7 @@ def rotate_internal(compromised: bool) -> dict[str, Any]:
         _write_state({
             "phase": "failed_recovered" if recovered else "active",
             "error": "internal rotation failed",
-            "services_resumed": recovered,
+            "services_resumed": recovered or services_resumed,
         })
         if isinstance(exc, MaintenanceError):
             raise
