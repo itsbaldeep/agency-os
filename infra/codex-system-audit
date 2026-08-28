@@ -88,33 +88,31 @@ remove_legacy_opencode_db_secret() {
 }
 
 tighten_sudoers() {
-  local target="/etc/sudoers.d/agency-executor"
-  local temporary backup
-  if [ ! -f "$target" ]; then
-    return 0
-  fi
-  temporary="$(mktemp /etc/sudoers.d/.agency-executor.XXXXXX)"
-  backup="$(mktemp /etc/sudoers.d/.agency-executor.backup.XXXXXX)"
-  cp -- "$target" "$backup"
-  if ! awk '!($0 ~ /^[[:space:]]*agency[[:space:]]+ALL=\(root\)[[:space:]]+NOPASSWD:[[:space:]]*\/usr\/local\/sbin\/codex-system-audit[[:space:]]+\*[[:space:]]*$/)' "$target" >"$temporary"; then
-    rm -f -- "$temporary" "$backup"
-    return 1
-  fi
-  chown root:root "$temporary"
-  chmod 0440 "$temporary"
-  if ! visudo -cf "$temporary" >/dev/null 2>&1; then
-    rm -f -- "$temporary" "$backup"
-    return 1
-  fi
-  mv -f -- "$temporary" "$target"
-  if ! visudo -cf /etc/sudoers >/dev/null 2>&1; then
-    cp -- "$backup" "$target"
-    chown root:root "$target"
-    chmod 0440 "$target"
-    rm -f -- "$backup"
-    return 1
-  fi
-  rm -f -- "$backup"
+  local target temporary mode owner group
+  local -a policy_files=(/etc/sudoers /etc/sudoers.d/*)
+  for target in "${policy_files[@]}"; do
+    [ -f "$target" ] || continue
+    [ -L "$target" ] && continue
+    if ! grep -Eq '^[[:space:]]*agency[[:space:]]+ALL=\(root\)[[:space:]]+NOPASSWD:[[:space:]]*/usr/local/sbin/codex-system-audit[[:space:]]+\*[[:space:]]*$' "$target"; then
+      continue
+    fi
+    temporary="$(mktemp "$(dirname "$target")/.sudoers.XXXXXX")"
+    if ! awk '!($0 ~ /^[[:space:]]*agency[[:space:]]+ALL=\(root\)[[:space:]]+NOPASSWD:[[:space:]]*\/usr\/local\/sbin\/codex-system-audit[[:space:]]+\*[[:space:]]*$/)' "$target" >"$temporary"; then
+      rm -f -- "$temporary"
+      return 1
+    fi
+    owner="$(stat -c '%U' "$target")"
+    group="$(stat -c '%G' "$target")"
+    mode="$(stat -c '%a' "$target")"
+    chown "$owner:$group" "$temporary"
+    chmod "$mode" "$temporary"
+    if ! visudo -cf "$temporary" >/dev/null 2>&1; then
+      rm -f -- "$temporary"
+      return 1
+    fi
+    mv -f -- "$temporary" "$target"
+  done
+  visudo -cf /etc/sudoers >/dev/null 2>&1
 }
 
 case "${1:-}" in

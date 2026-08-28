@@ -52,6 +52,7 @@ class SystemAuditHelperTests(unittest.TestCase):
             "systemctl start caddy-ask.service agency-bot.service agency-worker.service cron.service",
             source,
         )
+        self.assertIn("local -a policy_files=(/etc/sudoers /etc/sudoers.d/*)", source)
 
     def test_caddy_ask_uses_its_service_specific_environment(self):
         unit = CADDY_ASK_UNIT.read_text()
