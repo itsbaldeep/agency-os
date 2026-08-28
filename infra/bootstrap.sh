@@ -34,8 +34,9 @@ sudo systemctl daemon-reload
 
 echo "== 6. caddy + sudoers =="
 sudo cp infra/caddy/Caddyfile /etc/caddy/Caddyfile
-sudo cp infra/sudoers-agency-executor /etc/sudoers.d/agency-executor
-sudo visudo -cf /etc/sudoers.d/agency-executor   # refuse to continue if invalid
+sudo install -o root -g root -m 0755 infra/codex-system-audit /usr/local/sbin/codex-system-audit
+sudo visudo -cf infra/sudoers-agency-executor
+sudo install -o root -g root -m 0440 infra/sudoers-agency-executor /etc/sudoers.d/agency-executor
 
 echo "== 7. crontab =="
 crontab infra/cron/agency.crontab

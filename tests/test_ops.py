@@ -4,6 +4,7 @@ import os
 import tarfile
 import tempfile
 import unittest
+from subprocess import CompletedProcess
 from datetime import date
 from pathlib import Path
 from unittest import mock
@@ -137,6 +138,37 @@ class OpsTests(unittest.TestCase):
             member = archive.extractfile("root-agents")
             self.assertIsNotNone(member)
             self.assertEqual(member.read().decode(), "global rules\n")
+
+    def test_root_backup_copies_only_the_helper_reported_fixed_path(self):
+        root_dir = self.home / "root-backups"
+        root_dir.mkdir()
+        archive = root_dir / "core-system-20260828T180000Z.tar.gz"
+        archive.write_bytes(b"root state")
+        stage = self.home / "stage"
+        stage.mkdir()
+        self.ops.ROOT_BACKUP_DIR = root_dir
+
+        with mock.patch.object(
+            self.ops,
+            "run",
+            return_value=CompletedProcess([], 0, f"{archive}\n".encode(), b""),
+        ):
+            self.assertTrue(self.ops.request_root_backup(stage))
+
+        self.assertEqual((stage / archive.name).read_bytes(), b"root state")
+
+    def test_root_backup_rejects_an_unexpected_helper_path(self):
+        stage = self.home / "stage"
+        stage.mkdir()
+        unexpected = self.home / "core-system-20260828T180000Z.tar.gz"
+        unexpected.write_bytes(b"unexpected")
+
+        with mock.patch.object(
+            self.ops,
+            "run",
+            return_value=CompletedProcess([], 0, f"{unexpected}\n".encode(), b""),
+        ):
+            self.assertFalse(self.ops.request_root_backup(stage))
 
 
 if __name__ == "__main__":

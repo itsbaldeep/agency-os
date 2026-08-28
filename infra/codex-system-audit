@@ -1,0 +1,104 @@
+#!/bin/bash
+set -euo pipefail
+
+ROOT_BACKUP_DIR="/var/backups/agency-os"
+temporary_backup=""
+
+cleanup_backup() {
+  if [ -n "$temporary_backup" ]; then
+    rm -f -- "$temporary_backup"
+  fi
+}
+trap cleanup_backup EXIT
+
+backup_core() {
+  local timestamp final_backup
+  local -a paths=(
+    etc/systemd/system
+    usr/lib/systemd/system/headscale.service
+    usr/lib/systemd/system/caddy.service
+    etc/ufw
+    etc/default/ufw
+    etc/sudoers
+    etc/sudoers.d
+    etc/headscale
+    var/lib/headscale
+    etc/caddy
+    var/lib/caddy
+  )
+
+  umask 077
+  if [ -e "$ROOT_BACKUP_DIR" ] || [ -L "$ROOT_BACKUP_DIR" ]; then
+    if [ ! -d "$ROOT_BACKUP_DIR" ] || [ -L "$ROOT_BACKUP_DIR" ] \
+      || [ "$(realpath -e "$ROOT_BACKUP_DIR")" != "$ROOT_BACKUP_DIR" ]; then
+      echo "Refusing unsafe backup directory" >&2
+      return 1
+    fi
+  fi
+  install -d -o root -g agency -m 0750 "$ROOT_BACKUP_DIR"
+
+  for path in "${paths[@]}"; do
+    if [ ! -e "/$path" ]; then
+      echo "Required recovery source is missing: /$path" >&2
+      return 1
+    fi
+  done
+
+  timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  final_backup="$ROOT_BACKUP_DIR/core-system-$timestamp.tar.gz"
+  if [ -e "$final_backup" ]; then
+    echo "Backup target already exists" >&2
+    return 1
+  fi
+
+  temporary_backup="$(mktemp "$ROOT_BACKUP_DIR/.core-system.XXXXXX.tar.gz")"
+  tar --create --gzip --file "$temporary_backup" --directory / --numeric-owner -- "${paths[@]}"
+  tar --list --gzip --file "$temporary_backup" >/dev/null
+  chown agency:agency "$temporary_backup"
+  chmod 0600 "$temporary_backup"
+  ln "$temporary_backup" "$final_backup"
+  rm -f -- "$temporary_backup"
+  temporary_backup=""
+  printf '%s\n' "$final_backup"
+}
+
+case "${1:-}" in
+  cron-users)
+    for f in /var/spool/cron/crontabs/*; do
+      [ -f "$f" ] || continue
+      u="$(basename "$f")"
+      echo "USER:$u"
+      crontab -u "$u" -l 2>/dev/null \
+        | sed -E 's/^([A-Za-z_][A-Za-z0-9_]*)=.*/\1=[REDACTED]/'
+    done
+    ;;
+
+  cron-system)
+    for f in /etc/crontab /etc/cron.d/*; do
+      [ -f "$f" ] || continue
+      echo "FILE:$f"
+      sed -E 's/^([A-Za-z_][A-Za-z0-9_]*)=.*/\1=[REDACTED]/' "$f"
+    done
+    ;;
+
+  sudoers)
+    grep -RhvE '^[[:space:]]*(#|$)' /etc/sudoers /etc/sudoers.d 2>/dev/null
+    ;;
+
+  sockets)
+    ss -lntupH
+    ;;
+
+  firewall)
+    ufw status verbose
+    ;;
+
+  backup-core)
+    backup_core
+    ;;
+
+  *)
+    echo "Usage: $0 {cron-users|cron-system|sudoers|sockets|firewall|backup-core}" >&2
+    exit 2
+    ;;
+esac

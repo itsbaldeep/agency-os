@@ -36,7 +36,7 @@ BACKUP_DIR = Path(
 OPS_STATE = STATE_DIR / "operations.json"
 ROTATION_STATE = STATE_DIR / "credential-rotations.json"
 TOOL_AUTH_STATUS = CREDENTIAL_DIR / "tool-auth-status.json"
-ROOT_BACKUP_DIR = AGENCY_HOME / "backups/system"
+ROOT_BACKUP_DIR = Path("/var/backups/agency-os")
 ROOT_HELPER = "/usr/local/sbin/codex-system-audit"
 SENSITIVE_NAME = re.compile(r"(TOKEN|KEY|SECRET|PASSWORD|PASS|ACCESS|WEBHOOK|AUTH)")
 PLACEHOLDER = re.compile(r"^(|change-?me!?|placeholder|example|default|test|secret)$", re.I)
@@ -261,16 +261,22 @@ def export_opencode_state(destination: Path) -> bool:
 
 
 def request_root_backup(stage: Path) -> bool:
-    before = set(ROOT_BACKUP_DIR.glob("core-system-*.tar*")) if ROOT_BACKUP_DIR.exists() else set()
     try:
-        run(["sudo", "-n", ROOT_HELPER, "backup-core"], timeout=60)
-    except OpsError:
+        result = run(["sudo", "-n", ROOT_HELPER, "backup-core"], timeout=60)
+        output = result.stdout.decode("utf-8", errors="strict").splitlines()
+    except (OpsError, UnicodeDecodeError):
         return False
-    after = set(ROOT_BACKUP_DIR.glob("core-system-*.tar*")) if ROOT_BACKUP_DIR.exists() else set()
-    created = sorted(after - before, key=lambda path: path.stat().st_mtime)
-    if not created:
+    if len(output) != 1:
         return False
-    shutil.copy2(created[-1], stage / created[-1].name)
+    created = Path(output[0])
+    if (
+        created.parent != ROOT_BACKUP_DIR
+        or not re.fullmatch(r"core-system-\d{8}T\d{6}Z\.tar\.gz", created.name)
+        or created.is_symlink()
+        or not created.is_file()
+    ):
+        return False
+    shutil.copy2(created, stage / created.name)
     return True
 
 

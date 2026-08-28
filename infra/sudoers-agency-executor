@@ -1,0 +1,9 @@
+Cmnd_Alias AGENCY_SYSTEM_AUDIT = \
+    /usr/local/sbin/codex-system-audit cron-users, \
+    /usr/local/sbin/codex-system-audit cron-system, \
+    /usr/local/sbin/codex-system-audit sudoers, \
+    /usr/local/sbin/codex-system-audit sockets, \
+    /usr/local/sbin/codex-system-audit firewall, \
+    /usr/local/sbin/codex-system-audit backup-core
+
+agency ALL=(root) NOPASSWD: AGENCY_SYSTEM_AUDIT
