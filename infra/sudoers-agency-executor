@@ -7,6 +7,7 @@ Cmnd_Alias AGENCY_SYSTEM_AUDIT = \
     /usr/local/sbin/codex-system-audit backup-core, \
     /usr/local/sbin/codex-system-audit maintenance-begin, \
     /usr/local/sbin/codex-system-audit maintenance-resume, \
-    /usr/local/sbin/codex-system-audit remove-legacy-opencode-db-secret
+    /usr/local/sbin/codex-system-audit remove-legacy-opencode-db-secret, \
+    /usr/local/sbin/codex-system-audit tighten-sudoers
 
 agency ALL=(root) NOPASSWD: AGENCY_SYSTEM_AUDIT

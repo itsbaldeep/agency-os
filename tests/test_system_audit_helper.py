@@ -41,6 +41,7 @@ class SystemAuditHelperTests(unittest.TestCase):
             "maintenance-begin",
             "maintenance-resume",
             "remove-legacy-opencode-db-secret",
+            "tighten-sudoers",
         ):
             self.assertIn(f"codex-system-audit {action}", sudoers)
         self.assertIn(

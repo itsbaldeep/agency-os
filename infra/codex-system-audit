@@ -87,6 +87,36 @@ remove_legacy_opencode_db_secret() {
   mv -f -- "$temporary" "$target"
 }
 
+tighten_sudoers() {
+  local target="/etc/sudoers.d/agency-executor"
+  local temporary backup
+  if [ ! -f "$target" ]; then
+    return 0
+  fi
+  temporary="$(mktemp /etc/sudoers.d/.agency-executor.XXXXXX)"
+  backup="$(mktemp /etc/sudoers.d/.agency-executor.backup.XXXXXX)"
+  cp -- "$target" "$backup"
+  if ! awk '!($0 ~ /^[[:space:]]*agency[[:space:]]+ALL=\(root\)[[:space:]]+NOPASSWD:[[:space:]]*\/usr\/local\/sbin\/codex-system-audit[[:space:]]+\*[[:space:]]*$/)' "$target" >"$temporary"; then
+    rm -f -- "$temporary" "$backup"
+    return 1
+  fi
+  chown root:root "$temporary"
+  chmod 0440 "$temporary"
+  if ! visudo -cf "$temporary" >/dev/null 2>&1; then
+    rm -f -- "$temporary" "$backup"
+    return 1
+  fi
+  mv -f -- "$temporary" "$target"
+  if ! visudo -cf /etc/sudoers >/dev/null 2>&1; then
+    cp -- "$backup" "$target"
+    chown root:root "$target"
+    chmod 0440 "$target"
+    rm -f -- "$backup"
+    return 1
+  fi
+  rm -f -- "$backup"
+}
+
 case "${1:-}" in
   cron-users)
     for f in /var/spool/cron/crontabs/*; do
@@ -134,8 +164,12 @@ case "${1:-}" in
     remove_legacy_opencode_db_secret
     ;;
 
+  tighten-sudoers)
+    tighten_sudoers
+    ;;
+
   *)
-    echo "Usage: $0 {cron-users|cron-system|sudoers|sockets|firewall|backup-core|maintenance-begin|maintenance-resume|remove-legacy-opencode-db-secret}" >&2
+    echo "Usage: $0 {cron-users|cron-system|sudoers|sockets|firewall|backup-core|maintenance-begin|maintenance-resume|remove-legacy-opencode-db-secret|tighten-sudoers}" >&2
     exit 2
     ;;
 esac
