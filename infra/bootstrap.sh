@@ -35,7 +35,7 @@ echo "== 6. caddy + sudoers =="
 sudo cp infra/caddy/Caddyfile /etc/caddy/Caddyfile
 sudo install -o root -g root -m 0755 infra/codex-system-audit /usr/local/sbin/codex-system-audit
 sudo visudo -cf infra/sudoers-agency-executor
-sudo install -o root -g root -m 0440 infra/sudoers-agency-executor /etc/sudoers.d/agency-executor
+sudo install -o root -g root -m 0440 infra/sudoers-agency-executor /etc/sudoers.d/agency-maintenance
 
 echo "== 7. crontab =="
 crontab infra/cron/agency.crontab
