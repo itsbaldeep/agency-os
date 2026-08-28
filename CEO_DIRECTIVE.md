@@ -106,10 +106,9 @@ report → repeat.** Every step visible on the dashboard.
    work; multiple outline/draft variants with human selection are still planned.
 4. **Publication breadth is narrow.** WordPress has a tracked adapter but needs a
    live credential/destination proof. Git/PHP/Java/Next.js adapters do not exist.
-5. **Recovery has one remaining deployment gap.** The fixed-target `backup-core`
-   helper and exact sudo allowlist are implemented and tested in canonical source.
-   Root-only state remains absent until the reviewed helper is installed once and
-   a fresh bundle verifies `root_state=true`.
+5. **Recovery is complete for the current estate.** The fixed-target `backup-core`
+   helper, exact sudo allowlist, and fresh post-rotation bundle all verify
+   `root_state=true`. The old wildcard helper permission was removed.
 6. **Fallback is currently verified.** OpenCode OpenAI OAuth succeeds. The human
    confirmed on 2026-08-26 that OpenCode Zen remains required as free-capacity
    fallback, and a new Zen key passed an explicit free-model probe on 2026-08-28.
@@ -120,11 +119,10 @@ report → repeat.** Every step visible on the dashboard.
    APT reports zero actionable updates, two policy-deferred candidates, and no
    reboot requirement. The alert detector now labels deferred candidates without
    treating them as maintenance debt.
-9. **One internal credential set is compromised.** A diagnostic on 2026-08-28
-   loaded the current PostgreSQL, ClickHouse, and MinIO password variables into
-   delegated tool context. No values were printed to the human, but the boundary
-   is not approved. Replace that internal set once through the reviewed automated
-   maintenance path, then resolve the incident only after verification.
+9. **The internal credential incident is resolved.** The PostgreSQL, PGPASSWORD,
+   ClickHouse, and MinIO values were replaced by the compromised-only maintenance
+   workflow. Consumers, routes, credential incidents, and the fresh recovery
+   bundle all verify cleanly. No external API keys were rotated.
 
 ### The honest bottom line
 
@@ -180,12 +178,12 @@ self-fixing remain parked until the core client workflow is dependable.
       OpenAI capacity is unavailable.
 - [x] Deployden GSC and GA4 property access was granted and verified through
       bounded read-only API queries on 2026-08-26.
-- [ ] Install the reviewed fixed-target sudo helper and allowlist once, then verify
-      a fresh recovery bundle with root-only Headscale/system state included.
+- [x] Install the reviewed fixed-target sudo helper and allowlist, remove the old
+      wildcard permission, and verify a fresh recovery bundle with root-only state.
 - [x] Apply the actionable package upgrades. No reboot is currently required; keep
       the two APT-phased candidates visible as deferred evidence only.
-- [ ] Replace the internal PostgreSQL/ClickHouse/MinIO credential set through the
-      compromised-only maintenance command, then verify all consumers and backup.
+- [x] Replace the compromised internal PostgreSQL/ClickHouse/MinIO credential set
+      through the automated maintenance command and verify all consumers/backup.
 
 ### When we have a real client engagement
 - [ ] **WordPress Application Password** from the client (Phase 3 publisher).

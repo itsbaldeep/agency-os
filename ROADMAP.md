@@ -40,16 +40,16 @@ execution log second.
   remains required as free-capacity fallback; a new Zen key passed an explicit
   free-model probe on 2026-08-28.
 - A checksummed daily core recovery bundle exists. The weekly laptop acknowledgement
-  is current through 2026-08-29. Canonical source now has a tested fixed-target
-  `backup-core` helper; root-only state remains absent until one reviewed install
-  and a fresh bundle verification.
+  is current through 2026-08-29. The fixed-target `backup-core` helper is installed,
+  the old wildcard sudo permission is removed, and the latest bundle verifies
+  root-only system state.
 - Dashboard Resources and the daily Discord digest now expose host maintenance.
   Nine packages were upgraded on 2026-08-28. APT now reports zero actionable
   updates, two policy-deferred candidates, and no reboot requirement.
 - The reviewed `scripts/maintenance.py` controller consolidates status, queue and
   backup gates, quiesce/resume, least-privilege environment synchronization, and
-  compromised-only internal credential replacement. Its fixed sudo helper still
-  needs the one-time runtime installation before live use.
+  compromised-only internal credential replacement. The controller has completed
+  a live credential replacement and post-rotation verification.
 - Dashboard Alerts at `:5001/alerts` is the human chore inbox: it shows the latest
   backup/SCP/SHA evidence, weekly laptop acknowledgement, name-only credential
   weakness/provider-health evidence, exact package commands, and silent
@@ -142,11 +142,11 @@ domain property at 2026-08-26 18:06 UTC and is pending Google's processing.
       acknowledgement is current through 2026-08-29.
 - [x] OpenCode Zen was re-authenticated and passed an explicit free-model probe on
       2026-08-28; it remains the approved free-capacity fallback.
-- [ ] Install the reviewed fixed-target helper and sudo allowlist, then prove a
-      fresh recovery bundle with `root_state=true`.
+- [x] Install the reviewed fixed-target helper and sudo allowlist, remove the old
+      wildcard permission, and prove a fresh recovery bundle with `root_state=true`.
 - [x] Apply all actionable host package updates. Two candidates remain deferred by
       APT policy, and the host does not currently require a reboot.
-- [ ] Run the compromised-only internal credential replacement once for the
+- [x] Run the compromised-only internal credential replacement once for the
       PostgreSQL/ClickHouse/MinIO variables exposed to diagnostic tool context.
 - [ ] Repair and verify the stale `systemd-networkd-wait-online.service` failure
       without weakening live DNS or boot ordering.
