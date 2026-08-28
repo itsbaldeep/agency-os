@@ -64,8 +64,8 @@ report → repeat.** Every step visible on the dashboard.
 - Model routing is explicit: Codex uses the ChatGPT subscription for coding;
   DeepSeek V4 Flash handles cheap/classification work and V4 Pro handles evidence
   synthesis/content. Configured free raw providers precede OpenCode fallbacks.
-  OpenCode OpenAI OAuth works; the OpenCode Zen API credential currently returns
-  401 and remains a visible rotation/availability issue.
+  OpenCode OpenAI OAuth works; a newly issued OpenCode Zen key passed an explicit
+  free-model probe on 2026-08-28.
 - ClickHouse retains only actionable `events` and `ai_visibility_checks`, capped at
   0.25 CPU / 512 MiB. Routine success heartbeats are filtered; failures, changes,
   resolutions, and visibility evidence remain visible.
@@ -101,10 +101,10 @@ report → repeat.** Every step visible on the dashboard.
    server-verified on 2026-08-26 and the weekly laptop acknowledgement is current
    through 2026-08-29. The sudo helper still lacks fixed-target `backup-core`
    support for root-only state.
-6. **Fallback is degraded.** OpenCode OpenAI OAuth succeeds. The human confirmed
-   on 2026-08-26 that OpenCode Zen remains required as free-capacity fallback,
-   but its current credential is invalid and must be re-authenticated. Configured
-   free API providers depend on their own present credentials/rate limits.
+6. **Fallback is currently verified.** OpenCode OpenAI OAuth succeeds. The human
+   confirmed on 2026-08-26 that OpenCode Zen remains required as free-capacity
+   fallback, and a new Zen key passed an explicit free-model probe on 2026-08-28.
+   Configured free API providers still depend on their rate limits.
 7. **Soft parks retain rollback weight.** Hearth's stopped containers/layers and a
    root-owned `.next` build remain intentionally preserved until a later cleanup.
 8. **Host maintenance is due.** Fourteen packages were upgradable on 2026-08-26;
@@ -161,9 +161,9 @@ self-fixing remain parked until the core client workflow is dependable.
 - [x] The latest core backup was server-verified on 2026-08-26, and the laptop
       acknowledgement is current through 2026-08-29. The VPS must resume nagging
       when the next weekly acknowledgement becomes due.
-- [ ] Human-rotate/acknowledge every unrotated central credential. Re-authenticate
-      OpenCode Zen; the human confirmed on 2026-08-26 that this free fallback is
-      retained for periods when OpenAI capacity is unavailable.
+- [x] OpenCode Zen was re-authenticated and passed an explicit free-model probe on
+      2026-08-28. It remains the approved free-capacity fallback for periods when
+      OpenAI capacity is unavailable.
 - [x] Deployden GSC and GA4 property access was granted and verified through
       bounded read-only API queries on 2026-08-26.
 - [ ] Extend the fixed-target sudo audit helper with `backup-core` if root-only

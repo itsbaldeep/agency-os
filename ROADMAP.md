@@ -34,7 +34,8 @@ execution log second.
 - OpenCode web remains core for mobile/web agent access. Codex is the normal coding
   harness; DeepSeek V4 Flash/Pro handle raw completions; OpenCode/OpenAI OAuth is the
   last subscription fallback. The human confirmed on 2026-08-26 that OpenCode Zen
-  remains required as free-capacity fallback; its credential is currently invalid.
+  remains required as free-capacity fallback; a new Zen key passed an explicit
+  free-model probe on 2026-08-28.
 - A checksummed daily core recovery bundle exists. The 2026-08-26 bundle was
   server-verified, and the weekly laptop acknowledgement is current through
   2026-08-29. Root-only system state remains absent until the fixed-target sudo
@@ -131,8 +132,8 @@ domain property at 2026-08-26 18:06 UTC and is pending Google's processing.
 
 - [x] The latest core backup was server-verified on 2026-08-26, and the laptop
       acknowledgement is current through 2026-08-29.
-- [ ] Human-rotate every unacknowledged core credential and re-authenticate OpenCode
-      Zen, which remains the approved free-capacity fallback.
+- [x] OpenCode Zen was re-authenticated and passed an explicit free-model probe on
+      2026-08-28; it remains the approved free-capacity fallback.
 - [ ] Add fixed-target `backup-core` support to `/usr/local/sbin/codex-system-audit`.
 - [ ] Apply the 14 host package updates reported on 2026-08-26 during the approved
       maintenance window. Reboot only if required afterward, then re-verify all
