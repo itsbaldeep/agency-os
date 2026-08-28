@@ -168,7 +168,6 @@ def recovery_and_credentials() -> tuple[str, list[str]]:
     backup = state.get("last_backup") or {}
     offsite = state["offsite"]
     inventory = ops.credential_inventory()
-    unrotated = [item for item in inventory if not item["human_rotated_at"]]
     weak = [item for item in inventory if item["placeholder_like"]]
     alerts: list[str] = []
     if backup:
@@ -188,7 +187,7 @@ def recovery_and_credentials() -> tuple[str, list[str]]:
         alerts.append(offsite_line)
     else:
         offsite_line = f"✅ Off-site copy acknowledged {offsite['confirmed_on']}"
-    credential_line = f"Credential audit: **{len(unrotated)} not human-rotated**"
+    credential_line = f"Credential health: **{len(inventory)} checked, {len(weak)} weak or unhealthy**"
     if weak:
         names = ", ".join(sorted({item["name"] for item in weak}))
         weak_line = f"🚨 Weak/placeholder-like credentials: {names}"

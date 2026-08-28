@@ -74,12 +74,21 @@ report → repeat.** Every step visible on the dashboard.
   Saturday off-site acknowledgement keeps alerting until the human marks it done.
 - The secret-free host snapshot is readable by the non-root dashboard and exposes
   RAM, disk, container use, pending packages, and reboot state. The daily Discord
-  digest surfaces task/content failure rates, recovery/credential debt, package
-  debt, and required reboot state rather than repeating routine success noise.
+  digest surfaces task/content failure rates, recovery/credential-health debt,
+  package debt, and required reboot state rather than repeating routine success noise.
 - Dashboard Alerts (`:5001/alerts`) is now the single human chore inbox. It exposes
   the latest backup/SCP/SHA evidence, weekly off-site acknowledgement, credential
-  names/rotation state, exact host-maintenance commands, and silent whitelisted
-  rechecks. Discord deep-links there. Operations approvals are core/system-only.
+  weakness/provider-health evidence, exact host-maintenance commands, and silent
+  whitelisted rechecks. Discord deep-links there. Operations approvals are
+  core/system-only.
+- Core secrets live only in the local central and least-privilege service environment
+  files. Agency OS has no password-manager dependency. Routine age-based rotation is
+  not required. Replace a credential only when it is weak, placeholder-like,
+  unhealthy, or known compromised, then recheck its owner deterministically.
+- `scripts/maintenance.py` is the one operator entry point for status, safe
+  quiesce/resume, service-specific environment synchronization, and the explicitly
+  compromised-only internal credential replacement path. Its root actions remain
+  a fixed sudo allowlist, never arbitrary shell authority.
 - Core and engagement resources are separate. Hearth and Streamwise are soft
   parked; Aetheria and the old jobs/resume stack are hard parked; Deployden is
   non-parkable core; Weft is reserved and not created.
@@ -97,20 +106,25 @@ report → repeat.** Every step visible on the dashboard.
    work; multiple outline/draft variants with human selection are still planned.
 4. **Publication breadth is narrow.** WordPress has a tracked adapter but needs a
    live credential/destination proof. Git/PHP/Java/Next.js adapters do not exist.
-5. **Recovery has one remaining system-state gap.** The application backup was
-   server-verified on 2026-08-26 and the weekly laptop acknowledgement is current
-   through 2026-08-29. The sudo helper still lacks fixed-target `backup-core`
-   support for root-only state.
+5. **Recovery has one remaining deployment gap.** The fixed-target `backup-core`
+   helper and exact sudo allowlist are implemented and tested in canonical source.
+   Root-only state remains absent until the reviewed helper is installed once and
+   a fresh bundle verifies `root_state=true`.
 6. **Fallback is currently verified.** OpenCode OpenAI OAuth succeeds. The human
    confirmed on 2026-08-26 that OpenCode Zen remains required as free-capacity
    fallback, and a new Zen key passed an explicit free-model probe on 2026-08-28.
    Configured free API providers still depend on their rate limits.
 7. **Soft parks retain rollback weight.** Hearth's stopped containers/layers and a
    root-owned `.next` build remain intentionally preserved until a later cleanup.
-8. **Host maintenance is due.** Fourteen packages were upgradable on 2026-08-26;
-   the host did not require a reboot before the upgrade. Codex lacks passwordless
-   authority for package upgrades/reboot, so this remains visible rather than
-   silently run.
+8. **Package maintenance is current.** Nine packages were upgraded on 2026-08-28.
+   APT reports zero actionable updates, two policy-deferred candidates, and no
+   reboot requirement. The alert detector now labels deferred candidates without
+   treating them as maintenance debt.
+9. **One internal credential set is compromised.** A diagnostic on 2026-08-28
+   loaded the current PostgreSQL, ClickHouse, and MinIO password variables into
+   delegated tool context. No values were printed to the human, but the boundary
+   is not approved. Replace that internal set once through the reviewed automated
+   maintenance path, then resolve the incident only after verification.
 
 ### The honest bottom line
 
@@ -166,10 +180,12 @@ self-fixing remain parked until the core client workflow is dependable.
       OpenAI capacity is unavailable.
 - [x] Deployden GSC and GA4 property access was granted and verified through
       bounded read-only API queries on 2026-08-26.
-- [ ] Extend the fixed-target sudo audit helper with `backup-core` if root-only
-      Headscale/system state should enter the recovery bundle.
-- [ ] Schedule the pending package upgrade and host reboot with an operator who has
-      the required sudo authority; verify every core service after the reboot.
+- [ ] Install the reviewed fixed-target sudo helper and allowlist once, then verify
+      a fresh recovery bundle with root-only Headscale/system state included.
+- [x] Apply the actionable package upgrades. No reboot is currently required; keep
+      the two APT-phased candidates visible as deferred evidence only.
+- [ ] Replace the internal PostgreSQL/ClickHouse/MinIO credential set through the
+      compromised-only maintenance command, then verify all consumers and backup.
 
 ### When we have a real client engagement
 - [ ] **WordPress Application Password** from the client (Phase 3 publisher).

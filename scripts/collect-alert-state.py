@@ -52,25 +52,21 @@ def failed_units() -> list[str]:
 def credential_action(item: dict[str, Any]) -> dict[str, Any]:
     item = dict(item)
     weak = bool(item.get("placeholder_like"))
-    rotated = bool(item.get("human_rotated_at"))
     health = item.get("health_status") or "not_probed"
-    item["status"] = "clear" if rotated and not weak else "action_required"
+    item["status"] = "action_required" if weak else "clear"
     item["source_path"] = (
         f"/home/agency/.config/agency/{item['source']}"
         if item.get("source") != "tool-auth-status.json"
         else "/home/agency/.config/agency/tool-auth-status.json"
     )
     if weak and health in ("invalid", "missing", "stale"):
-        item["next_action"] = "Re-authenticate this provider, recheck, then mark it human-rotated."
+        item["next_action"] = "Re-authenticate this provider, then recheck."
         item["command"] = "opencode auth login"
     elif weak:
         item["next_action"] = "Replace the value with a strong human-generated credential, restart its owner, then recheck."
         item["command"] = f"nano {item['source_path']}"
-    elif not rotated:
-        item["next_action"] = "If you personally replaced this credential, acknowledge that rotation."
-        item["command"] = ""
     else:
-        item["next_action"] = "No action required."
+        item["next_action"] = "No weak, placeholder, or unhealthy evidence detected."
         item["command"] = ""
     return item
 
@@ -152,7 +148,6 @@ def build_alert_state(today: date | None = None) -> dict[str, Any]:
             "total": len(credentials),
             "open": credential_open,
             "weak_or_unhealthy": sum(bool(item.get("placeholder_like")) for item in credentials),
-            "acknowledged": sum(bool(item.get("human_rotated_at")) for item in credentials),
         },
         "maintenance": maintenance,
         "root_recovery": {

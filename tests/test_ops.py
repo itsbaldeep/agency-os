@@ -64,19 +64,13 @@ class OpsTests(unittest.TestCase):
         self.assertTrue(record["placeholder_like"])
         self.assertNotIn("value", record)
 
-    def test_weak_credential_cannot_be_acknowledged(self):
-        (self.credentials / "core.env").write_text(
-            "CLICKHOUSE_PASSWORD=changeme\n", encoding="utf-8"
-        )
-        with self.assertRaises(self.ops.OpsError):
-            self.ops.mark_credential("core.env:CLICKHOUSE_PASSWORD")
-
-    def test_strong_credential_can_be_acknowledged(self):
+    def test_strong_credential_is_reported_without_rotation_state(self):
         (self.credentials / "core.env").write_text(
             "API_TOKEN=q9M!2xL#7vP@4sD$8nK\n", encoding="utf-8"
         )
-        records = self.ops.mark_credential("core.env:API_TOKEN")
-        self.assertTrue(records[0]["human_rotated_at"])
+        records = self.ops.credential_inventory()
+        self.assertFalse(records[0]["placeholder_like"])
+        self.assertNotIn("human_rotated_at", records[0])
 
     def test_project_named_password_is_treated_as_weak(self):
         self.assertTrue(self.ops.credential_looks_weak("agency_clickhouse_2026"))

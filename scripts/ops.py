@@ -34,7 +34,6 @@ BACKUP_DIR = Path(
     os.environ.get("AGENCY_BACKUP_DIR", AGENCY_HOME / "backups/core")
 )
 OPS_STATE = STATE_DIR / "operations.json"
-ROTATION_STATE = STATE_DIR / "credential-rotations.json"
 TOOL_AUTH_STATUS = CREDENTIAL_DIR / "tool-auth-status.json"
 ROOT_BACKUP_DIR = Path("/var/backups/agency-os")
 ROOT_HELPER = "/usr/local/sbin/codex-system-audit"
@@ -414,7 +413,6 @@ def mark_offsite(note: str = "") -> dict[str, Any]:
 
 
 def credential_inventory() -> list[dict[str, Any]]:
-    rotations = read_json(ROTATION_STATE, {})
     records: list[dict[str, Any]] = []
     for env_path in sorted(CREDENTIAL_DIR.glob("*.env")):
         for name, value in sorted(parse_env(env_path).items()):
@@ -427,7 +425,6 @@ def credential_inventory() -> list[dict[str, Any]]:
                     "name": name,
                     "source": env_path.name,
                     "placeholder_like": credential_looks_weak(value),
-                    "human_rotated_at": (rotations.get(key) or {}).get("at"),
                 }
             )
     gsc = CREDENTIAL_DIR / "gsc-service-account.json"
@@ -439,7 +436,6 @@ def credential_inventory() -> list[dict[str, Any]]:
                 "name": "GSC_SERVICE_ACCOUNT",
                 "source": gsc.name,
                 "placeholder_like": False,
-                "human_rotated_at": (rotations.get(key) or {}).get("at"),
             }
         )
     for name, state in sorted(read_json(TOOL_AUTH_STATUS, {}).items()):
@@ -452,7 +448,6 @@ def credential_inventory() -> list[dict[str, Any]]:
                 "name": name,
                 "source": "tool-auth-status.json",
                 "placeholder_like": state.get("status") in ("invalid", "missing", "stale"),
-                "human_rotated_at": (rotations.get(key) or {}).get("at"),
                 "health_status": state.get("status", "unknown"),
                 "last_checked": state.get("last_checked"),
             }
@@ -467,18 +462,6 @@ def credential_looks_weak(value: str) -> bool:
     if len(normalized) < 16:
         return True
     return any(marker in normalized for marker in WEAK_MARKERS)
-
-
-def mark_credential(identifier: str) -> list[dict[str, Any]]:
-    current = {item["id"]: item for item in credential_inventory()}
-    if identifier not in current:
-        raise OpsError("unknown credential identifier; run credentials first")
-    if current[identifier].get("placeholder_like"):
-        raise OpsError("credential is still weak, placeholder-like, or unhealthy; replace/re-authenticate it before acknowledging rotation")
-    rotations = read_json(ROTATION_STATE, {})
-    rotations[identifier] = {"at": iso_now(), "acknowledged_by": "human"}
-    write_json(ROTATION_STATE, rotations)
-    return credential_inventory()
 
 
 def verify_backup(path: Path) -> dict[str, Any]:
@@ -533,9 +516,7 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser("status", help="show backup/off-site acknowledgement state")
     offsite = commands.add_parser("mark-offsite", help="acknowledge laptop/off-site copy")
     offsite.add_argument("--note", default="")
-    commands.add_parser("credentials", help="list credential names and rotation state")
-    rotated = commands.add_parser("mark-credential", help="acknowledge one human rotation")
-    rotated.add_argument("identifier")
+    commands.add_parser("credentials", help="list credential names and health evidence")
     verify = commands.add_parser("verify", help="verify a recovery bundle without restoring")
     verify.add_argument("bundle", type=Path)
     args = parser.parse_args(argv)
@@ -548,8 +529,6 @@ def main(argv: list[str] | None = None) -> int:
             result = mark_offsite(args.note)
         elif args.command == "credentials":
             result = credential_inventory()
-        elif args.command == "mark-credential":
-            result = mark_credential(args.identifier)
         elif args.command == "verify":
             result = verify_and_record_backup(args.bundle)
         else:

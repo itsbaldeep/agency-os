@@ -62,6 +62,31 @@ backup_core() {
   printf '%s\n' "$final_backup"
 }
 
+maintenance_begin() {
+  systemctl stop cron.service agency-worker.service agency-bot.service caddy-ask.service
+}
+
+maintenance_resume() {
+  systemctl start caddy-ask.service agency-bot.service agency-worker.service cron.service
+  systemctl is-active --quiet caddy-ask.service agency-bot.service agency-worker.service cron.service
+}
+
+remove_legacy_opencode_db_secret() {
+  local target="/etc/agency/opencode.env"
+  local temporary
+  if [ ! -f "$target" ]; then
+    return 0
+  fi
+  temporary="$(mktemp /etc/agency/.opencode.env.XXXXXX)"
+  if ! awk -F= '$1 != "POSTGRES_PASSWORD"' "$target" >"$temporary"; then
+    rm -f -- "$temporary"
+    return 1
+  fi
+  chown root:root "$temporary"
+  chmod 0600 "$temporary"
+  mv -f -- "$temporary" "$target"
+}
+
 case "${1:-}" in
   cron-users)
     for f in /var/spool/cron/crontabs/*; do
@@ -97,8 +122,20 @@ case "${1:-}" in
     backup_core
     ;;
 
+  maintenance-begin)
+    maintenance_begin
+    ;;
+
+  maintenance-resume)
+    maintenance_resume
+    ;;
+
+  remove-legacy-opencode-db-secret)
+    remove_legacy_opencode_db_secret
+    ;;
+
   *)
-    echo "Usage: $0 {cron-users|cron-system|sudoers|sockets|firewall|backup-core}" >&2
+    echo "Usage: $0 {cron-users|cron-system|sudoers|sockets|firewall|backup-core|maintenance-begin|maintenance-resume|remove-legacy-opencode-db-secret}" >&2
     exit 2
     ;;
 esac

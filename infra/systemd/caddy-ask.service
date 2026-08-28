@@ -3,7 +3,7 @@ Description=Caddy on-demand TLS allow-list
 After=network.target
 
 [Service]
-EnvironmentFile=/etc/agency/opencode.env
+EnvironmentFile=/home/agency/.config/agency/caddy-ask.env
 Type=simple
 User=agency
 WorkingDirectory=/home/agency/agency-os

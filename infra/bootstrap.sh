@@ -2,8 +2,7 @@
 # bootstrap.sh — rebuild the Agency OS box on a fresh Ubuntu 24/26 server.
 # Prereqs you bring by hand (the only two things not in git):
 #   1. this repo cloned to /home/agency/agency-os  (git clone via a deploy token)
-#   2. secrets restored to ~/agency-os/.env and ~/agency-os/bot/.env
-#      (from your password manager — see .env.example for required keys)
+#   2. secrets restored to the local core and service-specific environment files
 # Data restore (pg dumps, minio) is a separate step at the bottom.
 set -euo pipefail
 REPO="/home/agency/agency-os"

@@ -19,6 +19,9 @@ execution log second.
   Core development is manual edit → test → review → commit → deliberate deploy.
 - Core credentials live under `/home/agency/.config/agency`; engagement credentials
   stay with their owner. Credential values never enter logs, chat, Git, or traces.
+  Local environment files are authoritative and Agency OS has no password-manager
+  dependency. Routine rotation is retired; alert only on weak, placeholder-like,
+  unhealthy, or known-compromised credentials.
 - Operator routing is impact-based. Sol/xhigh handles routine status, navigation,
   non-impactful reconnaissance, and bounded low-risk work directly. Bounded Luna
   subagents support consequential engagement, production, core, security, and
@@ -36,24 +39,29 @@ execution log second.
   last subscription fallback. The human confirmed on 2026-08-26 that OpenCode Zen
   remains required as free-capacity fallback; a new Zen key passed an explicit
   free-model probe on 2026-08-28.
-- A checksummed daily core recovery bundle exists. The 2026-08-26 bundle was
-  server-verified, and the weekly laptop acknowledgement is current through
-  2026-08-29. Root-only system state remains absent until the fixed-target sudo
-  helper grows `backup-core`.
+- A checksummed daily core recovery bundle exists. The weekly laptop acknowledgement
+  is current through 2026-08-29. Canonical source now has a tested fixed-target
+  `backup-core` helper; root-only state remains absent until one reviewed install
+  and a fresh bundle verification.
 - Dashboard Resources and the daily Discord digest now expose host maintenance.
-  Fourteen package updates were pending on 2026-08-26; no reboot was required
-  before applying them. The maintenance window and post-upgrade check remain
-  operator work.
+  Nine packages were upgraded on 2026-08-28. APT now reports zero actionable
+  updates, two policy-deferred candidates, and no reboot requirement.
+- The reviewed `scripts/maintenance.py` controller consolidates status, queue and
+  backup gates, quiesce/resume, least-privilege environment synchronization, and
+  compromised-only internal credential replacement. Its fixed sudo helper still
+  needs the one-time runtime installation before live use.
 - Dashboard Alerts at `:5001/alerts` is the human chore inbox: it shows the latest
   backup/SCP/SHA evidence, weekly laptop acknowledgement, name-only credential
-  rotation state, exact package commands, and silent deterministic rechecks.
+  weakness/provider-health evidence, exact package commands, and silent
+  deterministic rechecks.
   Discord digests deep-link there. Operations approvals are core/system-only;
   engagement/content decisions stay in their own workflow.
 
 ## Stabilization completed on 2026-08-22
 
 - [x] Removed autonomous deploy/review/merge loops and restart-driven task orphaning.
-- [x] Centralized core credentials and added name-only rotation auditing.
+- [x] Centralized core credentials and added name-only weakness/provider-health
+      auditing.
 - [x] Added verified Postgres/ClickHouse/MinIO/config/OpenCode recovery bundles.
 - [x] Isolated core object storage; soft parked Hearth/Streamwise; hard parked
       Aetheria and the ambiguous jobs/resume stack.
@@ -134,10 +142,14 @@ domain property at 2026-08-26 18:06 UTC and is pending Google's processing.
       acknowledgement is current through 2026-08-29.
 - [x] OpenCode Zen was re-authenticated and passed an explicit free-model probe on
       2026-08-28; it remains the approved free-capacity fallback.
-- [ ] Add fixed-target `backup-core` support to `/usr/local/sbin/codex-system-audit`.
-- [ ] Apply the 14 host package updates reported on 2026-08-26 during the approved
-      maintenance window. Reboot only if required afterward, then re-verify all
-      core services, routes, firewall, and task state.
+- [ ] Install the reviewed fixed-target helper and sudo allowlist, then prove a
+      fresh recovery bundle with `root_state=true`.
+- [x] Apply all actionable host package updates. Two candidates remain deferred by
+      APT policy, and the host does not currently require a reboot.
+- [ ] Run the compromised-only internal credential replacement once for the
+      PostgreSQL/ClickHouse/MinIO variables exposed to diagnostic tool context.
+- [ ] Repair and verify the stale `systemd-networkd-wait-online.service` failure
+      without weakening live DNS or boot ordering.
 - [x] Grant and verify Deployden GSC/GA4 property access.
 - [ ] Provide a real CMS destination when publication testing is authorized.
 - [ ] Provide the Weft PRD when ready; Jobright is the baseline, not a build request.

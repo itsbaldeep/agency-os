@@ -4615,10 +4615,6 @@ def handle_operator_chore(task):
             )
         result = agency_ops.mark_offsite(str(params.get("note") or "Dashboard acknowledgement"))
         _refresh_alert_snapshot()
-    elif action == "mark_credential":
-        identifier = str(params.get("credential_id") or "")
-        result = agency_ops.mark_credential(identifier)
-        _refresh_alert_snapshot()
     elif action == "verify_backup":
         status = agency_ops.operations_status()
         path = (status.get("last_backup") or {}).get("path")
