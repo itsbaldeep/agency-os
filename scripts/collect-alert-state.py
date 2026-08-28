@@ -108,8 +108,13 @@ def build_alert_state(today: date | None = None) -> dict[str, Any]:
     maintenance = dict(host.get("maintenance") or {})
     update_count = int(maintenance.get("upgradable_count") or 0)
     reboot_required = bool(maintenance.get("reboot_required"))
+    apt_check_ok = maintenance.get("apt_check_ok") is not False
     maintenance.update({
-        "status": "clear" if update_count == 0 and not reboot_required else "action_required",
+        "status": (
+            "clear"
+            if apt_check_ok and update_count == 0 and not reboot_required
+            else "action_required"
+        ),
         "current_kernel": os.uname().release,
         "commands": [
             "sudo apt update",

@@ -45,17 +45,47 @@ def memory():
     }
 
 
+def package_name(value):
+    """Normalize APT's optional multi-arch suffix for human-facing evidence."""
+    return value.split(":", 1)[0]
+
+
+def listed_packages(list_output):
+    return sorted({
+        package_name(line.split("/", 1)[0])
+        for line in list_output.splitlines()
+        if "/" in line and not line.startswith("Listing")
+    })
+
+
+def package_updates(list_output, simulation_output):
+    """Separate packages APT will install now from policy-deferred candidates."""
+    candidates = set(listed_packages(list_output))
+    installable = {
+        package_name(fields[1])
+        for line in simulation_output.splitlines()
+        if line.startswith("Inst ") and len(fields := line.split()) > 1
+    }
+    return sorted(installable), sorted(candidates - installable)
+
+
 def maintenance():
     """Return names/counts only; never publish package source credentials."""
+    list_ok = True
     try:
-        output = run("apt", "list", "--upgradable")
-        packages = sorted({
-            line.split("/", 1)[0]
-            for line in output.splitlines()
-            if "/" in line and not line.startswith("Listing")
-        })
+        list_output = run("apt", "list", "--upgradable")
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        packages = []
+        list_output = ""
+        list_ok = False
+    simulation_ok = True
+    try:
+        simulation_output = run("apt-get", "-s", "upgrade")
+        packages, deferred = package_updates(list_output, simulation_output)
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        # Preserve the prior conservative behavior if APT simulation is unavailable.
+        packages = listed_packages(list_output)
+        deferred = []
+        simulation_ok = False
     reboot_marker = Path("/var/run/reboot-required")
     reboot_packages = Path("/var/run/reboot-required.pkgs")
     try:
@@ -68,6 +98,9 @@ def maintenance():
     return {
         "upgradable_count": len(packages),
         "upgradable_packages": packages,
+        "deferred_count": len(deferred),
+        "deferred_packages": deferred,
+        "apt_check_ok": list_ok and simulation_ok,
         "reboot_required": reboot_marker.exists(),
         "reboot_packages": reboot_names,
     }
