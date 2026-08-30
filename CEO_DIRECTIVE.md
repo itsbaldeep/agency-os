@@ -1,4 +1,4 @@
-# Agency OS — CEO Directive (state verified 2026-08-24)
+# Agency OS: CEO Directive (state verified 2026-08-30)
 
 Authority: human co-CEO + AI co-CEO (Codex CLI). This file is the persistent
 strategic context — read it on every session start. It supersedes informal
@@ -91,7 +91,9 @@ report → repeat.** Every step visible on the dashboard.
   a fixed sudo allowlist, never arbitrary shell authority.
 - Core and engagement resources are separate. Hearth and Streamwise are soft
   parked; Aetheria and the old jobs/resume stack are hard parked; Deployden is
-  non-parkable core; Weft is reserved and not created.
+  non-parkable core. On 2026-08-29 the human supplied the Weft PRD, selected the
+  product name TrueApply, and authorized an isolated, fully scaffolded in-house
+  product engagement. The retired stack remains archived and is not its runtime.
 
 ### What's broken or missing (the real gap)
 
@@ -128,9 +130,10 @@ report → repeat.** Every step visible on the dashboard.
 
 Agency OS now has a proven black-box audit, evidence-gated draft baseline, and first
 production Deployden SEO measurement. It is not yet a complete marketing agency.
-The next leap is repeating the loop against a real defect: linked suggestion,
-approved fix, post-fix comparison, then outcome measurement. Do not expand into
-Weft or campaign automation before that loop repeats.
+The next core leap is repeating the loop against a real defect: linked suggestion,
+approved fix, post-fix comparison, then outcome measurement. TrueApply is a separate
+human-authorized product engagement and may advance against its own gated roadmap
+without turning its product services, data, or credentials into core dependencies.
 
 ## 4. Competitive position (vs SearchAtlas, Synscribe, Alli AI)
 
@@ -161,11 +164,12 @@ here. The strategic order is fixed:
    variants, reviewed assets, approved publication, and outcome measurement.
 4. Add real, separately labeled AEO engines and multi-CMS adapters only after the
    first-party loop repeats reliably.
-5. Create Weft only after its PRD. Jobright is the competitor baseline, not an
-   instruction to scaffold the product.
+5. Build the now-authorized TrueApply engagement from its supplied PRD. Jobright is
+   competitor evidence, not source code or permission for unsafe automation.
 
-Campaign automation, multi-tenant SaaS, billing/RBAC, Grafana, and autonomous
-self-fixing remain parked until the core client workflow is dependable.
+Campaign automation, billing/RBAC expansion in Agency OS core, Grafana, and
+autonomous self-fixing remain parked until the core client workflow is dependable.
+TrueApply's later SaaS phases remain governed by its own engine-first exit criteria.
 
 ## 6. What I need from the human co-CEO (checklist)
 
@@ -195,7 +199,8 @@ self-fixing remain parked until the core client workflow is dependable.
 ### Strategic decisions only the human can make
 - [ ] **Pricing model** — retainer vs per-project vs free-audit → paid execution?
 - [ ] **First real client proof** after Deployden — Technoflavour or a prospect?
-- [ ] **Weft PRD** when ready. Until supplied, Weft remains a ledger concept only.
+- [x] **TrueApply PRD** supplied on 2026-08-29. `Weft` is retired as a codename;
+      TrueApply is authorized as the isolated in-house product engagement.
 
 ## 7. Operating rules for the AI co-CEO
 
@@ -235,7 +240,7 @@ self-fixing remain parked until the core client workflow is dependable.
 | What | Action | Reversible via |
 |---|---|---|
 | Aetheria | Recovery bundles verified; live source, routes, containers, volumes, UI, handler, and job 12 removed/retired | Restore only from the recorded recovery bundle as a new isolated engagement |
-| Old jobs/resume SaaS | `/jobs` surfaces/handlers removed; isolated tables dumped then dropped | Restore the dump only into future Weft's separate app/database after its PRD |
+| Old jobs/resume SaaS | `/jobs` surfaces/handlers removed; isolated tables dumped then dropped | Retain as historical recovery evidence; do not import into TrueApply without an explicit data-migration decision |
 | Autonomous jobs 8–11 | Cron and DB scheduling retired; no deploy/review/merge loop | Reintroduction is a strategic decision, not routine rollback |
 | Hearth | Source/data/context preserved; containers and public routes stopped | Use its recovery refs/manifests for an explicit unpark |
 | Streamwise | Source/data/context preserved; no live containers or DNS route | Use its recovery refs/manifests for an explicit unpark |
