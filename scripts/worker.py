@@ -2546,8 +2546,8 @@ def handle_defend_audit(task):
                 # Auto-create a lightweight project for this black-box brand
                 cur.execute(
                     "INSERT INTO projects (name, repo_url, state, agent_allowed) "
-                    "VALUES (%s, %s, 'idea', false) RETURNING id",
-                    (brand["name"], url or f"brand-{brand_id}"))
+                    "VALUES (%s, NULL, 'idea', false) RETURNING id",
+                    (brand["name"],))
                 project_id = cur.fetchone()["id"]
                 cur.execute("UPDATE brands SET project_id=%s WHERE id=%s", (project_id, brand_id))
                 conn.commit()
@@ -2704,6 +2704,84 @@ def handle_defend_audit(task):
             "prompt_tokens": result.get("prompt_tokens", 0),
             "completion_tokens": result.get("completion_tokens", 0),
             "cost": result.get("cost", 0), "model": result.get("model", MODEL_CONFIG["cheap"])}
+
+
+def handle_marketing_audit(task):
+    """Create one tracked parent workflow for all independent marketing evidence stages."""
+    params = task.get("params") or {}
+    brand_id = params.get("brand_id")
+    project_id = params.get("project_id")
+    raw_url = (params.get("url") or "").strip()
+    if not brand_id or not project_id or not raw_url:
+        return {"ok": False, "error": "marketing_audit: brand_id, project_id, and url are required"}
+
+    parsed = urllib.parse.urlsplit(raw_url if "://" in raw_url else "https://" + raw_url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
+        return {"ok": False, "error": "marketing_audit: url must be a public site root"}
+    try:
+        if parsed.port is not None:
+            return {"ok": False, "error": "marketing_audit: url must not include a port"}
+    except ValueError:
+        return {"ok": False, "error": "marketing_audit: url must not include a port"}
+    if parsed.path not in ("", "/") or parsed.query or parsed.fragment:
+        return {"ok": False, "error": "marketing_audit: url must be a public site root"}
+    url = parsed.scheme + "://" + parsed.hostname.lower().rstrip(".")
+    domain = parsed.hostname.lower().rstrip(".")
+
+    conn = get_conn()
+    child_ids = []
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT id, project_id FROM brands WHERE id=%s", (brand_id,))
+        brand = cur.fetchone()
+        if not brand:
+            return {"ok": False, "error": "marketing_audit: brand not found"}
+        if int(brand.get("project_id") or 0) != int(project_id):
+            return {"ok": False, "error": "marketing_audit: brand and project do not match"}
+        cur.execute("SELECT property_type, value FROM brand_properties WHERE brand_id=%s", (brand_id,))
+        properties = {row["property_type"]: row["value"] for row in cur.fetchall()}
+
+        children = [
+            ("defend_audit", {
+                "brand_id": brand_id, "project_id": project_id, "url": url,
+                "source": "marketing_audit",
+            }),
+            ("run_brand_audit", {
+                "brand_id": brand_id, "domain": domain,
+                "source": "marketing_audit",
+            }),
+            ("seo_measurement", {
+                "brand_id": brand_id, "project_id": project_id, "url": url,
+                "source": "marketing_audit",
+            }),
+        ]
+        for key in ("gsc_property", "ga4_property_id", "ga4_measurement_id"):
+            if properties.get(key):
+                children[-1][1][key] = properties[key]
+        for child_type, child_params in children:
+            cur.execute(
+                "INSERT INTO tasks (type, status, params, triggered_by, parent_task_id) "
+                "VALUES (%s, 'queued', %s, 'marketing-audit-chain', %s) RETURNING id",
+                (child_type, json.dumps(child_params), task["id"]),
+            )
+            child_ids.append(cur.fetchone()["id"])
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {
+        "ok": True,
+        "content": json.dumps({
+            "workflow": "marketing_audit",
+            "parent_task_id": task["id"],
+            "child_task_ids": child_ids,
+            "stages": ["defend_audit", "run_brand_audit", "seo_measurement"],
+        }, separators=(",", ":")),
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "cost": 0,
+        "model": "deterministic",
+    }
 
 
 def _seo_run_id(task_id, brand_id, url):
@@ -4638,6 +4716,7 @@ def handle_operator_chore(task):
 
 
 DISPATCH = {
+    "marketing_audit": handle_marketing_audit,
     "seo_measurement": handle_seo_measurement,
     "defend_audit": handle_defend_audit,
     "content_research": handle_content_research,

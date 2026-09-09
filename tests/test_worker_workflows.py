@@ -49,6 +49,53 @@ class WorkerWorkflowTests(unittest.TestCase):
         self.assertIn("sources @> %s::jsonb", source)
         self.assertIn("'executing'", source)
 
+    def test_marketing_audit_chains_three_tracked_children(self):
+        class Cursor(FakeCursor):
+            def __init__(self):
+                super().__init__()
+                self.next_id = 101
+
+            def fetchone(self):
+                sql = self.calls[-1][0]
+                if "FROM brands" in sql:
+                    return {"id": 7, "project_id": 30}
+                if "RETURNING id" in sql:
+                    row = {"id": self.next_id}
+                    self.next_id += 1
+                    return row
+                return None
+
+            def fetchall(self):
+                return [{"property_type": "gsc_property", "value": "sc-domain:example.test"},
+                        {"property_type": "ga4_property_id", "value": "123456"}]
+
+        class Conn:
+            def __init__(self):
+                self.c = Cursor()
+            def cursor(self, **_): return self.c
+            def commit(self): pass
+            def close(self): pass
+
+        conn = Conn()
+        with mock.patch.object(worker, "get_conn", return_value=conn):
+            result = worker.handle_marketing_audit({
+                "id": 99,
+                "params": {"brand_id": 7, "project_id": 30, "url": "https://example.test"},
+            })
+        self.assertTrue(result["ok"])
+        payload = json.loads(result["content"])
+        self.assertEqual(payload["stages"], ["defend_audit", "run_brand_audit", "seo_measurement"])
+        inserts = [call for call in conn.c.calls if "INSERT INTO tasks" in call[0]]
+        self.assertEqual(len(inserts), 3)
+        self.assertTrue(all(call[1][2] == 99 for call in inserts))
+        self.assertEqual([call[1][0] for call in inserts], payload["stages"])
+        self.assertEqual(json.loads(inserts[0][1][1])["url"], "https://example.test")
+        self.assertEqual(json.loads(inserts[1][1][1]), {
+            "brand_id": 7, "domain": "example.test", "source": "marketing_audit",
+        })
+        self.assertEqual(json.loads(inserts[-1][1][1])["gsc_property"], "sc-domain:example.test")
+        self.assertEqual(json.loads(inserts[-1][1][1])["ga4_property_id"], "123456")
+
     def test_seo_handler_fake_db_keeps_sources_explicit_and_result_bounded(self):
         class Cursor(FakeCursor):
             def fetchone(self):
