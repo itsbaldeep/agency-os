@@ -12,3 +12,4 @@ node_modules/
 *.db-shm
 *.db-wal
 gsc-api-key.json
+/.lavish/

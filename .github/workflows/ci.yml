@@ -16,3 +16,4 @@ jobs:
       - run: python3 -m py_compile scripts/*.py bot/agency_bot.py
       - run: pip install discord.py psycopg2-binary
       - run: python3 -m py_compile bot/agency_bot.py
+      - run: python3 -m unittest discover -s tests -p 'test_*.py'

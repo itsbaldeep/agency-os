@@ -6,6 +6,8 @@ from datetime import datetime, timedelta, timezone
 import pr_review  # bounded machine review for explicitly requested proposal tasks
 import ops as agency_ops
 import seo_measurement
+import marketing_assessments
+import marketing_report
 
 ENV_PATH = os.environ.get("AGENCY_ENV_FILE", "/home/agency/.config/agency/core.env")
 
@@ -2700,14 +2702,19 @@ def handle_defend_audit(task):
         model=MODEL_CONFIG["cheap"], max_tokens=800)
     if not result["ok"]:
         return result
-    return {"ok": True, "content": result.get("content", ""),
+    capability_snapshot = [{"key": name, "status": value.get("status")}
+                           for name, value in capabilities]
+    return {"ok": True, "content": json.dumps({
+                "summary": result.get("content", "")[:4000],
+                "capabilities": capability_snapshot,
+            }, separators=(",", ":")),
             "prompt_tokens": result.get("prompt_tokens", 0),
             "completion_tokens": result.get("completion_tokens", 0),
             "cost": result.get("cost", 0), "model": result.get("model", MODEL_CONFIG["cheap"])}
 
 
 def handle_marketing_audit(task):
-    """Create one tracked parent workflow for all independent marketing evidence stages."""
+    """Create or resume one tracked marketing assessment evidence collection run."""
     params = task.get("params") or {}
     brand_id = params.get("brand_id")
     project_id = params.get("project_id")
@@ -2758,13 +2765,26 @@ def handle_marketing_audit(task):
         for key in ("gsc_property", "ga4_property_id", "ga4_measurement_id"):
             if properties.get(key):
                 children[-1][1][key] = properties[key]
-        for child_type, child_params in children:
-            cur.execute(
-                "INSERT INTO tasks (type, status, params, triggered_by, parent_task_id) "
-                "VALUES (%s, 'queued', %s, 'marketing-audit-chain', %s) RETURNING id",
-                (child_type, json.dumps(child_params), task["id"]),
-            )
-            child_ids.append(cur.fetchone()["id"])
+
+        assessment, _created, deduplicated = marketing_assessments.get_or_create_assessment(
+            cur, task_id=task["id"], brand_id=brand_id, project_id=project_id, params=params,
+        )
+        if deduplicated:
+            conn.commit()
+            return {
+                "ok": True,
+                "content": json.dumps({
+                    "workflow": "marketing_assessment",
+                    "assessment_id": assessment["id"],
+                    "deduplicated_to_parent_task_id": assessment["trigger_task_id"],
+                    "status": assessment["status"],
+                }, separators=(",", ":")),
+                "prompt_tokens": 0, "completion_tokens": 0, "cost": 0,
+                "model": "deterministic",
+            }
+        child_ids = marketing_assessments.ensure_stage_tasks(
+            cur, assessment=assessment, parent_task_id=task["id"], stages=children,
+        )
         conn.commit()
     finally:
         conn.close()
@@ -2772,16 +2792,289 @@ def handle_marketing_audit(task):
     return {
         "ok": True,
         "content": json.dumps({
-            "workflow": "marketing_audit",
+            "workflow": "marketing_assessment",
             "parent_task_id": task["id"],
+            "assessment_id": assessment["id"],
             "child_task_ids": child_ids,
             "stages": ["defend_audit", "run_brand_audit", "seo_measurement"],
+            "status": "collecting",
+            "message": "evidence collection queued; report synthesis has not run",
         }, separators=(",", ":")),
         "prompt_tokens": 0,
         "completion_tokens": 0,
         "cost": 0,
         "model": "deterministic",
+        "task_status": "collecting",
     }
+
+
+def _object(value):
+    """Return a JSON object without accepting malformed database payloads."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except (TypeError, ValueError):
+            return {}
+    return {}
+
+
+def _marketing_source_state(value):
+    """Map collector states to the intentionally small report vocabulary."""
+    state = str(value or "").strip().lower()
+    if state in {"available", "ok", "success"}:
+        return "available"
+    if state in {"not_configured", "not configured", "missing_configuration"}:
+        return "not_configured"
+    if state in {"failed", "error"}:
+        return "failed"
+    return "unavailable"
+
+
+def _report_timestamp(value, fallback):
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+            if parsed.tzinfo:
+                return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        except ValueError:
+            pass
+    return fallback
+
+
+def _report_source(key, label, status, checked_at, *, metrics=None, error=None):
+    state = _marketing_source_state(status)
+    source = {
+        "key": key,
+        "label": label,
+        "state": state,
+        "freshness": "fresh" if state == "available" else "unknown",
+        "checked_at": checked_at,
+        "metrics": metrics or [],
+    }
+    if state == "failed":
+        source["error"] = str(error or "collector failed")[:500]
+    return source
+
+
+def build_deterministic_marketing_report(assessment, evidence, generated_at=None):
+    """Turn bounded evidence into a conservative first strategy report.
+
+    This is deliberately deterministic. Existing model-generated suggestions may
+    be represented as proposed work, but every factual statement remains tied to
+    a source state and observed metric. A richer model narrative can only extend
+    this validated report contract in a later task.
+    """
+    now = generated_at or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    subject = evidence.get("subject") or {}
+    source_rows = evidence.get("sources") or []
+    sources = []
+    for raw in source_rows:
+        if not isinstance(raw, dict):
+            continue
+        sources.append(_report_source(
+            raw.get("key") or "unknown", raw.get("label") or "Unknown source",
+            raw.get("status"), _report_timestamp(raw.get("checked_at"), now),
+            metrics=raw.get("metrics") if isinstance(raw.get("metrics"), list) else [],
+            error=raw.get("error"),
+        ))
+    source_map = {source["key"]: source for source in sources}
+    claims = []
+    for source in sources:
+        if source["state"] != "available":
+            continue
+        for metric in source["metrics"]:
+            if metric.get("state") != "observed":
+                continue
+            label = metric.get("key", "metric").replace("_", " ")
+            claims.append({
+                "text": f"{source['label']} observed {metric.get('value')} {label} in this assessment.",
+                "type": "observation", "confidence": "medium", "source_refs": [source["key"]],
+            })
+            break
+
+    actions = []
+    available_refs = [source["key"] for source in sources if source["state"] == "available"]
+    default_refs = available_refs[:1] or [source["key"] for source in sources[:1]]
+    for index, suggestion in enumerate(evidence.get("suggestions") or []):
+        if not isinstance(suggestion, dict):
+            continue
+        title = str(suggestion.get("title") or "").strip()
+        if not title:
+            continue
+        suggestion_id = suggestion.get("id") or index + 1
+        action_type = str(suggestion.get("action_type") or "review").lower()
+        priority = str(suggestion.get("impact") or "medium").lower()
+        if priority not in marketing_report.ACTION_PRIORITIES:
+            priority = "medium"
+        actions.append({
+            "id": f"suggestion-{suggestion_id}", "title": title[:240],
+            "detail": str(suggestion.get("rationale") or "Review the evidence and decide whether to schedule this work.")[:2000],
+            "priority": priority,
+            "mode": "review_required" if action_type else "human",
+            "status": "proposed", "human_decision_required": True,
+            "dependencies": [], "source_refs": default_refs,
+        })
+        if len(actions) == 10:
+            break
+    if not actions:
+        unavailable = next((source for source in sources if source["state"] != "available"), None)
+        if unavailable:
+            actions.append({
+                "id": f"restore-{unavailable['key']}",
+                "title": f"Restore or configure {unavailable['label']} evidence",
+                "detail": "Resolve the recorded access or collection gap before using this source to make performance claims.",
+                "priority": "high", "mode": "human", "status": "proposed",
+                "human_decision_required": True, "dependencies": [], "source_refs": [unavailable["key"]],
+            })
+        else:
+            actions.append({
+                "id": "review-evidence", "title": "Review collected marketing evidence",
+                "detail": "Choose the next approved implementation from the evidence currently available.",
+                "priority": "medium", "mode": "review_required", "status": "proposed",
+                "human_decision_required": True, "dependencies": [], "source_refs": default_refs,
+            })
+    complete = bool(sources) and all(source["state"] == "available" for source in sources)
+    candidate = {
+        "schema_version": marketing_report.SCHEMA_VERSION,
+        "report_id": f"assessment-{assessment['id']}",
+        "status": "complete" if complete else "partial",
+        "generated_at": now,
+        "subject": {"name": str(subject.get("name") or "Unknown brand")[:200],
+                    "url": str(subject.get("url") or "https://example.invalid")[:2048]},
+        "sources": sources, "claims": claims, "actions": actions,
+    }
+    return marketing_report.normalize_report(candidate)
+
+
+def _load_marketing_evidence(cur, assessment):
+    """Load bounded evidence attached to this assessment's child tasks only.
+
+    Audit rows are not globally current-state inputs here. The collector task
+    result carries the immutable audit ID created for this run, so a newer run
+    for the same brand cannot silently rewrite an older strategy report.
+    """
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    brand_id = assessment["brand_id"]
+    cur.execute("SELECT name FROM brands WHERE id=%s", (brand_id,))
+    brand = cur.fetchone() or {}
+    cur.execute("SELECT value FROM brand_properties WHERE brand_id=%s AND property_type='domain'", (brand_id,))
+    domain_row = cur.fetchone() or {}
+    domain = str(domain_row.get("value") or "").strip().rstrip("/")
+    url = domain if domain.startswith(("http://", "https://")) else ("https://" + domain if domain else "https://example.invalid")
+    cur.execute(
+        "SELECT s.stage_key, t.status AS task_status, t.result_ref, t.error, t.created_at, t.finished_at "
+        "FROM marketing_assessment_stages s JOIN tasks t ON t.id=s.task_id "
+        "WHERE s.assessment_id=%s ORDER BY s.id",
+        (assessment["id"],),
+    )
+    stages = {row["stage_key"]: row for row in (cur.fetchall() or [])}
+
+    def stage(stage_key):
+        return stages.get(stage_key) or {"task_status": "unavailable", "result_ref": {}, "error": "stage was not recorded"}
+
+    def audit_id(stage_key):
+        result = _object(stage(stage_key).get("result_ref"))
+        raw = result.get("audit_id")
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return None
+
+    seo_id, visibility_id = audit_id("seo_measurement"), audit_id("run_brand_audit")
+    seo, visibility = {}, {}
+    if seo_id:
+        cur.execute("SELECT summary, raw_data, created_at FROM audits WHERE id=%s AND brand_id=%s AND audit_type='seo_measurement'", (seo_id, brand_id))
+        seo = cur.fetchone() or {}
+    if visibility_id:
+        cur.execute("SELECT summary, created_at FROM audits WHERE id=%s AND brand_id=%s AND audit_type <> 'seo_measurement'", (visibility_id, brand_id))
+        visibility = cur.fetchone() or {}
+    if visibility_id:
+        cur.execute("SELECT id, title, rationale, impact, action_type FROM suggestions WHERE brand_id=%s AND audit_id=%s AND status IN ('pending','approved') ORDER BY id DESC LIMIT 10", (brand_id, visibility_id))
+        suggestions = cur.fetchall() or []
+    else:
+        suggestions = []
+
+    seo_summary, seo_raw = _object(seo.get("summary")), _object(seo.get("raw_data"))
+    seo_sources = _object(seo_raw.get("sources"))
+    seo_stage = stage("seo_measurement")
+    checked_at = _report_timestamp(seo.get("created_at") or seo_stage.get("finished_at"), now)
+    counts = _object(seo_summary.get("counts"))
+    def metric(key, value, unit="count"):
+        return {"key": key, "state": "observed", "value": value, "unit": unit} if isinstance(value, (int, float)) and not isinstance(value, bool) else {"key": key, "state": "unavailable", "value": None, "unit": unit}
+    sources = []
+    crawl = _object(seo_sources.get("crawl"))
+    seo_missing = "collector completed without a persisted SEO audit snapshot" if seo_stage.get("task_status") == "done" and not seo else seo_stage.get("error")
+    sources.append({"key": "technical_crawl", "label": "Technical crawl", "status": crawl.get("status") or ("failed" if seo_missing else seo_stage.get("task_status")), "checked_at": checked_at,
+                    "metrics": [metric("pages", counts.get("pages")), metric("findings", counts.get("findings"))], "error": crawl.get("error") or seo_missing})
+    for key, label in (("pagespeed", "PageSpeed"), ("gsc", "Google Search Console"), ("ga4", "Google Analytics 4")):
+        item = _object(seo_sources.get(key))
+        sources.append({"key": key, "label": label, "status": item.get("status") or ("failed" if seo_missing else seo_stage.get("task_status")), "checked_at": checked_at, "metrics": [], "error": item.get("error") or seo_missing})
+    visibility_summary = _object(visibility.get("summary"))
+    visibility_stage = stage("run_brand_audit")
+    visibility_missing = "collector completed without a persisted visibility audit snapshot" if visibility_stage.get("task_status") == "done" and not visibility else visibility_stage.get("error")
+    sources.append({"key": "ai_visibility", "label": "AI visibility audit", "status": "available" if visibility else ("failed" if visibility_missing else visibility_stage.get("task_status")),
+                    "checked_at": _report_timestamp(visibility.get("created_at") or visibility_stage.get("finished_at"), now), "metrics": [metric("prompts_queried", visibility_summary.get("prompts_queried"))], "error": visibility_missing})
+    defend_stage = stage("defend_audit")
+    defend_result = _object(defend_stage.get("result_ref"))
+    capability_snapshot = defend_result.get("capabilities") if isinstance(defend_result.get("capabilities"), list) else []
+    sources.append({"key": "technical_defend", "label": "Public-site defend audit", "status": defend_stage.get("task_status"),
+                    "checked_at": _report_timestamp(defend_stage.get("finished_at"), now),
+                    "metrics": [metric("capabilities_checked", len(capability_snapshot))], "error": defend_stage.get("error")})
+    return {"subject": {"name": brand.get("name") or "Unknown brand", "url": url}, "sources": sources, "suggestions": suggestions}
+
+
+def handle_marketing_assessment_synthesis(task):
+    """Persist a validated, deterministic report for a settled assessment."""
+    assessment_id = (task.get("params") or {}).get("assessment_id")
+    if not assessment_id:
+        return {"ok": False, "error": "marketing_assessment_synthesis: assessment_id is required"}
+    conn = get_conn()
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT * FROM marketing_assessments WHERE id=%s FOR UPDATE", (assessment_id,))
+        assessment = cur.fetchone()
+        if not assessment:
+            return {"ok": False, "error": "marketing_assessment_synthesis: assessment not found"}
+        # The report and parent can be durably committed just before the outer
+        # poller writes this synthesis task's terminal status. A restart in that
+        # narrow window requeues this task. Treat the already validated report as
+        # an idempotent success so the retry completes the child instead of
+        # destroying the parent report through the failure reconciliation path.
+        if assessment.get("status") in {"ready", "partial"}:
+            report = _object(assessment.get("report"))
+            validation = _object(assessment.get("validation"))
+            if report and validation.get("valid") is True:
+                conn.commit()
+                return {"ok": True, "content": json.dumps({"assessment_id": assessment_id,
+                                                               "status": assessment["status"],
+                                                               "report_id": report.get("report_id"),
+                                                               "recovered": True}, separators=(",", ":")),
+                        "prompt_tokens": 0, "completion_tokens": 0, "cost": 0, "model": "deterministic"}
+            return {"ok": False, "error": "marketing_assessment_synthesis: terminal assessment has no validated report"}
+        if assessment.get("status") != "synthesizing":
+            return {"ok": False, "error": f"marketing_assessment_synthesis: assessment is {assessment.get('status')}"}
+        evidence = _load_marketing_evidence(cur, assessment)
+        report = build_deterministic_marketing_report(assessment, evidence)
+        db_status = "ready" if report["status"] == "complete" else "partial"
+        validation = {"valid": True, "schema_version": marketing_report.SCHEMA_VERSION,
+                      "generator": "deterministic", "report_status": report["status"]}
+        cur.execute("UPDATE marketing_assessments SET status=%s, report=%s, validation=%s, completed_at=now(), updated_at=now() WHERE id=%s",
+                    (db_status, json.dumps(report), json.dumps(validation), assessment_id))
+        cur.execute("UPDATE tasks SET status='done', progress=100, progress_text='validated strategy ready', error=NULL, finished_at=now(), result_ref=%s WHERE id=%s",
+                    (json.dumps({"workflow": "marketing_assessment", "assessment_id": assessment_id,
+                                 "status": db_status, "report_id": report["report_id"]}, separators=(",", ":")),
+                     assessment["trigger_task_id"]))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "content": json.dumps({"assessment_id": assessment_id, "status": db_status,
+                                                   "report_id": report["report_id"]}, separators=(",", ":")),
+            "prompt_tokens": 0, "completion_tokens": 0, "cost": 0, "model": "deterministic"}
 
 
 def _seo_run_id(task_id, brand_id, url):
@@ -4717,6 +5010,7 @@ def handle_operator_chore(task):
 
 DISPATCH = {
     "marketing_audit": handle_marketing_audit,
+    "marketing_assessment_synthesis": handle_marketing_assessment_synthesis,
     "seo_measurement": handle_seo_measurement,
     "defend_audit": handle_defend_audit,
     "content_research": handle_content_research,
@@ -4759,6 +5053,7 @@ def poll():
                 "UPDATE tasks SET status='failed', error=%s, result_ref=%s, finished_at=now() WHERE id=%s",
                 (err, json.dumps({"failure_category": category, "first_aid": action}), tid),
             )
+            marketing_assessments.reconcile_for_child_task(cur, tid)
             conn.commit()
             notify_task_failure(task, err)
             return True
@@ -4772,6 +5067,7 @@ def poll():
                 (error, json.dumps({"failure_category": category, "first_aid": action}), tid),
             )
             update_workflow_link(cur, task, "failed", error=error)
+            marketing_assessments.reconcile_for_child_task(cur, tid)
             conn.commit()
             print(f"[worker] Task {tid} crashed in handler: {e}", flush=True)
             notify_task_failure(task, error)
@@ -4786,6 +5082,7 @@ def poll():
             )
             record_task_usage(cur, task, result)
             update_workflow_link(cur, task, "needs_input", result=result)
+            marketing_assessments.reconcile_for_child_task(cur, tid)
             conn.commit()
             post_discord(
                 f"🟡 Task #{tid} `{ttype}` needs input\n{content[:500]}\n"
@@ -4795,10 +5092,16 @@ def poll():
             return True
         if result.get("ok"):
             content = result.get("content", "")
+            task_status = result.get("task_status", "done")
+            if task_status not in {"done", "collecting"}:
+                raise RuntimeError(f"handler returned unsupported task status: {task_status}")
             cur.execute(
-                "UPDATE tasks SET status='done', prompt_tokens=%s, completion_tokens=%s, cost=%s, result_ref=%s, finished_at=now() WHERE id=%s",
-                (result.get("prompt_tokens", 0), result.get("completion_tokens", 0),
-                 result.get("cost", 0), content[:20000], tid)
+                "UPDATE tasks SET status=%s, prompt_tokens=%s, completion_tokens=%s, cost=%s, result_ref=%s, "
+                "finished_at=CASE WHEN %s='done' THEN now() ELSE NULL END, "
+                "progress=CASE WHEN %s='done' THEN 100 ELSE 33 END, "
+                "progress_text=CASE WHEN %s='done' THEN 'done' ELSE 'collecting child evidence' END WHERE id=%s",
+                (task_status, result.get("prompt_tokens", 0), result.get("completion_tokens", 0),
+                 result.get("cost", 0), content[:20000], task_status, task_status, task_status, tid),
             )
             # Link task_id to content_items row (created by handler, body already stored)
             _ci_id = result.get("content_item_id")
@@ -4806,9 +5109,13 @@ def poll():
                 cur.execute("UPDATE content_items SET task_id=%s WHERE id=%s", (tid, _ci_id))
             record_task_usage(cur, task, result)
             update_workflow_link(cur, task, "done", result=result)
+            marketing_assessments.reconcile_for_child_task(cur, tid)
             conn.commit()
-            ch_trace({"project": "system", "actor": "worker", "action": f"task_done_{ttype}", "detail": f"Task {tid} completed: {result.get('prompt_tokens',0)} in / {result.get('completion_tokens',0)} out, cost ${result.get('cost',0)}", "gate": "green", "decision": "proceed", "ok": 1})
-            print(f"[worker] Task {tid} done: {result.get('prompt_tokens',0)} in / {result.get('completion_tokens',0)} out tokens, ${result.get('cost',0)}", flush=True)
+            if task_status == "done":
+                ch_trace({"project": "system", "actor": "worker", "action": f"task_done_{ttype}", "detail": f"Task {tid} completed: {result.get('prompt_tokens',0)} in / {result.get('completion_tokens',0)} out, cost ${result.get('cost',0)}", "gate": "green", "decision": "proceed", "ok": 1})
+                print(f"[worker] Task {tid} done: {result.get('prompt_tokens',0)} in / {result.get('completion_tokens',0)} out tokens, ${result.get('cost',0)}", flush=True)
+            else:
+                print(f"[worker] Task {tid} collecting child evidence", flush=True)
         else:
             error = result.get("error", "unknown")[:500]
             category, action = classify_failure(error)
@@ -4821,6 +5128,7 @@ def poll():
             )
             record_task_usage(cur, task, result)
             update_workflow_link(cur, task, "failed", result=result, error=error)
+            marketing_assessments.reconcile_for_child_task(cur, tid)
             conn.commit()
             ch_trace({"project": "system", "actor": "worker", "action": f"task_failed_{ttype}", "detail": f"Task {tid} failed: {result.get('error','')[:200]}", "gate": "green", "decision": "proceed", "ok": 0})
             print(f"[worker] Task {tid} failed: {result.get('error','')[:200]}", flush=True)
@@ -4847,6 +5155,11 @@ def start_up():
             (list(SIDE_EFFECT_TASKS),),
         )
         review = cur.rowcount
+        conn.commit()
+        # A restart can occur after a child settles but before the parent state is
+        # reconciled. Replaying this deterministic projection is safe and creates
+        # neither child tasks nor model work.
+        marketing_assessments.reconcile_open_assessments(cur)
         conn.commit()
         if requeued or review:
             print(f"[worker] restart recovery: {requeued} safely requeued, {review} need review", flush=True)

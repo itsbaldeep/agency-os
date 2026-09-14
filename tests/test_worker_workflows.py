@@ -49,20 +49,12 @@ class WorkerWorkflowTests(unittest.TestCase):
         self.assertIn("sources @> %s::jsonb", source)
         self.assertIn("'executing'", source)
 
-    def test_marketing_audit_chains_three_tracked_children(self):
+    def test_marketing_audit_creates_one_collecting_assessment_and_three_stages(self):
         class Cursor(FakeCursor):
-            def __init__(self):
-                super().__init__()
-                self.next_id = 101
-
             def fetchone(self):
                 sql = self.calls[-1][0]
                 if "FROM brands" in sql:
                     return {"id": 7, "project_id": 30}
-                if "RETURNING id" in sql:
-                    row = {"id": self.next_id}
-                    self.next_id += 1
-                    return row
                 return None
 
             def fetchall(self):
@@ -77,7 +69,12 @@ class WorkerWorkflowTests(unittest.TestCase):
             def close(self): pass
 
         conn = Conn()
-        with mock.patch.object(worker, "get_conn", return_value=conn):
+        assessment = {"id": 55, "trigger_task_id": 99, "status": "queued"}
+        with mock.patch.object(worker, "get_conn", return_value=conn), \
+             mock.patch.object(worker.marketing_assessments, "get_or_create_assessment",
+                               return_value=(assessment, True, False)) as create, \
+             mock.patch.object(worker.marketing_assessments, "ensure_stage_tasks",
+                               return_value=[101, 102, 103]) as ensure:
             result = worker.handle_marketing_audit({
                 "id": 99,
                 "params": {"brand_id": 7, "project_id": 30, "url": "https://example.test"},
@@ -85,16 +82,358 @@ class WorkerWorkflowTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         payload = json.loads(result["content"])
         self.assertEqual(payload["stages"], ["defend_audit", "run_brand_audit", "seo_measurement"])
-        inserts = [call for call in conn.c.calls if "INSERT INTO tasks" in call[0]]
-        self.assertEqual(len(inserts), 3)
-        self.assertTrue(all(call[1][2] == 99 for call in inserts))
-        self.assertEqual([call[1][0] for call in inserts], payload["stages"])
-        self.assertEqual(json.loads(inserts[0][1][1])["url"], "https://example.test")
-        self.assertEqual(json.loads(inserts[1][1][1]), {
+        self.assertEqual(payload["assessment_id"], 55)
+        self.assertEqual(payload["status"], "collecting")
+        self.assertEqual(result["task_status"], "collecting")
+        create.assert_called_once()
+        stages = ensure.call_args.kwargs["stages"]
+        self.assertEqual([stage[0] for stage in stages], payload["stages"])
+        self.assertEqual(stages[0][1]["url"], "https://example.test")
+        self.assertEqual(stages[1][1], {
             "brand_id": 7, "domain": "example.test", "source": "marketing_audit",
         })
-        self.assertEqual(json.loads(inserts[-1][1][1])["gsc_property"], "sc-domain:example.test")
-        self.assertEqual(json.loads(inserts[-1][1][1])["ga4_property_id"], "123456")
+        self.assertEqual(stages[-1][1]["gsc_property"], "sc-domain:example.test")
+        self.assertEqual(stages[-1][1]["ga4_property_id"], "123456")
+
+    def test_marketing_assessment_collection_state_is_not_report_ready(self):
+        rows = [
+            {"stage_key": "defend_audit", "task_id": 1, "required": True, "task_status": "done"},
+            {"stage_key": "run_brand_audit", "task_id": 2, "required": True, "task_status": "done"},
+            {"stage_key": "seo_measurement", "task_id": 3, "required": True, "task_status": "done"},
+        ]
+        status, manifest, text = worker.marketing_assessments.collection_outcome(rows)
+        self.assertEqual(status, "collecting")
+        self.assertTrue(manifest["children_settled"])
+        self.assertTrue(manifest["synthesis_eligible"])
+        self.assertEqual(manifest["report_state"], "not_generated")
+        self.assertIn("synthesis pending", text)
+
+    def test_marketing_assessment_failed_collection_has_no_green_partial_report(self):
+        rows = [
+            {"stage_key": "defend_audit", "task_id": 1, "required": True, "task_status": "done"},
+            {"stage_key": "run_brand_audit", "task_id": 2, "required": True, "task_status": "failed", "task_error": "provider unavailable"},
+            {"stage_key": "seo_measurement", "task_id": 3, "required": True, "task_status": "done"},
+        ]
+        status, manifest, text = worker.marketing_assessments.collection_outcome(rows)
+        self.assertEqual(status, "failed")
+        self.assertFalse(manifest["synthesis_eligible"])
+        self.assertEqual(manifest["missing_evidence"], ["run_brand_audit"])
+        self.assertEqual(manifest["report_state"], "not_generated")
+        self.assertIn("failed", text)
+
+    def test_marketing_assessment_run_key_is_stable_and_accepts_ui_idempotency_key(self):
+        self.assertEqual(worker.marketing_assessments.assessment_run_key(99, {}), "task:99")
+        self.assertEqual(
+            worker.marketing_assessments.assessment_run_key(99, {"idempotency_key": " dashboard-click-1 "}),
+            "dashboard-click-1",
+        )
+
+    def test_assessment_stage_creation_is_idempotent_after_restart(self):
+        class Cursor:
+            def __init__(self):
+                self.calls = []
+                self.stage_rows = {}
+                self.next_task_id = 100
+                self.last_row = None
+
+            def execute(self, sql, params=()):
+                normalized = " ".join(sql.split())
+                self.calls.append((normalized, params))
+                self.last_row = None
+                if normalized.startswith("SELECT stage_key, task_id"):
+                    return
+                if normalized.startswith("INSERT INTO tasks"):
+                    self.last_row = {"id": self.next_task_id}
+                    self.next_task_id += 1
+                if normalized.startswith("INSERT INTO marketing_assessment_stages"):
+                    self.stage_rows[params[1]] = params[2]
+
+            def fetchone(self):
+                return self.last_row
+
+            def fetchall(self):
+                return [{"stage_key": key, "task_id": value}
+                        for key, value in self.stage_rows.items()]
+
+        cur = Cursor()
+        stages = [("defend_audit", {"brand_id": 7}), ("seo_measurement", {"brand_id": 7})]
+        assessment = {"id": 55}
+        first = worker.marketing_assessments.ensure_stage_tasks(
+            cur, assessment=assessment, parent_task_id=99, stages=stages,
+        )
+        second = worker.marketing_assessments.ensure_stage_tasks(
+            cur, assessment=assessment, parent_task_id=99, stages=stages,
+        )
+        self.assertEqual(first, [100, 101])
+        self.assertEqual(second, first)
+        self.assertEqual(len([call for call in cur.calls if call[0].startswith("INSERT INTO tasks")]), 2)
+
+    def test_concurrent_logical_run_conflict_reuses_existing_assessment(self):
+        class Cursor:
+            def __init__(self):
+                self.calls = []
+                self.last_query = ""
+
+            def execute(self, sql, params=()):
+                self.last_query = " ".join(sql.split())
+                self.calls.append((self.last_query, params))
+
+            def fetchone(self):
+                if "OR (brand_id=%s" in self.last_query:
+                    return {"id": 55, "trigger_task_id": 98, "status": "collecting"}
+                return None
+
+        cur = Cursor()
+        assessment, created, deduplicated = worker.marketing_assessments.get_or_create_assessment(
+            cur, task_id=99, brand_id=7, project_id=30,
+            params={"assessment_run_key": "same-dashboard-click"},
+        )
+        self.assertEqual(assessment["id"], 55)
+        self.assertFalse(created)
+        self.assertTrue(deduplicated)
+        insert = next(call for call in cur.calls if call[0].startswith("INSERT INTO marketing_assessments"))
+        self.assertIn("ON CONFLICT DO NOTHING", insert[0])
+
+    def test_assessment_reconciliation_is_idempotent_and_keeps_parent_collecting(self):
+        class Cursor:
+            def __init__(self):
+                self.calls = []
+                self.last_query = ""
+                self.assessment = {"id": 55, "trigger_task_id": 99, "status": "collecting"}
+                self.rows = [
+                    {"stage_key": "defend_audit", "task_id": 1, "required": True,
+                     "status": "queued", "task_status": "done", "task_error": None},
+                    {"stage_key": "run_brand_audit", "task_id": 2, "required": True,
+                     "status": "queued", "task_status": "done", "task_error": None},
+                    {"stage_key": "seo_measurement", "task_id": 3, "required": True,
+                     "status": "queued", "task_status": "done", "task_error": None},
+                ]
+
+            def execute(self, sql, params=()):
+                self.last_query = " ".join(sql.split())
+                self.calls.append((self.last_query, params))
+
+            def fetchone(self):
+                if self.last_query.startswith("SELECT * FROM marketing_assessments"):
+                    return self.assessment
+                return None
+
+            def fetchall(self):
+                if self.last_query.startswith("SELECT s.stage_key"):
+                    return self.rows
+                return []
+
+        cur = Cursor()
+        first = worker.marketing_assessments.reconcile_assessment(cur, 55)
+        second = worker.marketing_assessments.reconcile_assessment(cur, 55)
+        self.assertEqual(first["status"], "collecting")
+        self.assertEqual(second["manifest"], first["manifest"])
+        parent_updates = [call for call in cur.calls if call[0].startswith("UPDATE tasks SET status")]
+        self.assertEqual(len(parent_updates), 2)
+        self.assertTrue(all(call[1][0] == "collecting" for call in parent_updates))
+
+    def test_only_one_synthesizer_can_claim_a_settled_assessment(self):
+        class Cursor:
+            def __init__(self, rowcount):
+                self.calls = []
+                self.rowcount = rowcount
+
+            def execute(self, sql, params=()):
+                self.calls.append((" ".join(sql.split()), params))
+
+        settled = {"manifest": {"synthesis_eligible": True}}
+        with mock.patch.object(worker.marketing_assessments, "reconcile_assessment", return_value=settled):
+            winner, winner_reason = worker.marketing_assessments.claim_synthesis(Cursor(1), 55)
+            loser, loser_reason = worker.marketing_assessments.claim_synthesis(Cursor(0), 55)
+        self.assertTrue(winner)
+        self.assertEqual(winner_reason, "claimed")
+        self.assertFalse(loser)
+        self.assertEqual(loser_reason, "already claimed")
+
+    def test_settled_collection_queues_one_synthesis_task(self):
+        class Cursor:
+            def __init__(self):
+                self.calls = []
+                self.last_query = ""
+                self.rowcount = 1
+
+            def execute(self, sql, params=()):
+                self.last_query = " ".join(sql.split())
+                self.calls.append((self.last_query, params))
+
+            def fetchone(self):
+                if self.last_query.startswith("SELECT id, brand_id"):
+                    return {"id": 55, "brand_id": 7, "project_id": 30, "trigger_task_id": 99,
+                            "status": "collecting", "source_manifest": {"synthesis_eligible": True}}
+                if "stage_key=%s" in self.last_query:
+                    return None
+                if self.last_query.startswith("INSERT INTO tasks"):
+                    return {"id": 104}
+                return None
+
+        cur = Cursor()
+        task_id = worker.marketing_assessments.queue_synthesis_if_eligible(cur, 55)
+        self.assertEqual(task_id, 104)
+        task_insert = next(call for call in cur.calls if call[0].startswith("INSERT INTO tasks"))
+        self.assertEqual(task_insert[1][0], "marketing_assessment_synthesis")
+        stage_insert = next(call for call in cur.calls if call[0].startswith("INSERT INTO marketing_assessment_stages"))
+        self.assertIn("false,'queued'", stage_insert[0])
+
+    def test_deterministic_report_marks_unavailable_sources_partial_and_preserves_zero(self):
+        report = worker.build_deterministic_marketing_report(
+            {"id": 55},
+            {"subject": {"name": "Example", "url": "https://example.test"}, "sources": [
+                {"key": "technical_crawl", "label": "Technical crawl", "status": "available",
+                 "checked_at": "2026-09-14T10:00:00Z",
+                 "metrics": [{"key": "pages", "state": "observed", "value": 0, "unit": "count"}]},
+                {"key": "gsc", "label": "Google Search Console", "status": "not_configured",
+                 "checked_at": "2026-09-14T10:00:00Z", "metrics": []},
+            ], "suggestions": [{"id": 9, "title": "Add structured data", "rationale": "Crawl evidence needs review.",
+                                  "impact": "high", "action_type": "propose_fix"}]},
+            generated_at="2026-09-14T10:01:00Z",
+        )
+        self.assertEqual(report["status"], "partial")
+        crawl = next(source for source in report["sources"] if source["key"] == "technical_crawl")
+        self.assertEqual(crawl["metrics"][0]["value"], 0)
+        self.assertEqual(report["actions"][0]["mode"], "review_required")
+        self.assertTrue(report["actions"][0]["human_decision_required"])
+
+    def test_synthesis_failure_marks_parent_failed_instead_of_leaving_collecting(self):
+        class Cursor:
+            def __init__(self):
+                self.calls = []
+                self.last_query = ""
+            def execute(self, sql, params=()):
+                self.last_query = " ".join(sql.split())
+                self.calls.append((self.last_query, params))
+            def fetchone(self):
+                if self.last_query.startswith("SELECT s.assessment_id"):
+                    return {"assessment_id": 55, "stage_key": "marketing_assessment_synthesis",
+                            "task_status": "failed", "task_error": "invalid report"}
+                return None
+
+        outcome = worker.marketing_assessments.reconcile_for_child_task(Cursor(), 104)
+        self.assertEqual(outcome["status"], "failed")
+        self.assertIn("invalid report", outcome["progress_text"])
+
+    def test_synthesis_loads_only_audits_referenced_by_its_own_child_tasks(self):
+        class Cursor:
+            def __init__(self):
+                self.calls = []
+                self.last_query = ""
+
+            def execute(self, sql, params=()):
+                self.last_query = " ".join(sql.split())
+                self.calls.append((self.last_query, params))
+
+            def fetchone(self):
+                if self.last_query.startswith("SELECT name FROM brands"):
+                    return {"name": "Example"}
+                if self.last_query.startswith("SELECT value FROM brand_properties"):
+                    return {"value": "example.test"}
+                if "audit_type='seo_measurement'" in self.last_query:
+                    return {"created_at": "2026-09-14T10:00:00Z", "summary": {"counts": {"pages": 0}},
+                            "raw_data": {"sources": {"crawl": {"status": "available"}, "gsc": {"status": "not_configured"}}}}
+                if "audit_type <> 'seo_measurement'" in self.last_query:
+                    return {"created_at": "2026-09-14T10:00:00Z", "summary": {"prompts_queried": 5}}
+                return None
+
+            def fetchall(self):
+                if self.last_query.startswith("SELECT s.stage_key"):
+                    return [
+                        {"stage_key": "defend_audit", "task_status": "done", "result_ref": "{}", "error": None, "finished_at": "2026-09-14T10:00:00Z"},
+                        {"stage_key": "run_brand_audit", "task_status": "done", "result_ref": '{"audit_id":22}', "error": None, "finished_at": "2026-09-14T10:00:00Z"},
+                        {"stage_key": "seo_measurement", "task_status": "done", "result_ref": '{"audit_id":11}', "error": None, "finished_at": "2026-09-14T10:00:00Z"},
+                    ]
+                if self.last_query.startswith("SELECT id, title"):
+                    return [{"id": 2, "title": "Review crawl findings", "rationale": "Use evidence.", "impact": "high", "action_type": "propose_fix"}]
+                return []
+
+        cur = Cursor()
+        evidence = worker._load_marketing_evidence(cur, {"id": 55, "brand_id": 7, "project_id": 30})
+        self.assertEqual(evidence["subject"]["url"], "https://example.test")
+        self.assertEqual(next(item for item in evidence["sources"] if item["key"] == "technical_crawl")["status"], "available")
+        audit_queries = [call for call in cur.calls if "FROM audits" in call[0]]
+        self.assertEqual([call[1][0] for call in audit_queries], [11, 22])
+        self.assertTrue(all("ORDER BY created_at" not in call[0] for call in audit_queries))
+
+    def test_restart_recovery_queues_eligible_synthesis(self):
+        class Cursor:
+            def __init__(self):
+                self.calls = []
+            def execute(self, sql, params=()):
+                self.calls.append((" ".join(sql.split()), params))
+            def fetchall(self):
+                return [{"id": 55}]
+
+        recovered = {"assessment_id": 55, "manifest": {"synthesis_eligible": True}}
+        with mock.patch.object(worker.marketing_assessments, "reconcile_assessment", return_value=recovered), \
+             mock.patch.object(worker.marketing_assessments, "queue_synthesis_if_eligible", return_value=104) as queued:
+            result = worker.marketing_assessments.reconcile_open_assessments(Cursor())
+        self.assertEqual(result[0]["synthesis_task_id"], 104)
+        queued.assert_called_once_with(mock.ANY, 55)
+
+    def test_synthesis_retry_after_persisted_report_is_idempotent_success(self):
+        class Cursor:
+            def __init__(self): self.calls = []
+            def execute(self, sql, params=()): self.calls.append((" ".join(sql.split()), params))
+            def fetchone(self):
+                return {"id": 55, "status": "ready", "report": {"report_id": "assessment-55"},
+                        "validation": {"valid": True}}
+        class Conn:
+            def __init__(self): self.c = Cursor(); self.commits = 0
+            def cursor(self, **_): return self.c
+            def commit(self): self.commits += 1
+            def close(self): pass
+        conn = Conn()
+        with mock.patch.object(worker, "get_conn", return_value=conn):
+            result = worker.handle_marketing_assessment_synthesis({"params": {"assessment_id": 55}})
+        self.assertTrue(result["ok"])
+        self.assertTrue(json.loads(result["content"])["recovered"])
+        self.assertEqual(conn.commits, 1)
+
+    def test_synthesis_refuses_unclaimed_collecting_assessment(self):
+        class Cursor:
+            def execute(self, *_args, **_kwargs): pass
+            def fetchone(self): return {"id": 55, "status": "collecting"}
+        class Conn:
+            def cursor(self, **_): return Cursor()
+            def close(self): pass
+        with mock.patch.object(worker, "get_conn", return_value=Conn()):
+            result = worker.handle_marketing_assessment_synthesis({"params": {"assessment_id": 55}})
+        self.assertFalse(result["ok"])
+        self.assertIn("collecting", result["error"])
+
+    def test_poll_keeps_parent_task_collecting_after_child_queueing(self):
+        class Cursor:
+            def __init__(self):
+                self.calls = []
+                self.claimed = False
+
+            def execute(self, sql, params=()):
+                self.calls.append((" ".join(sql.split()), params))
+
+            def fetchone(self):
+                if not self.claimed:
+                    self.claimed = True
+                    return {"id": 99, "type": "marketing_audit", "params": {}}
+                return None
+
+        class Conn:
+            def __init__(self):
+                self.cursor_value = Cursor()
+            def cursor(self, **_): return self.cursor_value
+            def commit(self): pass
+            def close(self): pass
+
+        conn = Conn()
+        result = {"ok": True, "content": "{}", "task_status": "collecting"}
+        with mock.patch.object(worker, "get_conn", return_value=conn), \
+             mock.patch.dict(worker.DISPATCH, {"marketing_audit": lambda _task: result}), \
+             mock.patch.object(worker.marketing_assessments, "reconcile_for_child_task"):
+            self.assertTrue(worker.poll())
+        update = next(call for call in conn.cursor_value.calls if call[0].startswith("UPDATE tasks SET status=%s"))
+        self.assertEqual(update[1][0], "collecting")
 
     def test_seo_handler_fake_db_keeps_sources_explicit_and_result_bounded(self):
         class Cursor(FakeCursor):
