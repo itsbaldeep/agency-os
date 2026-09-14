@@ -2824,7 +2824,9 @@ def _object(value):
 def _marketing_source_state(value):
     """Map collector states to the intentionally small report vocabulary."""
     state = str(value or "").strip().lower()
-    if state in {"available", "ok", "success"}:
+    # Task rows use ``done`` while collector payloads use ``available``.  Both
+    # mean the evidence was successfully collected, not that it is unavailable.
+    if state in {"available", "ok", "success", "done"}:
         return "available"
     if state in {"not_configured", "not configured", "missing_configuration"}:
         return "not_configured"

@@ -39,6 +39,10 @@ class FakeConnection:
 
 
 class WorkerWorkflowTests(unittest.TestCase):
+
+    def test_completed_collector_state_is_available_in_marketing_report(self):
+        self.assertEqual(worker._marketing_source_state("done"), "available")
+
     def test_seo_run_id_is_stable_per_task(self):
         self.assertEqual(worker._seo_run_id(7, 2, "https://example.test"), worker._seo_run_id(7, 2, "https://example.test"))
         self.assertNotEqual(worker._seo_run_id(7, 2, "https://example.test"), worker._seo_run_id(8, 2, "https://example.test"))
