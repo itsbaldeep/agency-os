@@ -9,6 +9,20 @@ execution log second.
 
 ## Current reality
 
+### Growth programme continuation, 2026-09-19
+
+- Accepted audience: TrueApply experienced professionals, evidence-led tailoring.
+- First ten publications require human approval, followed by explicit policy review.
+- Implementation batch in progress: exact, nonoverlapping 28-day search and
+  analytics comparisons, aggregate user counts, source availability, deterministic
+  next steps, and dashboard presentation. Reuse immutable audit snapshots first.
+- Next batches: content calendar and strategy backlog; isolated static publishing
+  with approval and rollback; experiments with insufficient-evidence outcomes;
+  daily measurement/evaluation scheduling. These are not yet implemented.
+- Daily unique users must never be summed into monthly unique users. GSC query
+  rows are discovery data, not an authoritative site total. An indexed URL and a
+  crawlable URL are different states. No growth claim follows from report readiness.
+
 - Canonical core source is `/home/agency/core/{agency-os,agency-dashboard,deployden}`.
   `/home/agency/agency-os` is runtime-only.
 - Core runtime: Postgres, bounded ClickHouse, core MinIO, dashboard `:5001`,

@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pr_review  # bounded machine review for explicitly requested proposal tasks
 import ops as agency_ops
 import seo_measurement
+import growth_measurement
 import marketing_assessments
 import marketing_report
 
@@ -3114,6 +3115,7 @@ def handle_seo_measurement(task):
         access = seo_measurement.google_access(); token = access.get("token") if access.get("status") == "available" else None
         end = datetime.now(timezone.utc).date() - timedelta(days=3); start = end - timedelta(days=27); base = {"startDate":str(start),"endDate":str(end)}
         gsc_prop = p.get("gsc_property") or props.get("gsc_property") or "sc-domain:" + urllib.parse.urlsplit(url).hostname
+        ga4_prop = p.get("ga4_property_id") or props.get("ga4_property_id")
         if token:
             gsc_q = {**base,"dimensions":["query"],"rowLimit":250}; gsc_p = {**base,"dimensions":["page"],"rowLimit":250}
             gsc = seo_measurement.google_metric("https://searchconsole.googleapis.com/webmasters/v3/sites/"+urllib.parse.quote(gsc_prop,safe="")+"/searchAnalytics/query",token,gsc_q)
@@ -3122,7 +3124,6 @@ def handle_seo_measurement(task):
             page_metrics=seo_measurement.normalize_gsc(gsc_page.get("data")) if gsc_page.get("status")=="available" else gsc_page
             google_states={query_metrics.get("status"),page_metrics.get("status")}
             gsc={"status":"available" if google_states=={"available"} else "partial" if "available" in google_states else "source_unavailable","query":query_metrics,"page":page_metrics}
-            ga4_prop=p.get("ga4_property_id") or props.get("ga4_property_id")
             if ga4_prop:
                 traffic=seo_measurement.google_metric("https://analyticsdata.googleapis.com/v1beta/properties/"+str(ga4_prop)+":runReport",token,{"dateRanges":[base],"dimensions":[{"name":"landingPagePlusQueryString"}],"metrics":[{"name":"sessions"},{"name":"totalUsers"},{"name":"keyEvents"}],"limit":250})
                 leads=seo_measurement.google_metric("https://analyticsdata.googleapis.com/v1beta/properties/"+str(ga4_prop)+":runReport",token,{"dateRanges":[base],"dimensions":[{"name":"eventName"}],"metrics":[{"name":"eventCount"}],"dimensionFilter":{"filter":{"fieldName":"eventName","stringFilter":{"value":"generate_lead"}}},"limit":250})
@@ -3132,7 +3133,8 @@ def handle_seo_measurement(task):
                 ga4={"status":"available" if analytics_states=={"available"} else "partial" if "available" in analytics_states else "source_unavailable","traffic":traffic_metrics,"generate_lead":lead_metrics}
             else: ga4={"status":"source_unavailable","error":"property not configured"}
         else: gsc={"status":"source_unavailable","error":"access unavailable"}; ga4={"status":"source_unavailable","error":"access unavailable"}
-        sources={"crawl":crawl,"pagespeed":ps,"gsc":gsc,"ga4":ga4}; evidence={"run_id":run_id,"captured_at":captured,"parser_version":seo_measurement.PARSER_VERSION,"sources":sources,"counts":counts,"finding_ids":[f["evidence_id"] for f in findings],"findings":findings}
+        growth = growth_measurement.collect_growth(token, gsc_property=gsc_prop, ga4_property=ga4_prop, captured_at=captured)
+        sources={"crawl":crawl,"pagespeed":ps,"gsc":gsc,"ga4":ga4}; evidence={"run_id":run_id,"captured_at":captured,"parser_version":seo_measurement.PARSER_VERSION,"sources":sources,"growth":growth,"counts":counts,"finding_ids":[f["evidence_id"] for f in findings],"findings":findings}
         cur.execute("SELECT raw_data FROM audits WHERE brand_id=%s AND audit_type='seo_measurement' ORDER BY created_at DESC LIMIT 1",(brand_id,)); prior=cur.fetchone(); previous=prior.get("raw_data") if prior else None
         comparison=seo_measurement.compare_runs(previous,evidence); statuses={k:v.get("status") for k,v in sources.items()}
         cur.execute("INSERT INTO audits (brand_id,audit_type,summary,raw_data,sources) VALUES (%s,'seo_measurement',%s,%s,%s) RETURNING id",(brand_id,json.dumps({"source_statuses":statuses,"counts":counts,"comparison":comparison}),json.dumps(evidence),json.dumps([{"name":k,"status":v.get("status")} for k,v in sources.items()])))

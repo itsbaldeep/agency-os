@@ -9,9 +9,22 @@ chat decisions. Update it when strategy changes.
 ## 0. What this VPS is (one sentence)
 
 A self-hosted AI digital-marketing agency platform that does **real client
-work** for black-box brands — marketing, SEO, AEO, content — with the human
+work** for black-box brands: marketing, SEO, AEO, and content, with the human
 co-CEO steering from the dashboard at :5001 and AI co-CEO executing behind
 approval gates.
+
+### Growth programme decisions accepted 2026-09-19
+
+The recovered Lavish feedback selects evidence-led tailoring for experienced
+professionals as TrueApply's first acquisition audience. TrueApply's public site
+and blog are the owned learning project for reusable Agency OS growth features.
+The first ten publications require explicit human approval. After ten successful
+publications, review the policy with the owner; reaching ten does not automatically
+grant publication authority. Existing product privacy and draft-only rules remain.
+Build measurement and dashboard answers first, then content planning, isolated
+publication with rollback, experiments, and scheduled evaluation. Retired core
+deployment jobs remain retired. This authorizes implementation, not unreviewed
+marketing publication or spending.
 
 ## 1. The three project types
 

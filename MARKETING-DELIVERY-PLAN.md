@@ -1,6 +1,27 @@
 # Marketing delivery plan for Agency OS, Dashboard, TrueApply and Deployden
 
-Status: initial implementation slice verified locally, pending controlled database integration and core deployment. Prepared 2026-09-14 UTC.
+Status: initial assessment slice deployed and verified on 2026-09-14. Growth
+measurement continuation started 2026-09-19. Remaining batches below are open.
+
+## Accepted growth review and continuation, 2026-09-19
+
+Recovered feedback from Lavish session dd710c60b6aae114:
+
+- TrueApply's first acquisition audience is experienced professionals seeking
+  evidence-led resume tailoring.
+- Require explicit approval for the first ten publications, then review policy.
+  Publication eleven is not automatically authorized; a revised policy is needed.
+- The immediate engineering batch adds aggregate GSC/GA4 measurement for two
+  nonoverlapping 28-day periods, deterministic comparisons and dashboard answers.
+  Existing immutable audit records hold these snapshots without a new database.
+- Subsequent batches remain content calendar/backlog, isolated static publication,
+  experiments, and scheduled measurement/evaluation. These are planned, not live.
+
+Verified historical release evidence: assessment 2 and tasks 340 through 344
+completed with stored report and dashboard rendering. This proves workflow
+execution, not growth, indexing, or recommendation quality. The richer growth
+loop must validate suggestions against observed site features before proposing
+repairs such as adding schema that already exists.
 
 ## Implementation checkpoint, 2026-09-14 UTC
 
