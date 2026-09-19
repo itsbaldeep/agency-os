@@ -1,7 +1,7 @@
 # Marketing delivery plan for Agency OS, Dashboard, TrueApply and Deployden
 
 Status: initial assessment slice deployed and verified on 2026-09-14. Growth
-measurement continuation started 2026-09-19. Remaining batches below are open.
+measurement deployed and verified 2026-09-19. Remaining batches below are open.
 
 ## Accepted growth review and continuation, 2026-09-19
 
@@ -23,7 +23,31 @@ execution, not growth, indexing, or recommendation quality. The richer growth
 loop must validate suggestions against observed site features before proposing
 repairs such as adding schema that already exists.
 
-## Implementation checkpoint, 2026-09-14 UTC
+## Growth implementation checkpoint, 2026-09-19 UTC
+
+Core commit 074674e and dashboard commits 08acd15/b548141 are deployed.
+113 core and 36 dashboard tests passed, plus collector-to-template integration.
+Dashboard-initiated tasks 345/346 completed as audits 43/44; both live report
+routes and health routes return 200. Worker restarted once with no active tasks.
+A second dashboard-only correction removed misleading legacy user sums and
+labeled dimensional search/landing-page rows as samples, not property totals.
+Jobs 8 through 12 remain disabled. No content was published or credentials changed.
+
+The live prior GA4 window returned metadata without metric headers or rows.
+The collector keeps that window unavailable rather than manufacturing zeros.
+Current GA4 and GSC work for both properties. Follow-up wording still needs to
+distinguish historical coverage from missing access; it must not imply that a
+working current connection needs new credentials. See ROADMAP.md for measured
+counts and remaining growth-loop batches.
+
+Rollback: prior worker at
+`/home/agency/backups/releases/growth-measurement-20260919-6w8ZXM/worker.py`;
+prior dashboard image
+`sha256:3f410d9cb059fdccb055e383857412e490948021440b248a1302bc404cd692c2`.
+Keep immutable audits and tasks. Restore runtime only through an empty-queue
+maintenance window. The new module may remain unused if the worker is reverted.
+
+## Historical implementation checkpoint, 2026-09-14 UTC
 
 The initial reusable foundation is implemented in canonical source: versioned
 assessment persistence, idempotent collection and synthesis, deterministic report

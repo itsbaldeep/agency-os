@@ -13,9 +13,18 @@ execution log second.
 
 - Accepted audience: TrueApply experienced professionals, evidence-led tailoring.
 - First ten publications require human approval, followed by explicit policy review.
-- Implementation batch in progress: exact, nonoverlapping 28-day search and
-  analytics comparisons, aggregate user counts, source availability, deterministic
-  next steps, and dashboard presentation. Reuse immutable audit snapshots first.
+- Deployed and verified 2026-09-19: exact, nonoverlapping 28-day search and
+  analytics windows, aggregate user counts, source availability, review-only
+  deterministic next steps, and dashboard presentation in immutable audit snapshots.
+  Tasks 345/346 completed, creating Deployden audit 43 and TrueApply audit 44.
+  Current window August 20 through September 16: TrueApply 28 observed GA4 users,
+  56 sessions, zero key events, four GSC impressions and one click; Deployden two
+  users, two sessions, zero key events, five impressions and zero clicks.
+  Prior GA4 responses have metadata but no metric headers or rows. They remain
+  unavailable, not fabricated zeros. Both reports are partial, with no proven trend.
+  Next hardening: distinguish missing historical coverage from access failure in
+  follow-up wording. Current GA4 access works; the generic restore-measurement
+  recommendation is too broad for this case. No credential change is needed.
 - Next batches: content calendar and strategy backlog; isolated static publishing
   with approval and rollback; experiments with insufficient-evidence outcomes;
   daily measurement/evaluation scheduling. These are not yet implemented.
