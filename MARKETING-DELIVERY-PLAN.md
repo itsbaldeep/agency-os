@@ -17,6 +17,39 @@ Recovered feedback from Lavish session dd710c60b6aae114:
 - Subsequent batches remain content calendar/backlog, isolated static publication,
   experiments, and scheduled measurement/evaluation. These are planned, not live.
 
+## Calendar implementation checkpoint, 2026-09-23 UTC
+
+Core 7f7ba0b and dashboard 43b79a7 are deployed with additive migration 015.
+Dashboard `/content/calendar` supports evidence-linked planning, bounded source
+editing, cancellation and idempotent research kickoff. Its dates do not schedule
+publication. Calendar intent and the planned title survive research and outline
+creation; task links show real research outcomes without implying publication.
+TrueApply candidate plan 1 was created through the dashboard API. Query demand,
+source coverage and existing-site overlap must be researched before drafting.
+
+Fixed missing-history recommendations without treating absent GA4 rows as zeros.
+Closed the research fetch redirect/SSRF gap: public address validation, pinned
+connections, verified TLS, bounded redirects/body size, and secret-free failures.
+Verification: 127 core tests, 45 dashboard tests and one opt-in real PostgreSQL
+integration test passed. The SQL test uses only temporary tables and rolls back.
+Reproduce it from agency-dashboard with
+`AGENCY_CALENDAR_DB_TEST=1 python3 -m unittest discover -s tests -p test_calendar_postgres.py`.
+Live calendar/brand report/health routes return 200. A public HTTPS fetch of
+Deployden passed. No model-generated content or publication was triggered.
+Fresh dashboard tasks 347/348 completed as audits 45/46. Both correctly report
+`historical_unavailable` for GA4 and recommend collecting a complete comparison
+window, not restoring access. A live private-source update returned HTTP 400
+without changing the plan. The TrueApply candidate and source editor render live.
+
+Recovery: verified core-backup-20260923T123438Z.tar.gz, including root state.
+Prior worker and growth module are retained in
+`/home/agency/backups/releases/content-calendar-20260923-EX9TVn/`.
+Prior dashboard image is
+`sha256:7039f38d80768418a81d6e1ea53d5f0d50044018dad85c129333e2f658813bc6`.
+Rollback restores those runtime files/image in an empty-queue window and keeps
+the additive calendar table and records. The worker was stopped/started once,
+with no running tasks to orphan. The backup policy pruned one expired bundle.
+
 Verified historical release evidence: assessment 2 and tasks 340 through 344
 completed with stored report and dashboard rendering. This proves workflow
 execution, not growth, indexing, or recommendation quality. The richer growth

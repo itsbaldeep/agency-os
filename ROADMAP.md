@@ -22,10 +22,17 @@ execution log second.
   users, two sessions, zero key events, five impressions and zero clicks.
   Prior GA4 responses have metadata but no metric headers or rows. They remain
   unavailable, not fabricated zeros. Both reports are partial, with no proven trend.
-  Next hardening: distinguish missing historical coverage from access failure in
-  follow-up wording. Current GA4 access works; the generic restore-measurement
-  recommendation is too broad for this case. No credential change is needed.
-- Next batches: content calendar and strategy backlog; isolated static publishing
+- History follow-up hardening deployed 2026-09-23: current-only observations now
+  produce a missing-comparison-window recommendation, not an access repair.
+- The first content-calendar slice is deployed at Dashboard `/content/calendar`:
+  audience, hypothesis, target query, planned date, success metric, audit evidence,
+  source editing, cancellation, and idempotent research kickoff. Research and
+  outline tasks preserve calendar context and the original planned title.
+  TrueApply plan 1 is a candidate guide about tailoring without inventing
+  experience. Its query demand is unverified; it has not been researched or published.
+  Dates are informational, not publication schedules. Failed research is visible
+  through its task; automatic retry, topic ranking and outcome evaluation remain open.
+- Next batches: evidence-ranked strategy backlog; isolated static publishing
   with approval and rollback; experiments with insufficient-evidence outcomes;
   daily measurement/evaluation scheduling. These are not yet implemented.
 - Daily unique users must never be summed into monthly unique users. GSC query
