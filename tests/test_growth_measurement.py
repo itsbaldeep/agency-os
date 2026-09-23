@@ -7,6 +7,18 @@ import growth_measurement as growth
 
 
 class GrowthMeasurementTests(unittest.TestCase):
+    @staticmethod
+    def _provider(current=True, previous=True, volume=100):
+        def fetch(url, _token, payload):
+            start = payload.get("startDate") or payload["dateRanges"][0]["startDate"]
+            is_current = start == "2026-08-17"
+            if (is_current and not current) or (not is_current and not previous):
+                return {"status": "source_unavailable", "error": "provider unavailable"}
+            if "searchconsole" in url:
+                return {"status": "available", "data": {"responseAggregationType": "byProperty", "rows": [{"clicks": 10, "impressions": volume, "ctr": .1, "position": 4}]}}
+            return {"status": "available", "data": {"metricHeaders": [{"name": "sessions"}, {"name": "totalUsers"}, {"name": "keyEvents"}], "rows": [{"metricValues": [{"value": str(volume)}, {"value": str(volume)}, {"value": "2"}]}]}}
+        return fetch
+
     def test_windows_are_non_overlapping_and_28_days(self):
         result = growth.windows("2026-09-16T12:00:00+00:00")
         self.assertEqual(result["current"], {"start_date": "2026-08-17", "end_date": "2026-09-13", "days": 28})
@@ -86,6 +98,25 @@ class GrowthMeasurementTests(unittest.TestCase):
         for payload in (None, [], {"status": "available", "data": []}):
             result = growth.collect_growth("test", "sc-domain:example.test", "123", metric_fetcher=lambda *args: payload)
             self.assertEqual(result["status"], "source_unavailable")
+
+    def test_current_only_data_is_historical_gap_without_access_rotation(self):
+        result = growth.collect_growth("test", "sc-domain:example.test", "123", "2026-09-16T00:00:00+00:00", self._provider(current=True, previous=False, volume=100))
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["sources"]["gsc"]["state"], "historical_unavailable")
+        self.assertIn("growth-gsc-history", [item["id"] for item in result["recommendations"]])
+        self.assertNotIn("growth-gsc-access", [item["id"] for item in result["recommendations"]])
+
+    def test_prior_only_data_treats_current_window_as_unavailable(self):
+        result = growth.collect_growth("test", "sc-domain:example.test", "123", "2026-09-16T00:00:00+00:00", self._provider(current=False, previous=True, volume=100))
+        self.assertEqual(result["status"], "source_unavailable")
+        self.assertEqual(result["sources"]["gsc"]["state"], "source_unavailable")
+        self.assertIn("growth-gsc-access", [item["id"] for item in result["recommendations"]])
+
+    def test_normal_two_window_data_is_available(self):
+        result = growth.collect_growth("test", "sc-domain:example.test", "123", "2026-09-16T00:00:00+00:00", self._provider(volume=100))
+        self.assertEqual(result["status"], "available")
+        self.assertEqual(result["confidence"], "available")
+        self.assertEqual(result["sources"]["ga4"]["state"], "available")
 
 
 if __name__ == "__main__":

@@ -160,9 +160,17 @@ def _strict_ga4_payload(payload):
 
 
 def _source_state(current, previous, low_volume):
-    if current.get("status") != "available" or previous.get("status") != "available":
+    if current.get("status") != "available":
         return "source_unavailable"
+    if previous.get("status") != "available":
+        return "historical_unavailable"
     return "insufficient_evidence" if low_volume else "available"
+
+
+def _source_status(current, previous):
+    if current.get("status") != "available":
+        return "source_unavailable"
+    return "available" if previous.get("status") == "available" else "partial"
 
 
 def recommendations(gsc, ga4):
@@ -170,18 +178,22 @@ def recommendations(gsc, ga4):
     actions = []
     gsc_current = gsc.get("windows", {}).get("current", {}).get("metrics", {})
     ga_current = ga4.get("windows", {}).get("current", {}).get("metrics", {})
-    if gsc.get("status") == "source_unavailable":
+    if gsc.get("state") == "source_unavailable":
         actions.append({"id": "growth-gsc-access", "priority": "high", "title": "Restore Search Console measurement", "reason": "Search Console is unavailable, so search demand cannot be assessed.", "mode": "review_required"})
     elif gsc_current.get("impressions") == 0:
         actions.append({"id": "growth-search-demand", "priority": "high", "title": "Create a search demand test", "reason": "The current Search Console window has zero impressions. Verify indexing and target one relevant query before reviewing a focused content test.", "mode": "review_required"})
+    elif gsc.get("state") == "historical_unavailable":
+        actions.append({"id": "growth-gsc-history", "priority": "low", "title": "Collect a complete comparison window", "reason": "Current Search Console data is available, but the previous comparison window is unavailable. Keep measuring before calling a trend.", "mode": "review_required"})
     elif gsc.get("state") == "insufficient_evidence":
         actions.append({"id": "growth-gsc-sample", "priority": "medium", "title": "Build enough search evidence", "reason": "Search volume is too low to call a trend; publish and distribute one focused asset, then remeasure.", "mode": "review_required"})
     elif gsc_current.get("clicks", 0) == 0:
         actions.append({"id": "growth-snippet-ctr", "priority": "medium", "title": "Improve search snippets", "reason": "Pages received impressions but no clicks in the current window.", "mode": "review_required"})
-    if ga4.get("status") == "source_unavailable":
+    if ga4.get("state") == "source_unavailable":
         actions.append({"id": "growth-ga4-access", "priority": "high", "title": "Restore Analytics measurement", "reason": "GA4 is unavailable, so user acquisition cannot be assessed.", "mode": "review_required"})
     elif ga_current.get("totalUsers") == 0:
         actions.append({"id": "growth-distribution", "priority": "high", "title": "Run a distribution test", "reason": "No users were recorded in the current GA4 window. Verify tracking before reviewing a focused distribution test.", "mode": "review_required"})
+    elif ga4.get("state") == "historical_unavailable":
+        actions.append({"id": "growth-ga4-history", "priority": "low", "title": "Collect a complete traffic comparison window", "reason": "Current GA4 data is available, but the previous comparison window is unavailable. Keep measuring before calling a trend.", "mode": "review_required"})
     elif ga4.get("state") == "insufficient_evidence":
         actions.append({"id": "growth-ga4-sample", "priority": "medium", "title": "Build enough user evidence", "reason": "GA4 volume is too low to call a reliable traffic trend.", "mode": "review_required"})
     elif ga_current.get("keyEvents", 0) == 0:
@@ -223,15 +235,14 @@ def collect_growth(token, gsc_property=None, ga4_property=None, captured_at=None
             ga4_periods[label] = _ga4_period(normalized)
     else:
         ga4_periods = {label: {"status": "source_unavailable", "error": "property or access unavailable"} for label in period_windows}
-    gsc = {"status": "available" if all(x["status"] == "available" for x in gsc_periods.values()) else "source_unavailable", "property": gsc_property, "date_timezone": "Google Search Console API (Pacific Time)", "checked_at": captured, "windows": gsc_periods, "comparison": _comparison(gsc_periods["current"], gsc_periods["previous"], ("clicks", "impressions", "ctr", "weighted_average_position"))}
-    ga4 = {"status": "available" if all(x["status"] == "available" for x in ga4_periods.values()) else "source_unavailable", "property": str(ga4_property) if ga4_property else None, "date_timezone": "GA4 property timezone", "checked_at": captured, "windows": ga4_periods, "comparison": _comparison(ga4_periods["current"], ga4_periods["previous"], ("sessions", "totalUsers", "keyEvents"))}
+    gsc = {"status": _source_status(gsc_periods["current"], gsc_periods["previous"]), "property": gsc_property, "date_timezone": "Google Search Console API (Pacific Time)", "checked_at": captured, "windows": gsc_periods, "comparison": _comparison(gsc_periods["current"], gsc_periods["previous"], ("clicks", "impressions", "ctr", "weighted_average_position"))}
+    ga4 = {"status": _source_status(ga4_periods["current"], ga4_periods["previous"]), "property": str(ga4_property) if ga4_property else None, "date_timezone": "GA4 property timezone", "checked_at": captured, "windows": ga4_periods, "comparison": _comparison(ga4_periods["current"], ga4_periods["previous"], ("sessions", "totalUsers", "keyEvents"))}
     gsc_low = gsc["status"] == "available" and (gsc_periods["current"].get("metrics", {}).get("impressions", 0) < GSC_MIN_IMPRESSIONS or gsc_periods["previous"].get("metrics", {}).get("impressions", 0) < GSC_MIN_IMPRESSIONS)
     ga4_low = ga4["status"] == "available" and (ga4_periods["current"].get("metrics", {}).get("totalUsers", 0) < GA4_MIN_USERS or ga4_periods["previous"].get("metrics", {}).get("totalUsers", 0) < GA4_MIN_USERS or ga4_periods["current"].get("metrics", {}).get("sessions", 0) < GA4_MIN_SESSIONS or ga4_periods["previous"].get("metrics", {}).get("sessions", 0) < GA4_MIN_SESSIONS)
     gsc["state"] = _source_state(gsc_periods["current"], gsc_periods["previous"], gsc_low)
     ga4["state"] = _source_state(ga4_periods["current"], ga4_periods["previous"], ga4_low)
-    result = {"schema_version": 1, "status": "available" if gsc["status"] == "available" or ga4["status"] == "available" else "source_unavailable", "captured_at": captured, "windows": period_windows, "sources": {"gsc": gsc, "ga4": ga4}, "confidence": "unavailable" if gsc["status"] == "source_unavailable" and ga4["status"] == "source_unavailable" else "insufficient_evidence" if gsc_low or ga4_low else "available", "recommendations": []}
+    gsc_current_available = gsc_periods["current"].get("status") == "available"
+    ga4_current_available = ga4_periods["current"].get("status") == "available"
+    result = {"schema_version": 1, "status": "available" if gsc["status"] == "available" and ga4["status"] == "available" else "partial" if gsc_current_available or ga4_current_available else "source_unavailable", "captured_at": captured, "windows": period_windows, "sources": {"gsc": gsc, "ga4": ga4}, "confidence": "unavailable" if not gsc_current_available and not ga4_current_available else "partial" if gsc["status"] != "available" or ga4["status"] != "available" else "insufficient_evidence" if gsc_low or ga4_low else "available", "recommendations": []}
     result["recommendations"] = recommendations(gsc, ga4)
-    if (gsc["status"] == "available") != (ga4["status"] == "available"):
-        result["status"] = "partial"
-        result["confidence"] = "partial"
     return result
