@@ -64,7 +64,7 @@ def _grounded_point(point, index, fact_map):
         raise ValueError(f"points[{index}] must be an object")
     label = _text(point.get("label"), f"points[{index}].label", MAX_TEXT)
     value = point.get("value")
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or abs(value) > 1e15 or not math.isfinite(value):
         raise ValueError(f"points[{index}].value must be finite numeric")
     fact_id = str(point.get("fact_id", ""))
     fact = fact_map.get(fact_id)
@@ -87,7 +87,7 @@ def validate_visual(payload, facts):
     if not isinstance(payload, dict):
         raise ValueError("visual payload must be an object")
     kind = payload.get("kind")
-    if kind not in KINDS:
+    if not isinstance(kind, str) or kind not in KINDS:
         raise ValueError("unsupported visual kind")
     out = {"type": "editorial_visual", "kind": kind,
            "title": _text(payload.get("title"), "title"),
