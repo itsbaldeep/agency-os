@@ -58,4 +58,16 @@ class EditorialVisualTests(unittest.TestCase):
  def test_comparison_constraints(self):
     visual = validate_visual(base("comparison", columns=["A", "B"], rows=[["one", "two"]]), [])
     self.assertIn("Editorial guidance", visual["editorial_label"])
+    rendered = render_visual(visual)
+    self.assertIn("@media (max-width:600px)", rendered)
+    self.assertIn('class="comparison-table"', rendered)
+    self.assertIn('data-label="A"', rendered)
     self.assertIn("| A | B |", visual_markdown(visual))
+
+
+ def test_mobile_spacing_is_compact_and_fluid(self):
+    visual = validate_visual(base("checklist", items=["Keep the claim accurate"]), [])
+    rendered = render_visual(visual)
+    self.assertIn("padding:14px", rendered)
+    self.assertIn("padding:12px!important", rendered)
+    self.assertIn("max-width:100%", rendered)

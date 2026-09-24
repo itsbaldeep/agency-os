@@ -151,8 +151,8 @@ def render_visual(visual):
         credit = f' <a href="{_e(v["credit_url"])}">{_e(v["credit"])} </a>' if v.get("credit_url") else f" {_e(v['credit'])}"
         body = f'<img style="max-width:100%;height:auto" src="{_e(v["url"])}" alt="{_e(v["alt"])}" loading="lazy" decoding="async" referrerpolicy="no-referrer"><small>Credit:{credit}</small>'
     elif kind == "comparison":
-        head = "".join(f"<th>{_e(x)}</th>" for x in v["columns"])
-        body = f'<p class="label">{_e(v["editorial_label"])}</p><div style="max-width:100%;overflow-x:auto"><table><thead><tr>{head}</tr></thead><tbody>' + "".join("<tr>" + "".join(f"<td>{_e(c)}</td>" for c in row) + "</tr>" for row in v["rows"]) + "</tbody></table></div>"
+        head = "".join(f'<th style="" role="columnheader">{_e(x)}</th>' for x in v["columns"])
+        body = f'<p class="label">{_e(v["editorial_label"])}</p><div class="comparison-scroll" style="max-width:100%;overflow-x:auto"><table role="table" class="comparison-table"><thead><tr role="row">{head}</tr></thead><tbody role="rowgroup">' + "".join('<tr role="row">' + "".join(f'<td role="cell" style="" data-label="{_e(v["columns"][i])}">{_e(c)}</td>' for i, c in enumerate(row)) + "</tr>" for row in v["rows"]) + "</tbody></table></div>"
     elif kind == "annotated_example":
         body = f'<p class="label">{_e(v["label"])}</p><div class="cards"><div class="card"><b>Before</b><p>{_e(v["before"])}</p></div><div class="card"><b>After</b><p>{_e(v["after"])}</p></div></div><ul>' + "".join(f"<li>{_e(x)}</li>" for x in v["notes"]) + "</ul>"
     elif kind in ("checklist", "flow"):
@@ -176,12 +176,37 @@ def render_visual(visual):
         series = (f'<polyline points="{" ".join(line_points)}" fill="none" stroke="currentColor"/>' if kind == "line_chart" else "".join(bars))
         ident = "v-" + hashlib.sha256((v["title"] + v["caption"] + kind + repr(v['points']) + str(visual.get('visual_id', ''))).encode()).hexdigest()[:12]
         body = f'<div style="max-width:100%;overflow-x:auto"><svg style="width:100%;height:auto;min-width:420px" viewBox="0 0 720 360" role="img" aria-labelledby="{ident}-title {ident}-desc"><title id="{ident}-title">{title}</title><desc id="{ident}-desc">{_e(v["caption"])}, range {_e(lo)} to {_e(hi)} {_e(v["units"])}</desc><text x="22" y="18">{_e(hi)} {_e(v["units"])}</text><text x="22" y="355">{_e(lo)} {_e(v["units"])}</text><line x1="20" y1="{y0:.1f}" x2="700" y2="{y0:.1f}" stroke="currentColor"/><g class="series">{series}</g></svg></div><div style="max-width:100%;overflow-x:auto"><table class="data"><caption>{_e(v["units"])}; sources and verified fact IDs retained in the data rows</caption><thead><tr><th>Label</th><th>Value</th><th>Fact ID</th><th>Source</th></tr></thead><tbody>{rows}</tbody></table></div>'
-    body = body.replace('class="cards"', 'class="cards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:14px;padding:0;list-style-position:inside"')
-    body = body.replace('class="card"', 'class="card" style="padding:18px;border:1px solid #b9cdbf;background:#f7fbf6;border-radius:8px;min-width:0;color:#17332b"')
-    body = body.replace('<th>', '<th scope="col" style="padding:12px;border:1px solid #b9cdbf;text-align:left;color:#17332b;background:#dcebdd;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;min-width:120px">').replace('<td>', '<td style="padding:12px;border:1px solid #b9cdbf;min-width:120px;word-break:normal">')
+    body = body.replace('class="cards"', 'class="cards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:12px;padding:0;list-style-position:inside"')
+    body = body.replace('class="card"', 'class="card" style="padding:14px;border:1px solid #b9cdbf;background:#f7fbf6;border-radius:8px;min-width:0;color:#17332b"')
+    th_style = 'padding:9px;border:1px solid #b9cdbf;text-align:left;color:#17332b;background:#dcebdd;font-size:14px;font-weight:700;text-transform:none;letter-spacing:normal;min-width:100px;'
+    td_style = 'padding:9px;border:1px solid #b9cdbf;min-width:100px;word-break:normal;'
+    body = body.replace('<th>', f'<th scope="col" style="{th_style}">').replace('<th style="', f'<th scope="col" style="{th_style}')
+    body = body.replace('<td>', f'<td style="{td_style}">').replace('<td role="cell" style="', f'<td role="cell" style="{td_style}')
     body = body.replace('<table', '<table style="width:100%;border-collapse:collapse;font-size:16px"')
     body = body.replace('class="series"', 'class="series" style="fill:#087f68;color:#087f68;stroke-width:3"')
-    return f'<figure class="editorial-visual {kind}" style="max-width:100%;box-sizing:border-box;margin:28px 0;padding:22px;background:#edf4ed;color:#17332b;border:1px solid #b9cdbf;border-radius:10px"><h3 style="margin:0 0 14px;font-size:23px;line-height:1.3">{title}</h3><div class="visual-body" style="max-width:100%;overflow-wrap:anywhere">{body}</div><figcaption style="margin-top:16px;font-size:14px;color:#385b4d">{caption}</figcaption></figure>'
+    # The visual is also exported outside the dashboard, so keep the base
+    # layout inline and add a narrowly scoped media query for narrow readers.
+    # This preserves a semantic table for desktop/assistive technology while
+    # turning comparison rows into labelled cards on phone widths.
+    responsive = '''<style>
+.editorial-visual{--visual-border:#b9cdbf}
+@media (max-width:600px){
+  .editorial-visual{margin:16px 0!important;padding:12px!important;border-radius:8px!important}
+  .editorial-visual h3{margin-bottom:10px!important;font-size:20px!important}
+  .editorial-visual figcaption{margin-top:10px!important;font-size:13px!important}
+  .editorial-visual .cards{gap:8px!important}
+  .editorial-visual .card{padding:11px!important}
+  .editorial-visual .comparison-scroll{overflow:visible!important}
+  .editorial-visual .comparison-table{display:block!important;font-size:14px!important}
+  .editorial-visual .comparison-table thead{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
+  .editorial-visual .comparison-table tbody,.editorial-visual .comparison-table tr,.editorial-visual .comparison-table td{display:block!important;width:auto!important;min-width:0!important}
+  .editorial-visual .comparison-table tr{margin:0 0 8px!important;border:1px solid var(--visual-border)!important;border-radius:6px!important;overflow:hidden!important}
+  .editorial-visual .comparison-table td{display:grid!important;grid-template-columns:1fr!important;gap:3px!important;padding:8px!important;border:0!important;border-bottom:1px solid var(--visual-border)!important;overflow-wrap:anywhere!important}
+  .editorial-visual .comparison-table td:last-child{border-bottom:0!important}
+  .editorial-visual .comparison-table td:before{content:attr(data-label);font-weight:700;color:#385b4d}
+}
+</style>'''
+    return f'{responsive}<figure class="editorial-visual {kind}" style="max-width:100%;box-sizing:border-box;margin:22px 0;padding:14px;background:#edf4ed;color:#17332b;border:1px solid #b9cdbf;border-radius:10px"><h3 style="margin:0 0 11px;font-size:21px;line-height:1.3">{title}</h3><div class="visual-body" style="max-width:100%;overflow-wrap:anywhere">{body}</div><figcaption style="margin-top:12px;font-size:14px;color:#385b4d">{caption}</figcaption></figure>'
 
 
 def visual_markdown(visual):
