@@ -255,6 +255,14 @@ TrueApply's later SaaS phases remain governed by its own engine-first exit crite
     traces, and Lavish are pulled in only when they add material value. No agent fleet
     may reintroduce autonomous deploy, review, or merge.
 
+## Content visual quality (human direction, 2026-09-24)
+
+Consider useful images, illustrations, diagrams, charts, tables and annotated
+examples during planning and review, not decorative visual quotas. Clearly label
+hypothetical examples and qualitative editorial guidance. Quantitative charts
+require verified source evidence; never invent measurements to fill a visual.
+Visual editing does not grant publication approval.
+
 ## 8. Retired and parked estate (verified 2026-08-22)
 
 | What | Action | Reversible via |

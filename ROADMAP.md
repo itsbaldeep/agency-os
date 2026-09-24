@@ -176,6 +176,17 @@ ledger visibility, and isolation.
 
 ## Content and execution work after that
 
+- [x] Deploy reviewed Visual Studio on composed draft previews (2026-09-24):
+      annotated examples, qualitative comparison tables, checklists, flows,
+      HTTPS image references, and evidence-backed bar/line charts. Preview-bound
+      saves, revision checks, tracked undo and portable HTML export are proven.
+      TrueApply draft 23 has three reviewed visuals, tasks 359–363, unpublished.
+      Outline previews now show structured briefs instead of an empty body.
+- [ ] Connect reviewed visual HTML to the Ghost publication adapter. Existing
+      plain-text WordPress publication refuses editorial visuals rather than
+      discarding them. Image upload/generation remains a separate workflow;
+      this editor accepts image URLs. No traffic improvement is yet inferred.
+
 - [ ] Add multiple outline and draft variants with explicit human selection; the
       current proven path produces one evidence-gated outline and one draft.
 - [ ] Prove core-MinIO image sourcing/review on a real draft; never generate assets
