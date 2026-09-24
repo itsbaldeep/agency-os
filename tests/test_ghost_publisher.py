@@ -96,6 +96,30 @@ class GhostPublisherTests(unittest.TestCase):
         self.assertEqual(decode(payload)["aud"], "/admin/")
         self.assertTrue(signature)
 
+    def test_published_retry_performs_no_second_write(self):
+        marker = '#agency-content-23-' + content_digest(item())[:16]
+        fake = FakeClient({'id': 'ghost-1', 'tags': [{'name': marker}]})
+        fake.post = {'id': 'ghost-1', 'html': render_pipeline_html(item()), 'status': 'published'}
+        result = publish(item(), {'base_url': 'https://example.com/blog'}, content_digest(item()), client=fake)
+        self.assertEqual(result['status'], 'published')
+        self.assertTrue(all(method == 'GET' for method, _, _ in fake.calls))
+
+    def test_modified_ghost_html_is_never_published(self):
+        marker = '#agency-content-23-' + content_digest(item())[:16]
+        fake = FakeClient({'id': 'ghost-1', 'tags': [{'name': marker}]})
+        fake.post = {'id': 'ghost-1', 'html': render_pipeline_html(item()).replace('Keep the evidence visible.', 'Changed claim.'), 'status': 'draft'}
+        with self.assertRaisesRegex(GhostPublishError, 'read-back'):
+            publish(item(), {'base_url': 'https://example.com/blog'}, content_digest(item()), client=fake)
+        self.assertTrue(all(method == 'GET' for method, _, _ in fake.calls))
+
+    def test_active_markup_is_rejected_before_network(self):
+        value = item()
+        value['content_blocks'] = [{'type': 'prose', 'markdown': '<script>alert(1)</script>'}]
+        fake = FakeClient()
+        with self.assertRaisesRegex(GhostPublishError, 'blocked HTML'):
+            publish(value, {'base_url': 'https://example.com/blog'}, content_digest(value), client=fake)
+        self.assertEqual(fake.calls, [])
+
 
 if __name__ == "__main__":
     unittest.main()

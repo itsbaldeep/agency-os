@@ -182,7 +182,12 @@ ledger visibility, and isolation.
       saves, revision checks, tracked undo and portable HTML export are proven.
       TrueApply draft 23 has three reviewed visuals, tasks 359–363, unpublished.
       Outline previews now show structured briefs instead of an empty body.
-- [ ] Connect reviewed visual HTML to the Ghost publication adapter. Existing
+- [x] Connect reviewed visual HTML to the Ghost publication adapter (2026-09-24).
+      Dedicated engagement-owned key, exact content/destination approval hashes,
+      private draft read-back and idempotent publication are deployed. Task 369
+      proves the deployed worker's private connection check. Real public publication
+      still awaits human confirmation; rollback currently uses Ghost's editor.
+      Existing
       plain-text WordPress publication refuses editorial visuals rather than
       discarding them. Image upload/generation remains a separate workflow;
       this editor accepts image URLs. No traffic improvement is yet inferred.
