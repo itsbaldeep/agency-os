@@ -26,6 +26,13 @@ publication with rollback, experiments, and scheduled evaluation. Retired core
 deployment jobs remain retired. This authorizes implementation, not unreviewed
 marketing publication or spending.
 
+On 2026-09-23 the owner authorized a dedicated scalable blog service for TrueApply
+on the existing domain. Ghost with a custom theme is deployed at `/blog/`, with
+separate engagement-owned MySQL/content storage and a tailnet-only editor. This
+changes the publishing destination, not the first-ten publication approval policy.
+Daily measurement is authorized; newsletter sending, advertising spend and
+autonomous publication remain outside this release.
+
 ## 1. The three project types
 
 | Type | Repo access | What we do | Likelihood |

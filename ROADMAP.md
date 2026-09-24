@@ -32,9 +32,32 @@ execution log second.
   experience. Its query demand is unverified; it has not been researched or published.
   Dates are informational, not publication schedules. Failed research is visible
   through its task; automatic retry, topic ranking and outcome evaluation remain open.
-- Next batches: evidence-ranked strategy backlog; isolated static publishing
-  with approval and rollback; experiments with insufficient-evidence outcomes;
-  daily measurement/evaluation scheduling. These are not yet implemented.
+- TrueApply Journal deployed 2026-09-23 at `https://trueapply.in/blog/`: dedicated
+  Ghost 6.65 / MySQL 8.4, custom responsive theme, image/rich-text editor,
+  metadata/schema/RSS/sitemaps and tailnet-only editor on port 4443. Blog and
+  blog-mysql are engagement services 38/39. Product services were not restarted.
+  Public editor, membership and draft-preview paths return 404. Default Ghost demo
+  post and About page are private drafts, not published marketing content.
+- Recovery proof: encrypted and authenticated SQL/content/theme/config bundle
+  decrypted successfully and restored into a new network-isolated MySQL instance.
+  Desktop/mobile browser tests include rich text, image upload, navigation, schema,
+  analytics opt-in and no overflow. No off-site blog backup proof or HA is claimed.
+- Daily owned measurement is now job 17 at 06:30 UTC, explicitly opted into
+  TrueApply brand 31. It calls the existing dashboard workflow with per-day
+  deduplication and skips inactive engagements. Manual run 212876 created task
+  356/audit 47, with crawl, PageSpeed, GSC and GA4 available. This is whole-property
+  measurement, not a dedicated blog-user dashboard or automatic strategy evaluation.
+  Blog GA4 collection is opt-in, with a `blog_cta_click` event that is not a sale.
+- Calendar plans 1/2/3 produced outlines 21/22/23: truthful tailoring, ATS resume
+  formatting, and resume bullets without metrics. Research 349/352/353 is complete.
+  Outline 350 failed a verified-fact gate; tracked retry 351 passed. Outlines
+  354/355 also passed. Composition and publication await human review. The third
+  research has zero verified facts, so unsupported source-backed claims/data blocks
+  must remain prohibited. No article has been composed or published by this batch.
+- Next batches: tracked Ghost publication adapter with idempotency/rollback,
+  blog-specific outcome reporting, evidence-ranked strategy backlog, experiments
+  with insufficient-evidence outcomes, scheduled evaluation, and off-site recovery.
+  A working CMS is not yet an automated end-to-end publishing loop.
 - Daily unique users must never be summed into monthly unique users. GSC query
   rows are discovery data, not an authoritative site total. An indexed URL and a
   crawlable URL are different states. No growth claim follows from report readiness.
