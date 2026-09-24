@@ -3604,9 +3604,13 @@ def handle_content_outline(task):
         "rigid type template and no minimum per type.\n"
         "7. Make the article more useful through specific briefs and evidence, not by adding more "
         "blocks. Every block must earn its place; consolidate adjacent ideas instead of using filler.\n"
-        "8. Use image_slot SPARINGLY — at most 2-3 across the whole article, only where a visual "
-        "genuinely aids understanding (a diagram, a real screenshot concept). Prefer chart and table "
-        "blocks to convey data, since those carry real information; images are decoration.\n"
+        "8. Perform a visual review: consider an annotated example, a comparison, a process diagram, "
+        "or a checklist wherever it makes the explanation easier to use. Use image_slot for a "
+        "specific explanatory illustration or screenshot concept, with descriptive alt text and "
+        "a concrete prompt, at most 2-3 per article. Never add decorative filler or invent chart "
+        "data. Evidence-backed tables, charts and callouts still require verified fact_ids. "
+        "Use prose or steps for unsupported editorial comparisons; the visual editor can add "
+        "clearly labelled qualitative guidance after composition.\n"
         "9. Mark EXACTLY ONE prose block with \"keyword_target\": true (in addition to intro) — "
         "that block must place the target keyword verbatim, naturally, later in the article. "
         "Other prose blocks stay unflagged so they read naturally without stuffing.\n"
@@ -4763,7 +4767,7 @@ def handle_publish_content(task):
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute(
-            "SELECT ci.id,ci.title,ci.body,ci.status,b.project_id,p.local_path,p.agent_allowed,"
+            "SELECT ci.id,ci.title,ci.body,ci.status,ci.content_blocks,b.project_id,p.local_path,p.agent_allowed,"
             "c.intake_params FROM content_items ci JOIN brands b ON b.id=ci.brand_id "
             "LEFT JOIN projects p ON p.id=b.project_id "
             "LEFT JOIN clients c ON c.brand_id=b.id WHERE ci.id=%s",
@@ -4799,6 +4803,12 @@ def handle_publish_content(task):
         return _needs_input(
             f"The `{driver}` publication adapter is not configured for this engagement.",
             ["supported adapter mapping", "destination path/endpoint", "credential_ref"],
+        )
+
+    if any(isinstance(block, dict) and block.get('type') == 'editorial_visual' for block in (item.get('content_blocks') or [])):
+        return _needs_input(
+            'This draft contains reviewed visuals. The current WordPress adapter only emits plain paragraphs; use the HTML export with a reviewed visual-capable publication workflow.',
+            ['visual-capable publication adapter'],
         )
 
     base_url = (destination.get("base_url") or "").rstrip("/")

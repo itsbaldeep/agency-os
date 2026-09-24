@@ -196,7 +196,13 @@ def render_content_blocks(blocks, title="Untitled"):
         if not isinstance(b, dict):
             continue
         t = b.get("type")
-        if t in ("intro", "heading"):
+        if t == 'editorial_visual':
+            from editorial_visuals import render_visual
+            try:
+                parts.append(render_visual(b))
+            except (ValueError, TypeError, KeyError):
+                parts.append('<aside role="alert">Visual unavailable: review its data before publication.</aside>')
+        elif t in ("intro", "heading"):
             text = b.get("markdown") or b.get("heading") or ""
             if t == "heading":
                 parts.append(f"<h2>{esc(text)}</h2>")
