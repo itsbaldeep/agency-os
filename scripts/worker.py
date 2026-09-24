@@ -4755,6 +4755,38 @@ def _project_env_value(project_path, name):
     return ""
 
 
+def handle_ghost_connection_check(task):
+    """Exercise the adapter with a synthetic private draft, never public content."""
+    from ghost_publisher import publish, content_digest, GhostPublishError
+    from publication_settings import project_destination
+    project_id = int((task.get('params') or {}).get('project_id') or 0)
+    config = project_destination(project_id)
+    if config.get('type') != 'ghost':
+        return {'ok': False, 'error': 'No Ghost connection is configured for this project.'}
+    conn = get_conn()
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT local_path FROM projects WHERE id=%s AND lifecycle='active'", (project_id,))
+        project = cur.fetchone()
+    finally:
+        conn.close()
+    if not project:
+        return {'ok': False, 'error': 'An active project is required.'}
+    item = {'id': 'connection-check-' + str(project_id), 'local_path': project['local_path'],
+            'title': 'Agency connection test, not for publication',
+            'body': 'Synthetic private connection check.', 'structured': {'facts': []},
+            'content_blocks': [
+                {'type': 'prose', 'markdown': 'Synthetic private connection check. **Not editorial content.**'},
+                {'type': 'editorial_visual', 'kind': 'comparison', 'reviewed': True,
+                 'title': 'Private rendering check', 'caption': 'Synthetic visual, not research.',
+                 'columns': ['Technique', 'Purpose'], 'rows': [['Example', 'Test responsive cards']]}]}
+    try:
+        result = publish(item, config, content_digest(item), publish=False)
+        return {'ok': True, 'content': json.dumps(result), 'prompt_tokens': 0, 'completion_tokens': 0, 'cost': 0}
+    except GhostPublishError as exc:
+        return {'ok': False, 'error': str(exc)}
+
+
 def handle_publish_content(task):
     """Publish only through an explicit destination adapter and credential reference."""
     import html
@@ -4767,7 +4799,7 @@ def handle_publish_content(task):
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute(
-            "SELECT ci.id,ci.title,ci.body,ci.status,ci.content_blocks,b.project_id,p.local_path,p.agent_allowed,"
+            "SELECT ci.id,ci.title,ci.body,ci.status,ci.content_blocks,ci.structured,b.project_id,p.local_path,p.agent_allowed,p.lifecycle,"
             "c.intake_params FROM content_items ci JOIN brands b ON b.id=ci.brand_id "
             "LEFT JOIN projects p ON p.id=b.project_id "
             "LEFT JOIN clients c ON c.brand_id=b.id WHERE ci.id=%s",
@@ -4780,6 +4812,33 @@ def handle_publish_content(task):
         return {"ok": False, "error": f"publish_content: content item {content_id} not found"}
     if not (item.get("body") or "").strip():
         return {"ok": False, "error": "publish_content: approved item has no composed body"}
+
+    from publication_settings import project_destination, destination_digest
+    project_config = project_destination(item.get('project_id'))
+    if project_config.get('type') == 'ghost':
+        if not project_config.get('enabled'):
+            return _needs_input('Ghost connection is not enabled.', ['verified Ghost connection'])
+        if params.get('approved_destination') != destination_digest(project_config):
+            return _needs_input('The publishing connection changed after approval. Review the destination again.', ['fresh dashboard approval'])
+        if item.get('lifecycle') != 'active' or item.get('status') not in ('publishing', 'publish_failed'):
+            return {'ok': False, 'error': 'Ghost publishing requires an active project and an approved publishing task.'}
+        from ghost_publisher import publish, GhostPublishError
+        lock_conn = get_conn()
+        try:
+            lock_cur = lock_conn.cursor()
+            lock_cur.execute('SELECT pg_try_advisory_lock(72391,%s)', (int(content_id),))
+            if not lock_cur.fetchone()[0]:
+                return {'ok': False, 'error': 'Another publication for this article is already in progress.'}
+            result = publish(item, project_config, params.get('approved_digest'))
+            return {'ok': True, 'content': json.dumps(result), 'workflow_status': 'published',
+                    'prompt_tokens': 0, 'completion_tokens': 0, 'cost': 0}
+        except GhostPublishError as exc:
+            return {'ok': False, 'error': str(exc)}
+        except Exception:
+            # Provider responses and authentication material must not reach task logs.
+            return {'ok': False, 'error': 'Ghost publication could not be verified. Inspect the Ghost draft and retry only after resolving the cause; do not create a duplicate article.'}
+        finally:
+            lock_conn.close()
 
     destination = params.get("destination") or {}
     if isinstance(destination, str):
@@ -5059,6 +5118,7 @@ DISPATCH = {
     "competitor_scan": handle_competitor_scan,
     "execute_suggestion": handle_execute_suggestion,
     "publish_content": handle_publish_content,
+    "ghost_connection_check": handle_ghost_connection_check,
     "execute_approval": handle_execute_approval,
     "operator_chore": handle_operator_chore,
 }
