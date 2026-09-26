@@ -207,7 +207,7 @@ def render_content_blocks(blocks, title="Untitled"):
             if t == "heading":
                 parts.append(f"<h2>{esc(text)}</h2>")
             elif text:
-                parts.append(f"<p class='lead'>{_md(text)}</p>")
+                parts.append(f"<div class='lead'>{_md(text)}</div>")
         elif t == "prose":
             if b.get("markdown"):
                 parts.append(f"<div class='prose'>{_md(b['markdown'])}</div>")

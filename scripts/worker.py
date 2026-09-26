@@ -239,8 +239,8 @@ def update_workflow_link(cur, task, outcome, result=None, error=""):
             "failed": "publish_failed",
         }[outcome]
         cur.execute(
-            "UPDATE content_items SET status=%s, updated_at=now() WHERE id=%s",
-            (status, params["content_item_id"]),
+            "UPDATE content_items SET status=%s, publish_task_id=COALESCE(%s,publish_task_id), updated_at=now() WHERE id=%s",
+            (status, task.get('id'), params["content_item_id"]),
         )
         cur.execute(
             "UPDATE suggestions s SET status=%s,updated_at=now() FROM content_items ci "

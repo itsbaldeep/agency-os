@@ -120,6 +120,15 @@ class GhostPublisherTests(unittest.TestCase):
             publish(value, {'base_url': 'https://example.com/blog'}, content_digest(value), client=fake)
         self.assertEqual(fake.calls, [])
 
+    def test_markdown_intro_uses_block_container_not_nested_paragraph(self):
+        value = item()
+        value['content_blocks'] = [{'type': 'intro', 'markdown': 'First **paragraph**.\n\nSecond paragraph.'}]
+        html = render_pipeline_html(value)
+        self.assertIn("<div class='lead'><p>", html)
+        self.assertNotIn("<p class='lead'>", html)
+        self.assertIn('<strong>paragraph</strong>', html)
+        self.assertIn('<p>Second paragraph.</p></div>', html)
+
 
 if __name__ == "__main__":
     unittest.main()
