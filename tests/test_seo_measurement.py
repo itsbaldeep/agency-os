@@ -106,6 +106,24 @@ class SeoMeasurementTests(unittest.TestCase):
         self.assertTrue(any(item["reason"] == "non_html" for item in result["excluded"]))
         self.assertTrue(any(item["rule"] == "invalid_jsonld" for item in seo.make_findings(result)))
 
+    def test_crawl_appends_link_audit_without_changing_existing_keys(self):
+        pages = {
+            "https://example.test/robots.txt": (200, b"User-agent: *\nAllow: /") ,
+            "https://example.test/sitemap.xml": (404, b""),
+            "https://example.test/": (200, b'<title>Home</title><a href="https://outside.example/missing">bad</a>'),
+        }
+        def fetch(url):
+            if url == "https://outside.example/missing":
+                return (404, b"gone")
+            return pages[url]
+        result = seo.crawl("https://example.test/", max_pages=1, fetcher=fetch, sleep=lambda _: None)
+        self.assertIn("pages", result)
+        self.assertIn("broken_links", result)
+        self.assertIn("link_audit", result)
+        self.assertEqual(result["link_audit"]["external_links"][0]["state"], "broken")
+        findings = seo.make_findings(result)
+        self.assertTrue(any(item["rule"] == "broken_external_link" for item in findings))
+
     def test_google_missing_access_and_signing_does_not_print_key(self):
         self.assertEqual(seo.google_access("/does/not/exist")["status"], "source_unavailable")
         proc = mock.Mock(returncode=0, stdout=b"signature", stderr=b"")

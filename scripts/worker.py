@@ -10,6 +10,8 @@ import growth_measurement
 import public_fetch
 import marketing_assessments
 import marketing_report
+import content_quality
+import content_links
 
 ENV_PATH = os.environ.get("AGENCY_ENV_FILE", "/home/agency/.config/agency/core.env")
 
@@ -3525,10 +3527,33 @@ def _cap_outline_blocks(blocks):
     runs after this cap, so an essential intro, keyword carrier, fact reference,
     or type-specific field can never be silently lost.
     """
-    original_count = len(blocks) if isinstance(blocks, list) else 0
+    if not isinstance(blocks, list):
+        raise ValueError("outline blocks must be a list")
+    original_count = len(blocks)
     if original_count <= CONTENT_MAX_OUTLINE_BLOCKS:
         return blocks, None
-    return blocks[:CONTENT_MAX_OUTLINE_BLOCKS], original_count
+    # Prefer dropping nonessential section labels over dropping their content.
+    # In particular, a generated FAQ heading at the cap must not survive after
+    # all of its FAQ children have been truncated.  Keep order intact and only
+    # fall back to removing the tail when no heading can be safely removed.
+    capped = list(blocks[:CONTENT_MAX_OUTLINE_BLOCKS])
+    overflow = list(blocks[CONTENT_MAX_OUTLINE_BLOCKS:])
+    # Remove labels stranded at the cap, then use the freed slots for the next
+    # child blocks. This keeps a section's content rather than preserving a
+    # heading that renders as an empty section. Never append another heading
+    # without its first child when the cap is reached.
+    while capped and isinstance(capped[-1], dict) and capped[-1].get("type") == "heading":
+        capped.pop()
+    while len(capped) < CONTENT_MAX_OUTLINE_BLOCKS and overflow:
+        candidate = overflow.pop(0)
+        if isinstance(candidate, dict) and candidate.get("type") == "heading" and not overflow:
+            break
+        capped.append(candidate)
+    # If a final heading became stranded after filling, remove it. The
+    # substantive outline validator will reject any other malformed shape.
+    while capped and isinstance(capped[-1], dict) and capped[-1].get("type") == "heading":
+        capped.pop()
+    return capped, original_count
 
 
 def handle_content_outline(task):
@@ -4108,6 +4133,24 @@ def handle_content_compose(task):
         {k: b.get(k) for k in ("type", "brief", "keyword_target", "fact_ids") if b.get(k) not in (None, False, [])}
         for b in outline
     ]
+    internal_links = []
+    inventory_conn = get_conn()
+    try:
+        inventory_cur = inventory_conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        inventory_cur.execute("SELECT ci.title,t.result_ref FROM content_items ci JOIN tasks t ON t.id=ci.publish_task_id "
+                              "WHERE ci.brand_id=%s AND ci.status='published' AND t.status='done' AND t.type='publish_content' "
+                              "ORDER BY ci.updated_at DESC LIMIT 20", (row['brand_id'],))
+        for published in inventory_cur.fetchall():
+            receipt = published.get('result_ref') or {}
+            if isinstance(receipt, str):
+                try:
+                    receipt = json.loads(receipt)
+                except ValueError:
+                    continue
+            if isinstance(receipt, dict) and str(receipt.get('url', '')).startswith('https://'):
+                internal_links.append({'title': published['title'], 'url': receipt['url']})
+    finally:
+        inventory_conn.close()
     for idx, block in enumerate(outline, 1):
         if idx <= len(filled):
             continue
@@ -4115,6 +4158,13 @@ def handle_content_compose(task):
         set_task_progress(task["id"], int(15 + 80 * (idx - 1) / n), f"compose: {bt} {idx}/{n}")
         refs = [str(v) for v in (block.get("fact_ids") or [])]
         block_facts = [fact_map[v] for v in refs if v in fact_map]
+        # Intro and takeaways often intentionally omit fact_ids because they
+        # summarize the article. Give them the bounded verified ledger so the
+        # model can cite and preserve source scope instead of making an
+        # unsupported generalization. Other blocks remain strictly scoped to
+        # their declared fact_ids.
+        if bt in ("intro", "key_takeaways") and not refs:
+            block_facts = [fact for fact in facts[:20] if isinstance(fact, dict)]
         sources = list(dict.fromkeys(f["source_url"] for f in block_facts))
         carry = {
             "type": bt, "brief": block.get("brief", ""),
@@ -4151,9 +4201,16 @@ def handle_content_compose(task):
             f"TYPE CONTRACT: {_content_block_spec(bt)}\n"
             f"KEYWORD CONTRACT: {keyword_instruction}\n"
             f"VERIFIED FACTS FOR THIS BLOCK: {evidence}\n"
+            f"PUBLISHED INTERNAL PAGES (navigation only, not factual evidence): {json.dumps(internal_links)}\n"
+            "Link to a listed internal page with a descriptive Markdown anchor only when it usefully extends this section. "
+            "Never invent a URL, link to an unpublished draft, or force irrelevant links.\n"
             "Truth contract: facts not listed above are unavailable. Never invent or infer numbers, "
             "quotes, dates, rankings, named product capabilities, or causal claims. If VERIFIED FACTS "
-            "is empty, write useful qualitative guidance only. Preserve source meaning.\n"
+            "is empty, write useful qualitative guidance only. Preserve source meaning. "
+            "Do not generalize a fact about one named product, employer, ATS, or platform to a universal "
+            "claim. Do not turn a parsing limitation into a claim that a person will be rejected or never "
+            "seen. Cite every factual claim to the provided source scope. Use the source URL(s) supplied by "
+            "the evidence ledger, and never invent a citation. Use no em dashes.\n"
             f"{_CONTENT_VOICE_RULES if bt in ('intro', 'prose', 'faq') else ''}\n"
             "Return ONLY {\"content\": {...fields required by the type contract...}} as a JSON object."
         )
@@ -4220,6 +4277,17 @@ def handle_content_compose(task):
             }
 
     fails = _content_compose_validate(filled, keyword)
+    quality_report = content_quality.validate_content(filled, mode="draft")
+    # Missing media is a tracked post-compose asset task. Structural gaps and
+    # placeholder assets are not: allowing those through creates drafts that
+    # look complete in the dashboard while being impossible to publish safely.
+    asset_only = {"unresolved_image", "missing_alt", "missing_image_brief"}
+    structural_quality = [item for item in quality_report["findings"]
+                          if item["code"] not in asset_only]
+    fails.extend(
+        f"content quality {item['code']}: {item['message']}"
+        for item in structural_quality
+    )
     if fails:
         return {
             "ok": False, "error": "compose final validation failed: " + "; ".join(fails),
@@ -4231,10 +4299,16 @@ def handle_content_compose(task):
     conn = get_conn()
     try:
         cur = conn.cursor()
+        structured_with_quality = dict(structured)
+        structured_with_quality["quality_report"] = {
+            **quality_report,
+            "publish_ready": not quality_report["findings"],
+            "needs_assets": any(item["code"] in asset_only for item in quality_report["findings"]),
+        }
         cur.execute(
-            "UPDATE content_items SET content_blocks=%s, body=%s, status='draft', updated_at=now() "
+            "UPDATE content_items SET content_blocks=%s, body=%s, structured=%s, status='draft', updated_at=now() "
             "WHERE id=%s",
-            (json.dumps(filled), body, ci_id))
+            (json.dumps(filled), body, json.dumps(structured_with_quality), ci_id))
         conn.commit()
     finally:
         conn.close()
@@ -4787,6 +4861,98 @@ def handle_ghost_connection_check(task):
         return {'ok': False, 'error': str(exc)}
 
 
+def _content_link_fingerprint(item):
+    """Stable revision identity for a document-link check."""
+    payload = {
+        "title": item.get("title") or "",
+        "content_blocks": item.get("content_blocks") or [],
+    }
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True,
+                                     separators=(",", ":"), default=str).encode()).hexdigest()
+
+
+def handle_content_link_check(task):
+    """Check draft links and persist a revision-bound, deterministic report."""
+    params = task.get("params") or {}
+    content_id = params.get("content_item_id")
+    if not content_id:
+        return {"ok": False, "error": "content_link_check: content_item_id is required"}
+    conn = get_conn()
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            "SELECT ci.id,ci.title,ci.content_blocks,ci.structured,b.project_id "
+            "FROM content_items ci JOIN brands b ON b.id=ci.brand_id WHERE ci.id=%s",
+            (content_id,),
+        )
+        item = cur.fetchone()
+    finally:
+        conn.close()
+    if not item:
+        return {"ok": False, "error": f"content_link_check: content item {content_id} not found"}
+    blocks = item.get("content_blocks") or []
+    structured = item.get("structured") or {}
+    if isinstance(structured, str):
+        try:
+            structured = json.loads(structured)
+        except (TypeError, ValueError):
+            structured = {}
+    if not isinstance(blocks, list):
+        return {"ok": False, "error": "content_link_check: content blocks are malformed"}
+    from publication_settings import project_destination
+    destination = project_destination(item.get("project_id"))
+    base_url = destination.get("public_url") or destination.get("base_url") or ""
+    if not isinstance(base_url, str) or not base_url.startswith(("https://", "http://")):
+        return _needs_input("Content link checking needs a configured public destination URL.", ["project publication base_url"])
+    fingerprint = _content_link_fingerprint(item)
+    report = content_links.check_document_links(blocks, base_url)
+    report["fingerprint"] = fingerprint
+    checked_at = report.get("links", [{}])[0].get("checked_at") if report.get("links") else seo_measurement.now()
+    report["checked_at"] = checked_at
+    if params.get('read_only') is True:
+        if report.get('blocking'):
+            return {'ok': False, 'error': 'Confirmed broken content links block publication', 'content': json.dumps(report)}
+        if report.get('unverified'):
+            return _needs_input('Some links could not be verified. Recheck the draft links before publication.', ['verified content links'])
+        return {'ok': True, 'content': json.dumps(report)}
+
+    # Network checking happens outside the write transaction. Re-lock and
+    # compare the revision before persisting so a stale result cannot overwrite
+    # a newer editor change.
+    lock_conn = get_conn()
+    try:
+        lock_cur = lock_conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        lock_cur.execute("SELECT id,title,content_blocks,structured FROM content_items WHERE id=%s FOR UPDATE", (content_id,))
+        current = lock_cur.fetchone()
+        if not current or _content_link_fingerprint(current) != fingerprint:
+            lock_conn.rollback()
+            return _needs_input("The article changed while links were being checked. Run the link check again on the current revision.", ["fresh content-link check"])
+        current_structured = current.get("structured") or {}
+        if isinstance(current_structured, str):
+            try:
+                current_structured = json.loads(current_structured)
+            except (TypeError, ValueError):
+                current_structured = {}
+        if not isinstance(current_structured, dict):
+            current_structured = {}
+        current_structured["link_report"] = report
+        lock_cur.execute("UPDATE content_items SET structured=%s,updated_at=now() WHERE id=%s", (json.dumps(current_structured), content_id))
+        lock_conn.commit()
+    finally:
+        lock_conn.close()
+
+    content = json.dumps({"content_item_id": content_id, "fingerprint": fingerprint,
+                          "checked_at": checked_at, "links": len(report.get("links", [])),
+                          "broken": len(report.get("blocking", [])),
+                          "unverified": len(report.get("unverified", []))}, separators=(",", ":"))
+    if report.get("blocking"):
+        return {"ok": False, "error": "content_link_check: confirmed broken links block publication", "content": content}
+    if report.get("unverified"):
+        return _needs_input("Some content links could not be verified. Review the stored link report and recheck before publishing.", ["fresh content-link check"])
+    return {"ok": True, "content": content, "content_item_id": content_id,
+            "prompt_tokens": 0, "completion_tokens": 0, "cost": 0, "model": "deterministic"}
+
+
 def handle_publish_content(task):
     """Publish only through an explicit destination adapter and credential reference."""
     import html
@@ -4812,6 +4978,13 @@ def handle_publish_content(task):
         return {"ok": False, "error": f"publish_content: content item {content_id} not found"}
     if not (item.get("body") or "").strip():
         return {"ok": False, "error": "publish_content: approved item has no composed body"}
+
+    # Link verification is a publication gate and runs before destination
+    # adapters can perform any external write. It also persists a revision-
+    # bound report for dashboard review.
+    link_check = handle_content_link_check({"params": {"content_item_id": content_id, "read_only": True}})
+    if not link_check.get("ok"):
+        return link_check
 
     from publication_settings import project_destination, destination_digest
     project_config = project_destination(item.get('project_id'))
@@ -5106,6 +5279,7 @@ DISPATCH = {
     "content_research": handle_content_research,
     "content_outline": handle_content_outline,
     "content_compose": handle_content_compose,
+    "content_link_check": handle_content_link_check,
     "generate_draft": handle_generate_draft,
     "propose_fix": handle_propose_fix,
     "agent_task": handle_agent_task,

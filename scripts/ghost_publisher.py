@@ -8,6 +8,7 @@ It creates a Ghost draft, reads that draft back, and only then publishes it.
 from __future__ import annotations
 
 import base64
+import copy
 import hashlib
 import hmac
 import html
@@ -218,6 +219,47 @@ def _validate_item(item: dict) -> None:
             raise GhostPublishError("a visual failed its publication validation") from exc
 
 
+def _prepare_managed_assets(item: dict, destination: dict) -> dict:
+    """Copy reviewed managed visuals to the engagement public-media store.
+
+    The approved source item is never mutated.  Ghost receives a deep copy with
+    immutable engagement URLs, and every copied object is read back by hash.
+    """
+    blocks = item.get("content_blocks") or []
+    managed = []
+    for index, block in enumerate(blocks):
+        if not isinstance(block, dict):
+            continue
+        kind = block.get("type")
+        is_image = kind == "image_slot" or (kind == "editorial_visual" and block.get("kind") in {"image", "photo"})
+        if not is_image:
+            continue
+        if block.get("reviewed") is not True:
+            raise GhostPublishError(f"image block {index} must be reviewed before publication")
+        metadata = block.get("asset") or block.get("asset_metadata")
+        if not isinstance(metadata, dict) or not metadata.get("sha256") or not metadata.get("object_key"):
+            raise GhostPublishError(f"image block {index} is not a managed editorial asset")
+        managed.append((index, block, metadata))
+    if not managed:
+        return item
+    storage = destination.get("asset_storage")
+    if not isinstance(storage, (dict, str)):
+        raise GhostPublishError("managed images require an explicit asset_storage destination")
+    from content_assets import copy_to_engagement, read_core_asset
+    out = copy.deepcopy(item)
+    for index, original, metadata in managed:
+        try:
+            copied = copy_to_engagement(metadata, read_core_asset(metadata), storage)
+        except Exception as exc:
+            raise GhostPublishError(f"managed image {index} could not be copied and verified") from exc
+        block = out["content_blocks"][index]
+        block["url"] = copied["url"]
+        if block.get("type") == "image_slot":
+            block["image_url"] = copied["url"]
+        block["asset"] = {**metadata, "url": copied["url"], "object_key": copied["object_key"]}
+    return out
+
+
 class _SafeMarkup(HTMLParser):
     blocked = {"script", "iframe", "object", "embed", "form", "input", "button",
                "meta", "link", "base"}
@@ -269,11 +311,16 @@ def publish(item: dict, destination: dict, approved_digest: str, publish: bool =
     content_id = item.get("id")
     if content_id is None:
         raise GhostPublishError("content item id is required")
-    _validate_item(item)
+    item_for_publish = _prepare_managed_assets(item, destination)
+    _validate_item(item_for_publish)
+    from content_quality import publication_blockers
+    blockers = publication_blockers(item_for_publish.get("content_blocks") or [])
+    if blockers:
+        raise GhostPublishError("content quality blockers remain before publication")
     slug = "content-" + str(content_id)
-    title = item.get("title") or "Untitled"
+    title = item_for_publish.get("title") or "Untitled"
     marker = "#agency-content-%s-%s" % (content_id, digest[:16])
-    html_body = render_pipeline_html(item)
+    html_body = render_pipeline_html(item_for_publish)
     if "visual unavailable" in html_body.lower():
         raise GhostPublishError("rendered visual content is unavailable")
     _validate_markup(html_body)
@@ -300,7 +347,7 @@ def publish(item: dict, destination: dict, approved_digest: str, publish: bool =
             raise GhostPublishError("Ghost draft response did not include an id")
     checked = _post(client.request("GET", "/ghost/api/admin/posts/" + urllib.parse.quote(str(post_id), safe="") + "/?formats=html"))
     checked_html = (checked or {}).get("html") or ""
-    if any(fragment not in checked_html for fragment in _required_fragments(item)) or _normal_html(checked_html) != _normal_html(html_body):
+    if any(fragment not in checked_html for fragment in _required_fragments(item_for_publish)) or _normal_html(checked_html) != _normal_html(html_body):
         raise GhostPublishError("Ghost read-back did not preserve the rendered HTML")
     if not publish:
         status = (checked or {}).get("status")

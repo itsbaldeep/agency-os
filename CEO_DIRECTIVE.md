@@ -263,6 +263,19 @@ hypothetical examples and qualitative editorial guidance. Quantitative charts
 require verified source evidence; never invent measurements to fill a visual.
 Visual editing does not grant publication approval.
 
+### Editorial assets and help content, owner direction 2026-09-26
+
+Provide a real searchable/uploadable editorial asset library with editable alt
+text, provenance and previews. Agency owns editorial originals; publication
+copies reviewed immutable media into the engagement's separate public storage.
+Never expose private user-document buckets. Reject unresolved placeholders and
+empty sections before publication. Ground product help in current verified
+behavior, discover published internal pages for contextual links, cite factual
+sources beside their claims, warn readers before external navigation, and audit
+internal and external links across landing, help and blog surfaces. Draft 22 is
+authorized for regeneration and review, not publication. Help drafts retain the
+existing individual publication approval policy.
+
 ## 8. Retired and parked estate (verified 2026-08-22)
 
 | What | Action | Reversible via |

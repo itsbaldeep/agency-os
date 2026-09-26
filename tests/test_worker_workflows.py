@@ -53,6 +53,53 @@ class WorkerWorkflowTests(unittest.TestCase):
         self.assertIn("sources @> %s::jsonb", source)
         self.assertIn("'executing'", source)
 
+    def test_content_link_check_persists_revision_bound_report(self):
+        first = {"id": 22, "title": "Draft", "content_blocks": [{"type": "prose", "markdown": "See [source](https://example.test/source)."}], "structured": {}, "project_id": 30}
+        current = {**first}
+        report = {"status": "available", "links": [{"url": "https://example.test/source", "state": "ok", "status": 200, "checked_at": "now"}], "blocking": [], "unverified": [], "coverage": {"checked": 1}}
+
+        class Conn:
+            def __init__(self, row):
+                self.cursor_value = ResultCursor(row)
+                self.commits = 0
+            def cursor(self, **_kwargs): return self.cursor_value
+            def commit(self): self.commits += 1
+            def rollback(self): pass
+            def close(self): pass
+
+        first_conn, lock_conn = Conn(first), Conn(current)
+        with mock.patch.object(worker, "get_conn", side_effect=[first_conn, lock_conn]), \
+             mock.patch.object(worker.content_links, "check_document_links", return_value=report):
+            result = worker.handle_content_link_check({"id": 77, "params": {"content_item_id": 22}})
+        self.assertTrue(result["ok"])
+        self.assertIn("fingerprint", json.loads(result["content"]))
+        self.assertEqual(lock_conn.commits, 1)
+        update = next(params for sql, params in lock_conn.cursor_value.calls if "UPDATE content_items SET structured" in sql)
+        stored = json.loads(update[0])
+        self.assertEqual(stored["link_report"]["fingerprint"], worker._content_link_fingerprint(first))
+
+    def test_content_link_check_rejects_stale_report_and_broken_links_block(self):
+        first = {"id": 22, "title": "Draft", "content_blocks": [{"type": "prose", "markdown": "old"}], "structured": {}, "project_id": 30}
+        changed = {**first, "content_blocks": [{"type": "prose", "markdown": "new"}]}
+        class Conn:
+            def __init__(self, row): self.cursor_value, self.commits = ResultCursor(row), 0
+            def cursor(self, **_kwargs): return self.cursor_value
+            def commit(self): self.commits += 1
+            def rollback(self): pass
+            def close(self): pass
+        with mock.patch.object(worker, "get_conn", side_effect=[Conn(first), Conn(changed)]), \
+             mock.patch.object(worker.content_links, "check_document_links", return_value={"links": [], "blocking": [], "unverified": [], "coverage": {}}):
+            stale = worker.handle_content_link_check({"params": {"content_item_id": 22}})
+        self.assertEqual(stale["status"], "needs_input")
+        self.assertIn("changed", stale["error"])
+
+        broken = {"status": "available", "links": [], "blocking": [{"url": "https://example.test/missing"}], "unverified": [], "coverage": {}}
+        with mock.patch.object(worker, "get_conn", side_effect=[Conn(first), Conn(first)]), \
+             mock.patch.object(worker.content_links, "check_document_links", return_value=broken):
+            blocked = worker.handle_content_link_check({"params": {"content_item_id": 22}})
+        self.assertFalse(blocked["ok"])
+        self.assertIn("broken links", blocked["error"])
+
     def test_marketing_audit_creates_one_collecting_assessment_and_three_stages(self):
         class Cursor(FakeCursor):
             def fetchone(self):
@@ -567,6 +614,22 @@ class WorkerWorkflowTests(unittest.TestCase):
         self.assertEqual(len(capped), worker.CONTENT_MAX_OUTLINE_BLOCKS)
         self.assertEqual(original, 20)
         self.assertEqual(capped[-1]["brief"], "Section 17")
+
+    def test_outline_cap_removes_orphan_faq_heading_before_content(self):
+        blocks = [{"type": "prose", "brief": f"Section {i}"} for i in range(17)]
+        blocks.extend([
+            {"type": "heading", "brief": "Frequently asked questions"},
+            {"type": "faq", "brief": "Can I use a PDF?"},
+            {"type": "prose", "brief": "Closing guidance"},
+        ])
+        capped, original = worker._cap_outline_blocks(blocks)
+        self.assertEqual(original, 20)
+        self.assertEqual(len(capped), worker.CONTENT_MAX_OUTLINE_BLOCKS)
+        self.assertFalse(any(
+            b.get("type") == "heading" and "faq" in str(b.get("brief", "")).lower()
+            for b in capped
+        ))
+        self.assertEqual(capped[-1]["type"], "faq")
 
     def test_compose_block_keyword_contract_is_local(self):
         block = {"type": "prose", "brief": "Explain", "markdown": "Useful qualitative advice.",

@@ -225,9 +225,10 @@ def render_content_blocks(blocks, title="Untitled"):
             cols = b.get("columns") or []
             rows = b.get("rows") or []
             if rows:
-                hdr = "".join(f"<th>{esc(c)}</th>" for c in (cols or rows[0]))
-                body = "".join("<tr>" + "".join(f"<td>{esc(c)}</td>" for c in r) + "</tr>" for r in rows)
-                parts.append(f"<table><thead><tr>{hdr}</tr></thead><tbody>{body}</tbody></table>")
+                headers = cols or rows[0]
+                hdr = "".join(f"<th scope='col'>{esc(c)}</th>" for c in headers)
+                body = "".join("<tr>" + "".join(f"<td data-label='{esc(headers[j] if j < len(headers) else '')}'>{esc(c)}</td>" for j, c in enumerate(r)) + "</tr>" for r in rows)
+                parts.append(f"<table class='fact-table'><thead><tr>{hdr}</tr></thead><tbody>{body}</tbody></table>")
         elif t == "chart":
             parts.append(_render_chart(b))
         elif t == "callout":
@@ -237,7 +238,12 @@ def render_content_blocks(blocks, title="Untitled"):
             alt = b.get("alt", "")
             img_src = b.get("image_url") or b.get("url")
             if img_src:
-                parts.append(f"<figure><img src='{esc(img_src)}' alt='{esc(alt)}' loading='lazy'/><figcaption>{esc(alt)}</figcaption></figure>")
+                asset = b.get('asset') or {}
+                provenance = asset.get('provenance') or {}
+                credit = provenance.get('creator') or provenance.get('photographer') or ''
+                caption = b.get('caption') or alt
+                dimensions = f" width='{int(asset['width'])}' height='{int(asset['height'])}'" if asset.get('width') and asset.get('height') else ''
+                parts.append(f"<figure><img src='{esc(img_src)}' alt='{esc(alt)}' loading='lazy' decoding='async'{dimensions}/><figcaption>{esc(caption)}" + (f" <span class='image-credit'>Image: {esc(credit)}.</span>" if credit else '') + "</figcaption></figure>")
             else:
                 parts.append(f"<figure><div class='imgph'>{esc(alt)}</div><figcaption>{esc(alt)}</figcaption></figure>")
         elif t == "faq":
@@ -245,9 +251,17 @@ def render_content_blocks(blocks, title="Untitled"):
             a = b.get("answer", "")
             if q and a:
                 parts.append(f"<details class='faq'><summary>{esc(q)}</summary><div>{_md(a)}</div></details>")
+        block_sources = []
         for source in b.get("sources") or []:
             if isinstance(source, str) and source.startswith(("https://", "http://")) and source not in sources:
                 sources.append(source)
+            if isinstance(source, str) and source.startswith(("https://", "http://")) and source not in block_sources:
+                block_sources.append(source)
+        if block_sources:
+            from urllib.parse import urlsplit
+            parts.append("<p class='block-citations'>Source: " + ", ".join(
+                f"<a href='{esc(url)}' rel='noopener noreferrer' title='External source: {esc(urlsplit(url).hostname or '')}'>{esc(urlsplit(url).hostname or 'Source')} ↗</a>"
+                for url in block_sources) + "</p>")
     if sources:
         links = "".join(
             f"<li><a href='{esc(url)}' target='_blank' rel='noopener noreferrer'>{esc(url)}</a></li>"
@@ -288,6 +302,10 @@ def render_pipeline_css():
 .pipeline-article h1{font-size:2.2em;line-height:1.15;margin-bottom:8px}
 .pipeline-article .lead{font-size:1.15em;color:#374151;border-left:4px solid #3b82f6;padding-left:12px}
 .pipeline-article .prose p{margin:12px 0}
+.pipeline-article .block-citations{font-size:.82em;color:#52606d;margin:6px 0 18px;overflow-wrap:anywhere}
+.pipeline-article figure img{max-width:100%;height:auto}
+.pipeline-article .image-credit{display:block;font-size:.85em}
+@media(max-width:600px){.pipeline-article .fact-table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}.pipeline-article .fact-table,.pipeline-article .fact-table tbody,.pipeline-article .fact-table tr,.pipeline-article .fact-table td{display:block;width:auto}.pipeline-article .fact-table tr{border:1px solid #dce4e0;border-radius:8px;padding:8px;margin:10px 0}.pipeline-article .fact-table td{border:0;padding:6px 8px}.pipeline-article .fact-table td:before{content:attr(data-label);display:block;font-size:.8em;font-weight:700;color:#52606d}.pipeline-article .callout .stat{font-size:1.15em;line-height:1.45}}
 .pipeline-article h2{margin-top:28px;font-size:1.4em;border-bottom:2px solid #e5e7eb;padding-bottom:6px}
 .pipeline-article .takeaways{background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:14px 18px;margin:16px 0}
 .pipeline-article .takeaways h3{margin:0 0 8px;color:#1d4ed8}

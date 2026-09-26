@@ -2,6 +2,7 @@ import base64
 import json
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from ghost_publisher import GhostAdminClient, GhostPublishError, content_digest, publish, render_pipeline_html
@@ -128,6 +129,26 @@ class GhostPublisherTests(unittest.TestCase):
         self.assertNotIn("<p class='lead'>", html)
         self.assertIn('<strong>paragraph</strong>', html)
         self.assertIn('<p>Second paragraph.</p></div>', html)
+
+    def test_managed_asset_is_copied_without_mutating_approved_item(self):
+        value = item()
+        value["content_blocks"] = [{"type": "image_slot", "brief": "diagram", "alt": "Resume diagram", "prompt": "A diagram", "url": "https://assets.apps.deployden.tech/agency-content/editorial/a/a.png", "image_url": "https://assets.apps.deployden.tech/agency-content/editorial/a/a.png", "reviewed": True, "asset": {"sha256": "a" * 64, "object_key": "editorial/aa/" + "a" * 64 + ".png"}}]
+        approved = content_digest(value)
+        fake = FakeClient()
+        copied = {"url": "https://media.example/editorial/a.png", "object_key": "editorial/aa/" + "a" * 64 + ".png"}
+        with mock.patch("content_assets.read_core_asset", return_value=b"png"), mock.patch("content_assets.copy_to_engagement", return_value=copied) as copy_asset:
+            result = publish(value, {"endpoint": "http://localhost:2370", "base_url": "https://trueapply.in/blog", "asset_storage": {"endpoint": "http://storage", "access_key": "a", "secret_key": "b", "bucket": "public", "public_base": "https://media.example"}}, approved, client=fake)
+        self.assertEqual(result["digest"], approved)
+        self.assertEqual(value["content_blocks"][0]["url"], "https://assets.apps.deployden.tech/agency-content/editorial/a/a.png")
+        copy_asset.assert_called_once()
+
+    def test_unmanaged_image_is_rejected_before_ghost_write(self):
+        value = item()
+        value["content_blocks"] = [{"type": "image_slot", "brief": "diagram", "alt": "Resume diagram", "prompt": "A diagram", "url": "https://example.com/image.png", "image_url": "https://example.com/image.png", "reviewed": True}]
+        fake = FakeClient()
+        with self.assertRaisesRegex(GhostPublishError, "managed editorial asset"):
+            publish(value, {"endpoint": "http://localhost:2370", "base_url": "https://trueapply.in/blog"}, content_digest(value), client=fake)
+        self.assertEqual(fake.calls, [])
 
 
 if __name__ == "__main__":

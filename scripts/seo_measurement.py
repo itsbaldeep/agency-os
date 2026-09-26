@@ -7,6 +7,8 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 
+import public_fetch
+
 MAX_PAGES, MAX_BYTES, TIMEOUT, MIN_DELAY = 50, 1_000_000, 15, .2
 USER_AGENT = "AgencyOS SEO Measurement/1.0 (+https://deployden.tech)"
 SERVICE_ACCOUNT_FILE = "/home/agency/.config/agency/gsc-service-account.json"
@@ -93,11 +95,10 @@ def parse_robots(body, origin):
 
 def _fetch(url, max_bytes=MAX_BYTES, timeout=TIMEOUT, fetcher=None):
     if fetcher: return fetcher(url)
-    req=urllib.request.Request(url,headers={"User-Agent":USER_AGENT,"Accept":"text/html,application/xml,text/plain,*/*"})
-    with urllib.request.urlopen(req,timeout=timeout) as r:
-        data=r.read(max_bytes+1)
-        if len(data)>max_bytes: raise ValueError("response exceeds byte limit")
-        return getattr(r,"status",200),data,normalize_url(r.geturl(), url) or url, r.headers.get("Content-Type", "")
+    result = public_fetch.fetch(url, max_bytes=max_bytes, timeout=timeout)
+    if not result.get("ok"):
+        raise ValueError(result.get("error") or "public fetch failed")
+    return result.get("status", 200), result.get("body", b""), url, result.get("content_type", "")
 
 def _response(value, requested):
     if len(value) == 2:
@@ -153,7 +154,19 @@ def crawl(start,max_pages=MAX_PAGES,fetcher=None,sleep=time.sleep):
                 elif not same_origin(link,origin): excluded.append({"url":link,"reason":"external"})
         except Exception as exc: last=time.monotonic(); broken.append({"url":url,"source_url":referrers.get(url,origin),"status":None,"error":type(exc).__name__})
     page_status = "unavailable" if not pages else ("partial" if broken or unavailable else "available")
-    return {"status":page_status,"pages":pages,"broken_links":broken,"robots":{"status":"available" if robots_url not in unavailable else "unavailable"},"sitemap":{"status":sitemap_status,"members":sorted(sitemap_members),"unavailable":sorted(set(unavailable)-{robots_url})},"excluded":excluded,"bounded":{"max_pages":cap,"max_bytes":MAX_BYTES,"timeout":TIMEOUT,"min_delay":MIN_DELAY,"parser_version":PARSER_VERSION,"page_cap_reached":len(pages)>=cap and bool(queue),"queued_count":len(queue)}}
+    result = {"status":page_status,"pages":pages,"broken_links":broken,"robots":{"status":"available" if robots_url not in unavailable else "unavailable"},"sitemap":{"status":sitemap_status,"members":sorted(sitemap_members),"unavailable":sorted(set(unavailable)-{robots_url})},"excluded":excluded,"bounded":{"max_pages":cap,"max_bytes":MAX_BYTES,"timeout":TIMEOUT,"min_delay":MIN_DELAY,"parser_version":PARSER_VERSION,"page_cap_reached":len(pages)>=cap and bool(queue),"queued_count":len(queue)}}
+    # Keep the established crawl keys unchanged and append the independently
+    # bounded content-link inventory.  The injected fetcher is forwarded so
+    # deterministic callers do not unexpectedly access the network.
+    try:
+        from content_links import audit_links
+        result["link_audit"] = audit_links(origin, max_pages=cap, fetcher=fetcher,
+                                             external_fetcher=fetcher, sleep=sleep)
+    except Exception as exc:
+        result["link_audit"] = {"status": "unavailable", "page_inventory": [],
+                                 "internal_links": [], "external_links": [],
+                                 "coverage": {"error": type(exc).__name__}}
+    return result
 
 def evidence_id(rule,url,*_ignored): return "seo-"+hashlib.sha256(json.dumps([rule,normalize_url(url)],separators=(",",":"),sort_keys=True).encode()).hexdigest()[:24]
 def make_findings(crawl_result):
@@ -178,6 +191,10 @@ def make_findings(crawl_result):
             for u in urls: add("duplicate_description",u,value,"unique description")
     for broken in crawl_result.get("broken_links",[]):
         add("broken_internal_link",broken["url"],{"source_url":broken.get("source_url"),"status":broken.get("status"),"error":broken.get("error")},"2xx")
+    for broken in (crawl_result.get("link_audit") or {}).get("external_links", []):
+        if broken.get("state") == "broken":
+            add("broken_external_link", broken.get("url", ""),
+                {"source_url": broken.get("source_url"), "status": broken.get("status")}, "2xx")
     unavailable=crawl_result.get("sitemap",{}).get("unavailable",[])
     if crawl_result.get("sitemap",{}).get("status")!="available" and not unavailable: add("sitemap_missing",pages[0]["url"] if pages else "",crawl_result.get("sitemap",{}).get("status"),"available")
     for u in crawl_result.get("sitemap",{}).get("unavailable",[]): add("sitemap_unavailable",u,"unavailable","2xx XML sitemap")

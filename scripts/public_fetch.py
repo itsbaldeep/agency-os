@@ -224,11 +224,14 @@ def _request(target: _Target, timeout: float):
 
 
 def fetch(url: str, *, max_bytes: int = MAX_BYTES, timeout: float = MAX_TIMEOUT,
-          max_redirects: int = MAX_REDIRECTS) -> dict[str, Any]:
+          max_redirects: int = MAX_REDIRECTS, return_final_url: bool = False) -> dict[str, Any]:
     """Fetch bounded public response bytes without using environment proxies.
 
     Success: ``{"ok": True, "body": bytes, "status": int,
-    "content_type": str, "redirects": int}``.
+    "content_type": str, "redirects": int}``.  When ``return_final_url``
+    is true, the validated final URL is included.  The same opt-in includes
+    the HTTP status on non-2xx failures, preserving the historical failure
+    shape for existing callers.
     Failure: ``{"ok": False, "error": <stable category>}``.
     """
     try:
@@ -265,7 +268,10 @@ def fetch(url: str, *, max_bytes: int = MAX_BYTES, timeout: float = MAX_TIMEOUT,
             if status < 200 or status >= 300:
                 response.close()
                 connection.close()
-                return _safe_failure("http_status_" + str(status))
+                failure = _safe_failure("http_status_" + str(status))
+                if return_final_url:
+                    failure["status"] = status
+                return failure
             content_length = response.getheader("Content-Length")
             if content_length is not None:
                 try:
@@ -285,13 +291,16 @@ def fetch(url: str, *, max_bytes: int = MAX_BYTES, timeout: float = MAX_TIMEOUT,
                 return _safe_failure("read_failed")
             if len(body) > limit:
                 return _safe_failure("body_too_large")
-            return {
+            result = {
                 "ok": True,
                 "body": body,
                 "status": status,
                 "content_type": content_type,
                 "redirects": redirects,
             }
+            if return_final_url:
+                result["final_url"] = current
+            return result
         except (OSError, TypeError, ValueError, http.client.HTTPException):
             try:
                 response.close()
