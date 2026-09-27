@@ -33,7 +33,7 @@ class ContentQualityTests(unittest.TestCase):
         report = validate_content([
             {"type": "intro", "markdown": "A useful introduction."},
             {"type": "image_slot", "alt": "A clear process diagram", "prompt": "Process diagram",
-             "url": "https://assets.example.test/process.svg"},
+             "url": "https://assets.example.test/process.png", "reviewed": True, "asset": {"sha256": "a"*64, "provenance": {"kind": "owned"}}},
             {"type": "heading", "heading": "Frequently asked questions"},
             {"type": "faq", "brief": "Can I use a PDF?", "answer": "Check the employer's instructions."},
         ], "publish")
@@ -63,7 +63,7 @@ class ContentQualityTests(unittest.TestCase):
     def test_asset_prompt_metadata_does_not_trigger_visible_placeholder_check(self):
         report = validate_content([
             {"type": "image_slot", "alt": "A resume comparison", "prompt": "Placeholder brief for the asset team",
-             "url": "https://assets.example.test/comparison.svg"},
+             "url": "https://assets.example.test/comparison.png", "reviewed": True, "asset": {"sha256": "a"*64, "provenance": {"kind": "owned"}}},
         ], "publish")
         self.assertTrue(report["ok"])
 

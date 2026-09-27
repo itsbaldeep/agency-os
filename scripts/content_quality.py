@@ -89,6 +89,13 @@ def validate_content(blocks: Any, mode: str = "draft") -> dict[str, Any]:
             _add(findings, mode, "unknown_block_type", f"unknown block type: {block_type!r}", index)
             continue
         _validate_payload(findings, mode, index, block)
+        if re.search(r'!\[[^\]]*\]\(', _visible_text(block)):
+            _add(findings, mode, 'unmanaged_inline_image', 'Use a reviewed asset block instead of an inline Markdown image', index)
+        is_image = block_type == 'image_slot' or (block_type == 'editorial_visual' and block.get('kind') == 'image')
+        if mode == 'publish' and is_image:
+            asset = block.get('asset') or block.get('asset_metadata') or {}
+            if block.get('reviewed') is not True or not isinstance(asset, dict) or not asset.get('sha256') or not asset.get('provenance'):
+                _add(findings, mode, 'unreviewed_asset', 'Attach and review a managed asset with provenance before publication', index)
         if _PLACEHOLDER_RE.search(_visible_text(block)):
             _add(findings, mode, "placeholder_text", "reader-visible placeholder text remains", index)
 

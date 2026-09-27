@@ -145,6 +145,10 @@ def _document_links(blocks: Any, base_url: str) -> list[dict[str, str]]:
             found.append({"url": url, "kind": kind, "source": source})
 
     def walk(value: Any, path: str = "", parent_kind: str = "") -> None:
+        if isinstance(value, str):
+            for match in _MARKDOWN_HREF.findall(value):
+                add(match, 'markdown', path)
+            return
         if isinstance(value, list):
             for index, child in enumerate(value):
                 walk(child, f"{path}[{index}]", parent_kind)

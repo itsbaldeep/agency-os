@@ -191,7 +191,11 @@ def _normal_html(value: str) -> str:
         def handle_starttag(self, tag, attrs):
             self.parts.append(('start', tag, sorted(attrs)))
         def handle_endtag(self, tag):
-            self.parts.append(('end', tag))
+            # HTML void elements have no end tag. HTMLParser reports a
+            # synthetic end event for XHTML-style <img/>, while Ghost emits
+            # the equivalent <img>. All attributes still compare exactly.
+            if tag not in {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'}:
+                self.parts.append(('end', tag))
         def handle_data(self, data):
             text = re.sub(r'\s+', ' ', data).strip()
             if text:
@@ -205,6 +209,9 @@ def _normal_html(value: str) -> str:
 
 
 def _validate_item(item: dict) -> None:
+    raw = json.dumps(item.get('content_blocks') or [], ensure_ascii=False)
+    if re.search(r'<\s*(?:script|iframe|object|embed|form|input|button|meta|link|base)\b', raw, re.I):
+        raise GhostPublishError('content contains a blocked HTML element')
     structured = item.get("structured") or {}
     facts = structured.get("facts", []) if isinstance(structured, dict) else []
     from editorial_visuals import validate_visual
@@ -311,6 +318,7 @@ def publish(item: dict, destination: dict, approved_digest: str, publish: bool =
     content_id = item.get("id")
     if content_id is None:
         raise GhostPublishError("content item id is required")
+    _validate_item(item)
     item_for_publish = _prepare_managed_assets(item, destination)
     _validate_item(item_for_publish)
     from content_quality import publication_blockers
@@ -339,7 +347,8 @@ def publish(item: dict, destination: dict, approved_digest: str, publish: bool =
     else:
         draft = _post(client.request("POST", "/ghost/api/admin/posts/?source=html", {
             "posts": [{"title": title, "slug": slug, "html": html_body, "status": "draft",
-                       "tags": [{"name": marker, "visibility": "internal"}]}]}))
+                       "tags": [{"name": marker, "visibility": "internal"}] +
+                               ([{"name": "Help", "slug": "help"}] if (item_for_publish.get('structured') or {}).get('content_kind') == 'help' else [])}]}))
         if not draft:
             raise GhostPublishError("Ghost draft did not preserve the rendered HTML")
         post_id = draft.get("id")

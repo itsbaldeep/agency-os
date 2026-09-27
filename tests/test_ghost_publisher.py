@@ -8,6 +8,15 @@ from pathlib import Path
 from ghost_publisher import GhostAdminClient, GhostPublishError, content_digest, publish, render_pipeline_html
 
 
+class VoidHTMLTests(unittest.TestCase):
+    def test_void_image_serializations_match_but_changed_source_does_not(self):
+        from ghost_publisher import _normal_html
+        self.assertEqual(_normal_html('<img src="https://example.com/a.png"/>'),
+                         _normal_html('<img src="https://example.com/a.png">'))
+        self.assertNotEqual(_normal_html('<img src="https://example.com/a.png"/>'),
+                            _normal_html('<img src="https://example.com/b.png">'))
+
+
 class FakeClient:
     def __init__(self, existing=None):
         self.calls = []
@@ -136,6 +145,8 @@ class GhostPublisherTests(unittest.TestCase):
         approved = content_digest(value)
         fake = FakeClient()
         copied = {"url": "https://media.example/editorial/a.png", "object_key": "editorial/aa/" + "a" * 64 + ".png"}
+        value['content_blocks'][0]['asset']['provenance'] = {'kind': 'owned', 'creator': 'Test fixture'}
+        approved = content_digest(value)
         with mock.patch("content_assets.read_core_asset", return_value=b"png"), mock.patch("content_assets.copy_to_engagement", return_value=copied) as copy_asset:
             result = publish(value, {"endpoint": "http://localhost:2370", "base_url": "https://trueapply.in/blog", "asset_storage": {"endpoint": "http://storage", "access_key": "a", "secret_key": "b", "bucket": "public", "public_base": "https://media.example"}}, approved, client=fake)
         self.assertEqual(result["digest"], approved)

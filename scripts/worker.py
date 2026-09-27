@@ -4040,7 +4040,10 @@ def _content_assemble_plain(filled):
             if b.get("answer"):
                 parts.append(f"**{b.get('brief','Q')}**\n{b['answer']}")
         elif t == "image_slot" and b.get("alt"):
-            parts.append(f"_[Image planned: {b['alt']}]_")
+            image_url = b.get('image_url') or b.get('url')
+            parts.append(f"![{b['alt']}]({image_url})" if image_url else f"_[Image planned: {b['alt']}]_")
+            if b.get('caption'):
+                parts.append(b['caption'])
         for url in b.get("sources") or []:
             if url and url not in sources:
                 sources.append(url)

@@ -275,7 +275,29 @@ def render_content_blocks(blocks, title="Untitled"):
 def _md(s):
     try:
         import markdown
-        return markdown.markdown(s or "")
+        # Raw model/editor HTML is text, never executable markup in previews.
+        rendered = markdown.markdown(_html.escape(str(s or ''), quote=False))
+        from html.parser import HTMLParser
+        class SafeLinks(HTMLParser):
+            def __init__(self):
+                super().__init__(convert_charrefs=False)
+                self.parts = []
+            def handle_starttag(self, tag, attrs):
+                safe = []
+                for key, value in attrs:
+                    if key == 'href' and not str(value or '').startswith(('https://', 'http://', '#')):
+                        continue
+                    if key.lower().startswith('on'):
+                        continue
+                    safe.append(f' {key}="{esc(value or "")}"')
+                self.parts.append('<' + tag + ''.join(safe) + '>')
+            def handle_endtag(self, tag): self.parts.append('</' + tag + '>')
+            def handle_data(self, data): self.parts.append(data)
+            def handle_entityref(self, name): self.parts.append('&' + name + ';')
+            def handle_charref(self, name): self.parts.append('&#' + name + ';')
+        parser = SafeLinks()
+        parser.feed(rendered)
+        return ''.join(parser.parts)
     except Exception:
         return f"<p>{esc(s)}</p>"
 
