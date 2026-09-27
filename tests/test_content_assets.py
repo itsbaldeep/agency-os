@@ -65,6 +65,18 @@ class AssetTests(unittest.TestCase):
         self.assertEqual(result["sha256"], "x")
         self.assertEqual(store.call_args.args[0][0:8], PNG[0:8])
 
+    def test_import_prefers_bounded_editorial_size(self):
+        resized = 'https://images.pexels.com/sized.jpg'
+        photo = {'id': 7, 'url': 'https://www.pexels.com/photo/7/',
+                 'src': {'original': 'https://images.pexels.com/original.jpg', 'large2x': resized}}
+        with mock.patch.dict(os.environ, {'PEXELS_API_KEY': 'test'}), \
+             mock.patch.object(assets, '_request', side_effect=[
+                 (200, json.dumps(photo).encode(), '', 'application/json'),
+                 (200, PNG, resized, 'image/png')]) as fetch, \
+             mock.patch.object(assets, 'store_asset', return_value={'sha256': 'x'}):
+            assets.import_stock('7')
+        self.assertEqual(fetch.call_args_list[1].args[0], resized)
+
 
 if __name__ == "__main__":
     unittest.main()

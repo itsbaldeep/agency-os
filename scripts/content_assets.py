@@ -212,7 +212,7 @@ def search_assets(query: str) -> list[dict[str, Any]]:
         thumb = src.get("medium") or src.get("small")
         if not thumb:
             continue
-        records.append({"provider": "pexels", "provider_id": str(photo.get("id")), "thumbnail_url": _safe_url(thumb, _PEXELS_IMAGE_HOSTS), "photographer": photo.get("photographer") or "", "source_url": _safe_url(photo.get("url"), _PEXELS_HOSTS), "license_url": "https://www.pexels.com/license/", "alt": photo.get("alt") or query})
+        records.append({"provider": "pexels", "provider_id": str(photo.get("id")), "thumbnail_url": _safe_url(thumb, _PEXELS_IMAGE_HOSTS), "photographer": photo.get("photographer") or "", "source_url": _safe_url(photo.get("url"), _PEXELS_HOSTS), "license_url": "https://www.pexels.com/license/", "alt": photo.get("alt") or ""})
     return records
 
 
@@ -227,7 +227,9 @@ def import_stock(provider_id: str, description: str = "") -> dict[str, Any]:
         raise ValueError("provider asset was not found")
     photo = json.loads(body)
     src = photo.get("src") or {}
-    original = _safe_url(src.get("original") or src.get("large2x") or "", _PEXELS_IMAGE_HOSTS)
+    # Provider-sized editorial images avoid downloading camera originals that
+    # exceed our decode limits while retaining enough pixels for article use.
+    original = _safe_url(src.get("large2x") or src.get("original") or "", _PEXELS_IMAGE_HOSTS)
     status, data, final_url, content_type = _request(original, max_bytes=MAX_BYTES, allowed_hosts=_PEXELS_IMAGE_HOSTS)
     if status >= 400 or not data:
         raise ValueError("provider asset download failed")

@@ -11,6 +11,13 @@ execution log second.
 
 ### Editorial production workflow, 2026-09-27
 
+- Image selection now has a bounded post-compose task and dashboard refresh:
+  derive searches, reuse project assets, fetch stock candidates, prefill review
+  metadata and embed a suitable unreviewed draft default. Existing images are
+  preserved. A one-click selection confirms the displayed metadata; publication
+  still needs its own approval. Matching uses descriptions, not visual AI.
+  Diagram briefs without suitable custom artwork remain visibly unresolved.
+  Discovery is limited to four slots, two searches per slot and five candidates.
 - Dashboard draft previews now have a project-scoped asset library, Pexels search,
   raster uploads, editable alt suggestions, provenance, review and tracked attachment.
   Uploads require confirmation that the image is safe for public storage. Private

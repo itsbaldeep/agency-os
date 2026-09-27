@@ -276,6 +276,13 @@ internal and external links across landing, help and blog surfaces. Draft 22 is
 authorized for regeneration and review, not publication. Help drafts retain the
 existing individual publication approval policy.
 
+On 2026-09-27 the owner requested automatic image search suggestions, prefetched
+candidates, prefilled metadata and a suitable default embedded in each draft,
+with a simple replacement picker. This authorizes bounded draft asset imports,
+not publication. Preserve existing selected media. Suggested descriptions and
+metadata matching are not visual verification. Never substitute unrelated stock
+photography for a requested explanatory diagram or fabricate image rights.
+
 ## 8. Retired and parked estate (verified 2026-08-22)
 
 | What | Action | Reversible via |

@@ -12,6 +12,7 @@ import marketing_assessments
 import marketing_report
 import content_quality
 import content_links
+import content_asset_workflow
 
 ENV_PATH = os.environ.get("AGENCY_ENV_FILE", "/home/agency/.config/agency/core.env")
 
@@ -4103,7 +4104,7 @@ def handle_content_compose(task):
     conn = get_conn()
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("SELECT id, brand_id, structured, content_blocks FROM content_items WHERE id=%s AND status='outline'", (ci_id,))
+        cur.execute("SELECT id, brand_id, title, body, status, structured, content_blocks FROM content_items WHERE id=%s AND status='outline'", (ci_id,))
         row = cur.fetchone()
     finally:
         conn.close()
@@ -4312,6 +4313,13 @@ def handle_content_compose(task):
             "UPDATE content_items SET content_blocks=%s, body=%s, structured=%s, status='draft', updated_at=now() "
             "WHERE id=%s",
             (json.dumps(filled), body, json.dumps(structured_with_quality), ci_id))
+        if any(isinstance(block, dict) and block.get("type") == "image_slot" and not (block.get("url") or block.get("image_url")) for block in filled):
+            expected = content_asset_workflow.fingerprint({"title": row.get("title") if isinstance(row, dict) else "", "body": body, "content_blocks": filled, "structured": structured_with_quality, "status": "draft"})
+            cur.execute(
+                "INSERT INTO tasks (type,status,params,triggered_by,parent_task_id) "
+                "SELECT 'content_asset_suggestions','queued',%s,'content-compose',%s "
+                "WHERE NOT EXISTS (SELECT 1 FROM tasks WHERE type='content_asset_suggestions' AND status IN ('queued','running') AND params->>'content_item_id'=%s AND params->>'expected_fingerprint'=%s)",
+                (json.dumps({"content_item_id": ci_id, "expected_fingerprint": expected}), task["id"], str(ci_id), expected))
         conn.commit()
     finally:
         conn.close()
@@ -5282,6 +5290,7 @@ DISPATCH = {
     "content_research": handle_content_research,
     "content_outline": handle_content_outline,
     "content_compose": handle_content_compose,
+    "content_asset_suggestions": lambda task: content_asset_workflow.handle(task, get_conn),
     "content_link_check": handle_content_link_check,
     "generate_draft": handle_generate_draft,
     "propose_fix": handle_propose_fix,
