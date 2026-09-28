@@ -43,7 +43,9 @@ def content_digest(item: dict) -> str:
 
 def _slug(value: str) -> str:
     value = re.sub(r"[^a-z0-9]+", "-", (value or "").lower()).strip("-")
-    return value[:70].strip("-")
+    if len(value) <= 70:
+        return value
+    return value[:70].rsplit("-", 1)[0]
 
 
 def _endpoint(destination: dict) -> str:
@@ -325,8 +327,10 @@ def publish(item: dict, destination: dict, approved_digest: str, publish: bool =
     blockers = publication_blockers(item_for_publish.get("content_blocks") or [])
     if blockers:
         raise GhostPublishError("content quality blockers remain before publication")
-    slug = "content-" + str(content_id)
     title = item_for_publish.get("title") or "Untitled"
+    slug = _slug(title)
+    if not slug:
+        raise GhostPublishError("A title with letters or numbers is required for the public URL")
     marker = "#agency-content-%s-%s" % (content_id, digest[:16])
     html_body = render_pipeline_html(item_for_publish)
     if "visual unavailable" in html_body.lower():

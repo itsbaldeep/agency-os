@@ -60,10 +60,21 @@ class GhostPublisherTests(unittest.TestCase):
         self.assertEqual(result["status"], "published")
         self.assertEqual([call[0] for call in fake.calls], ["GET", "POST", "GET", "PUT", "GET"])
         self.assertEqual(fake.calls[1][2]["posts"][0]["status"], "draft")
+        self.assertEqual(fake.calls[1][2]["posts"][0]["slug"], "a-useful-article")
+        self.assertEqual(result["url"], "https://trueapply.in/blog/a-useful-article/")
         html = fake.calls[1][2]["posts"][0]["html"]
         self.assertIn("agency-content-card", html)
         self.assertIn("pipeline-article", html)
         self.assertIn("Keep the evidence visible", html)
+
+    def test_long_title_slug_ends_at_word_boundary(self):
+        value = item()
+        value["title"] = "Resume bullet points without metrics: show scope without inventing numbers"
+        fake = FakeClient()
+        publish(value, {"endpoint": "http://localhost:2370", "base_url": "https://trueapply.in/blog"},
+                content_digest(value), client=fake)
+        self.assertEqual(fake.calls[1][2]["posts"][0]["slug"],
+                         "resume-bullet-points-without-metrics-show-scope-without-inventing")
 
     def test_prepare_mode_never_puts(self):
         fake = FakeClient()
