@@ -3091,10 +3091,30 @@ def _seo_run_id(task_id, brand_id, url):
     return "seo-" + hashlib.sha256((str(task_id or "") + "|" + str(brand_id) + "|" + str(url)).encode()).hexdigest()[:24]
 
 
+def _seo_followups(params):
+    """Resolve one explicit post-measurement contract or the default refresh pair."""
+    followup = params.get("followup") if isinstance(params, dict) else None
+    top_flags = {key: params[key] for key in ("queue_research", "operator_authorized", "requires_review", "owner_feedback") if key in params}
+    if isinstance(followup, str):
+        followup = {"type": followup, **top_flags}
+    elif isinstance(followup, dict):
+        followup = {**top_flags, **followup}
+    if not isinstance(followup, dict) or not followup.get("type"):
+        return [("seo_cleanup", {}), ("growth_plan", {})]
+    allowed = {"growth_generate", "growth_plan", "seo_cleanup"}
+    if followup.get("type") not in allowed:
+        raise ValueError("unsupported SEO follow-up type")
+    return [(followup["type"], {key: followup[key] for key in ("queue_research", "operator_authorized", "requires_review", "owner_feedback") if key in followup})]
+
+
 def handle_seo_measurement(task):
     """Read-only bounded crawl and external measurement, with immutable evidence."""
     p = task.get("params") or {}; brand_id = p.get("brand_id")
     if not brand_id: return {"ok": False, "error": "seo_measurement: brand_id is required"}
+    try:
+        _seo_followups(p)
+    except ValueError as exc:
+        return {"ok": False, "error": "seo_measurement: " + str(exc)}
     conn = get_conn()
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -3168,15 +3188,20 @@ def handle_seo_measurement(task):
             if not cur.fetchone(): cur.execute("INSERT INTO suggestions (brand_id,audit_id,title,rationale,sources,action_type,status) VALUES (%s,%s,%s,%s,%s,'propose_fix','pending')",(brand_id,audit_id,titles.get(f["rule"],"Review deterministic SEO defect"),f["rule"]+" observed at "+f["url"]+"; observed "+str(f["observed"])+", expected "+str(f["expected"])+".",json.dumps([f])))
         # Refresh the bounded review queues once per immutable audit.  These
         # handlers create proposals only and perform no live cleanup or publish.
-        followup_params = json.dumps({"brand_id": brand_id, "audit_id": audit_id,
-                                      "revision": run_id, "owned_origin": url,
-                                      "owner_feedback": str(brand.get("name") or "").lower() == "trueapply"})
-        for followup_type in ("seo_cleanup", "growth_plan"):
+        try:
+            followups = _seo_followups(p)
+        except ValueError as exc:
+            return {"ok": False, "error": "seo_measurement: " + str(exc)}
+        for followup_type, followup_extra in followups:
+            queued_params = {"brand_id": brand_id, "audit_id": audit_id,
+                             "revision": run_id, "owned_origin": url,
+                             "owner_feedback": str(brand.get("name") or "").lower() == "trueapply"}
+            queued_params.update(followup_extra)
             cur.execute("""INSERT INTO tasks (type,status,params,triggered_by,parent_task_id)
                 SELECT %s,'queued',%s,'seo_measurement',%s
                 WHERE NOT EXISTS (SELECT 1 FROM tasks WHERE type=%s
                                   AND params->>'audit_id'=%s AND status IN ('queued','running','done'))""",
-                        (followup_type, followup_params, task.get("id"), followup_type, str(audit_id)))
+                        (followup_type, json.dumps(queued_params), task.get("id"), followup_type, str(audit_id)))
         conn.commit(); result={"audit_id":audit_id,"run_id":run_id,"source_statuses":statuses,"counts":counts,"comparison":comparison}
         return {"ok":True,"content":json.dumps(result,separators=(",",":")),"prompt_tokens":0,"completion_tokens":0,"cost":0,"model":"deterministic"}
     finally: conn.close()
@@ -3421,6 +3446,8 @@ def handle_growth_plan(task):
         cur.execute("SELECT domain FROM competitors WHERE brand_id=%s ORDER BY last_scanned_at DESC NULLS LAST,id LIMIT 5", (brand_id,))
         raw["competitor_urls"] = ["https://" + row["domain"].strip() + "/" for row in cur.fetchall() if row.get("domain")]
         queue = growth_planner.recommend(raw, existing, owner_feedback=params.get("owner_feedback") is True)
+        if params.get("queue_research") is True and (params.get("operator_authorized") is not True or params.get("requires_review") is not True):
+            return {"ok": False, "error": "growth_plan: operator_authorized and requires_review are required to queue research"}
         cur.execute("SELECT id,title,status FROM growth_recommendations WHERE brand_id=%s AND status='suggested' FOR UPDATE", (brand_id,))
         old_machine = {row["id"]: row for row in cur.fetchall()}
         current_machine_titles = {str(item.get("title") or "").strip().lower() for kind in ("articles", "help") for item in queue.get(kind, [])}
@@ -3444,13 +3471,18 @@ def handle_growth_plan(task):
         research_queued = []
         research_needs_input = []
         if params.get("queue_research") is True:
-            cur.execute("SELECT id,title,target_keyword,evidence,status FROM growth_recommendations WHERE brand_id=%s AND status='accepted' ORDER BY updated_at DESC,id DESC LIMIT 3", (brand_id,))
+            if params.get("operator_authorized") is True:
+                cur.execute("SELECT id,title,target_keyword,kind,evidence,status FROM growth_recommendations WHERE brand_id=%s AND status IN ('accepted','suggested') AND audit_id=%s ORDER BY status='accepted' DESC,rank,id LIMIT 3", (brand_id, audit_id))
+            else:
+                cur.execute("SELECT id,title,target_keyword,kind,evidence,status FROM growth_recommendations WHERE brand_id=%s AND status='accepted' ORDER BY updated_at DESC,id DESC LIMIT 3", (brand_id,))
             for rec in cur.fetchall():
                 evidence = rec.get("evidence") if isinstance(rec.get("evidence"), dict) else {}
                 competitor_urls = evidence.get("competitor_urls") or raw.get("competitor_urls") or []
                 if not rec.get("target_keyword") or not competitor_urls:
                     research_needs_input.append({"recommendation_id": rec["id"], "reason": "current competitor evidence is unavailable"})
                     continue
+                if params.get("operator_authorized") is True and rec.get("status") == "suggested":
+                    cur.execute("UPDATE growth_recommendations SET status='accepted',rationale=rationale || %s,updated_at=now() WHERE id=%s AND status='suggested'", (" Operator authorized research generation.", rec["id"]))
                 params_json = json.dumps({"brand_id": brand_id, "target_keyword": rec["target_keyword"], "competitor_urls": competitor_urls[:5], "title": rec["title"], "content_kind": rec.get("kind") or "article", "recommendation_id": rec["id"], "audit_id": audit_id})
                 cur.execute("""INSERT INTO tasks (type,status,params,triggered_by,parent_task_id)
                     SELECT 'content_research','queued',%s,'growth_plan',%s

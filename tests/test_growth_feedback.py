@@ -112,6 +112,12 @@ class GrowthPlannerTests(unittest.TestCase):
         self.assertEqual(result["articles"][0]["target_keyword"], "resume tailoring")
         self.assertEqual(result["articles"][0]["evidence"]["audit_id"], 2)
 
+    def test_zero_gsc_owner_goal_fills_open_article_slot_with_honest_evidence(self):
+        result = growth_planner.recommend({"audit_id": 9, "sources": {"crawl": {"pages": [{"url": "https://trueapply.in/", "fields": {"title": "TrueApply"}}]}}, "competitor_urls": ["https://example.test"]}, [{"kind": "article", "title": "Existing outline", "status": "outline"}], owner_feedback=True, max_articles=2)
+        self.assertEqual(len(result["articles"]), 2)
+        self.assertEqual(result["articles"][1]["evidence_status"], "owner_goal_hypothesis")
+        self.assertIn("unverified", result["articles"][1]["rationale"])
+
 
 if __name__ == "__main__":
     unittest.main()

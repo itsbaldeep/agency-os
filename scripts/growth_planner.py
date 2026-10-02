@@ -20,6 +20,27 @@ def _candidate(query, rank, audit_id=None):
             "evidence": {"source": "gsc_query", "query": query, "audit_id": audit_id}, "evidence_status": "verified_query",
             "rationale": "Current GSC query evidence supports this topic; volume and conversion demand remain unverified.", "status": "suggested"}
 
+def _goal_candidates(audit, seen, competitors, audit_id):
+    """Suggest bounded owner-goal coverage when query demand is unavailable."""
+    pages = (((audit.get("sources") or {}).get("crawl") or {}).get("pages") or [])
+    if not pages:
+        return []
+    inventory = " ".join(str((page.get("url") or "") + " " + str((page.get("fields") or {}).get("title") or "")).lower() for page in pages if isinstance(page, dict))
+    goals = (
+        ("How to tailor a resume for a chosen role without inventing experience", "resume tailoring chosen role", "experienced professionals need a truthful role-specific tailoring path"),
+        ("How to review an evidence match before creating a tailored kit", "review resume evidence match", "users need to understand the evidence before generating a kit"),
+        ("Career change resume tailoring: review your transferable experience", "career change resume tailoring", "career changers need a grounded way to frame transferable experience"),
+    )
+    out = []
+    for title, keyword, hypothesis in goals:
+        key = _title_key(title)
+        if key in seen or any(token in inventory for token in ("chosen role", "evidence match", "career change" ) if token in title.lower()):
+            continue
+        out.append({"kind": "article", "title": title, "target_keyword": keyword, "rank": len(out) + 1,
+                    "competitor_urls": [str(url) for url in competitors[:5]], "evidence": {"source": "owner_goal_coverage", "audit_id": audit_id, "owned_page_count": len(pages)},
+                    "evidence_status": "owner_goal_hypothesis", "rationale": hypothesis + "; search demand and conversion intent are unverified.", "status": "suggested"})
+    return out
+
 def _title_key(value):
     return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
 
@@ -56,6 +77,11 @@ def recommend(audit, existing=None, *, max_articles=MAX_ARTICLES, max_help=MAX_H
         candidate = _candidate(query, len(articles) + 1, audit.get("audit_id"))
         candidate["competitor_urls"] = [str(url) for url in competitors[:5]]
         if ("article", _title_key(candidate["title"])) not in seen:
+            articles.append(candidate); seen.add(("article", _title_key(candidate["title"])))
+    if owner_feedback and len(articles) < max_articles:
+        for candidate in _goal_candidates(audit, seen, competitors, audit.get("audit_id")):
+            if len(articles) >= max_articles:
+                break
             articles.append(candidate); seen.add(("article", _title_key(candidate["title"])))
     if owner_feedback:
         for title in OWNER_HELP:
