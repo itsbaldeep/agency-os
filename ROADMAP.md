@@ -294,8 +294,11 @@ fresh bounded article recommendations and a separate help lane. Dashboard contro
 expose fresh measurement, scheduling, research and aggregate acquisition/activation.
 Marketing publication and advertising spend remain individually gated.
 
-Source is isolated on `feat/trueapply-growth-loop`. Migrations 018 and 019 are
-additive. Tests include real PostgreSQL workflow fixtures and dashboard routes
-against a schema-only copy of production. No production deployment is recorded by
-this roadmap entry. The coordinated candidate and remaining launch decisions live
+PRs 81/82 and dashboard PRs 19/20 passed CI and were deliberately deployed on
+2026-10-02. Migrations 018 and 019 are additive. Tests include real PostgreSQL
+workflow fixtures and dashboard routes against a schema-only copy of production.
+Runtime core is `8c3f02a`; dashboard is `ce01d00`. Backup component verification
+passed, and worker restarts captured zero running tasks. TrueApply product remains
+an isolated release candidate, not a launched v1.0.0. The coordinated candidate
+and remaining launch decisions live
 at `/home/agency/worktrees/trueapply-v1.0.0/docs/deployments/v1.0.0-candidate.md`.
