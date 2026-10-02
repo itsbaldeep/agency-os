@@ -294,11 +294,19 @@ fresh bounded article recommendations and a separate help lane. Dashboard contro
 expose fresh measurement, scheduling, research and aggregate acquisition/activation.
 Marketing publication and advertising spend remain individually gated.
 
-PRs 81/82 and dashboard PRs 19/20 passed CI and were deliberately deployed on
+PRs 81/82 and dashboard PRs 19/20/21/22 passed CI and were deliberately deployed on
 2026-10-02. Migrations 018 and 019 are additive. Tests include real PostgreSQL
 workflow fixtures and dashboard routes against a schema-only copy of production.
-Runtime core is `8c3f02a`; dashboard is `ce01d00`. Backup component verification
+Runtime core is `8c3f02a`; dashboard is `a7ba361`. Backup component verification
 passed, and worker restarts captured zero running tasks. TrueApply product remains
 an isolated release candidate, not a launched v1.0.0. The coordinated candidate
 and remaining launch decisions live
 at `/home/agency/worktrees/trueapply-v1.0.0/docs/deployments/v1.0.0-candidate.md`.
+
+The final isolated corpus evaluation completed 28 parses, 25 verified tailored
+journeys and 100 passing render checks. Five-field recovery was 122/140 (87.1%),
+with four parser fallbacks. Only 19/25 whole journeys finished under 60 seconds;
+all measured loading states stayed below 60 seconds. These results do not close
+the original broad quality exits or unfamiliar-user acceptance. Existing content
+planning dates are October 5/8/12 for articles and October 6/9/13 for help drafts.
+Live queue counts are three per lane; dates never authorize publication.
