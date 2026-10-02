@@ -54,11 +54,11 @@ def configure(token, *, apply=False, request=api, snapshot=None):
         snapshot(before)
     if not apply:
         return {"mode": "inspect", "automatic_measurement_enabled":
-                before["settings"].get("streamEnabled"), "key_events":
+                before["settings"].get("streamEnabled", False), "key_events":
                 [item.get("eventName") for item in before["key_events"].get("keyEvents", [])]}
     if not snapshot:
         raise ValueError("a pre-change snapshot is required")
-    if before["settings"].get("streamEnabled") is not False:
+    if before["settings"].get("streamEnabled", False) is not False:
         request(token, settings_path + "?updateMask=stream_enabled", "PATCH",
                 {"streamEnabled": False})
     existing = {item.get("eventName") for item in before["key_events"].get("keyEvents", [])}
@@ -69,7 +69,7 @@ def configure(token, *, apply=False, request=api, snapshot=None):
     after = request(token, settings_path)
     current_events = request(token, events_path + "?pageSize=200")
     current_names = {item.get("eventName") for item in current_events.get("keyEvents", [])}
-    if after.get("streamEnabled") is not False or not set(EVENTS) <= current_names:
+    if after.get("streamEnabled", False) is not False or not set(EVENTS) <= current_names:
         raise ValueError("GA4 configuration read-back did not verify")
     return {"mode": "apply", "configuration_verified": True,
             "automatic_measurement_enabled": False, "key_events": list(EVENTS),

@@ -43,3 +43,11 @@ class ConfigureTests(unittest.TestCase):
     def test_other_property_rejected_before_network(self):
         with self.assertRaises(ValueError):
             ga.api("private", "v1beta/properties/999/keyEvents")
+
+    def test_proto_json_omits_disabled_boolean(self):
+        def request(token, path, method="GET", payload=None):
+            self.assertEqual(method, "GET")
+            return {"name": ga.STREAM + "/enhancedMeasurementSettings"} if "Settings" in path else {"keyEvents": [{"eventName": name} for name in ga.EVENTS]}
+        result = ga.configure("private", apply=True, request=request, snapshot=lambda value: None)
+        self.assertTrue(result["configuration_verified"])
+        self.assertFalse(result["automatic_measurement_enabled"])
