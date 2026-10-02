@@ -284,3 +284,18 @@ No untracked revival of the retired jobs stack, Agency-core billing/RBAC expansi
 Grafana, autonomous self-fixing, mass campaign execution, or project revival merely
 to expand the surface area. TrueApply follows its separately authorized PRD and
 engine-first gates.
+
+## TrueApply v1 marketing feedback loop, authorized 2026-10-02
+
+The owner accepted the product journey review and authorized proceeding toward a
+production ready v1.0.0. Core implementation adds tracked SEO repair proposals,
+revision-bound approval/apply/public verification, receipt-backed Discord summaries,
+fresh bounded article recommendations and a separate help lane. Dashboard controls
+expose fresh measurement, scheduling, research and aggregate acquisition/activation.
+Marketing publication and advertising spend remain individually gated.
+
+Source is isolated on `feat/trueapply-growth-loop`. Migrations 018 and 019 are
+additive. Tests include real PostgreSQL workflow fixtures and dashboard routes
+against a schema-only copy of production. No production deployment is recorded by
+this roadmap entry. The coordinated candidate and remaining launch decisions live
+at `/home/agency/worktrees/trueapply-v1.0.0/docs/deployments/v1.0.0-candidate.md`.

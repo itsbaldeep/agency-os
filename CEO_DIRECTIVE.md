@@ -293,3 +293,13 @@ photography for a requested explanatory diagram or fabricate image rights.
 | Hearth | Source/data/context preserved; containers and public routes stopped | Use its recovery refs/manifests for an explicit unpark |
 | Streamwise | Source/data/context preserved; no live containers or DNS route | Use its recovery refs/manifests for an explicit unpark |
 | Other legacy projects/docs | Recovery snapshot retained; live ledger/source clutter removed | Review the archived bundle, never silently re-import it |
+
+### TrueApply launch implementation, accepted 2026-10-02
+
+The owner accepted integrated progress on existing pages, a resume-for-role
+proposition, replayable illustration and contextual help, then authorized continued
+implementation toward a production ready v1.0.0. This includes the dashboard SEO,
+content planning and acquisition-to-activation feedback loop. Release-specific
+verification and explicit unresolved business decisions remain visible. Exact
+marketing publications, paid spend and future email/SMS/WhatsApp sends retain their
+existing approval gates. Removing beta wording alone is not launch acceptance.

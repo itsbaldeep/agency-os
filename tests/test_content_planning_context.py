@@ -114,7 +114,9 @@ class PlanningContextTests(unittest.TestCase):
             }})
 
         self.assertTrue(result["ok"])
-        structured = json.loads(persist_conn.cursor_value.calls[0][1][3])
+        params = persist_conn.cursor_value.calls[0][1]
+        self.assertEqual(params[3], "article")
+        structured = json.loads(params[4])
         self.assertEqual(structured["calendar_id"], 12)
         self.assertEqual(structured["planned_title"], "Job Search Checklist for Career Changers")
         self.assertEqual(structured["planning_context"], planning)
