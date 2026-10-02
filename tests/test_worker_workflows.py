@@ -39,6 +39,18 @@ class FakeConnection:
 
 
 class WorkerWorkflowTests(unittest.TestCase):
+    def test_seo_followup_preserves_explicit_generate_contract(self):
+        followups = worker._seo_followups({"followup": {"type": "growth_generate", "queue_research": True, "operator_authorized": True, "requires_review": True}})
+        self.assertEqual(followups, [("growth_generate", {"queue_research": True, "operator_authorized": True, "requires_review": True})])
+
+    def test_dashboard_string_followup_merges_top_level_contract_flags(self):
+        followups = worker._seo_followups({"followup": "growth_generate", "queue_research": True, "operator_authorized": True, "requires_review": True})
+        self.assertEqual(followups, [("growth_generate", {"queue_research": True, "operator_authorized": True, "requires_review": True})])
+
+    def test_seo_followup_rejects_unknown_operation(self):
+        with self.assertRaises(ValueError):
+            worker._seo_followups({"followup": "publish"})
+
 
     def test_completed_collector_state_is_available_in_marketing_report(self):
         self.assertEqual(worker._marketing_source_state("done"), "available")

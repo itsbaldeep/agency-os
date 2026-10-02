@@ -1,6 +1,7 @@
 import json
 import sys
 import unittest
+import tempfile
 from pathlib import Path
 from unittest import mock
 
@@ -9,6 +10,28 @@ import seo_measurement as seo
 
 
 class SeoMeasurementTests(unittest.TestCase):
+    def test_activation_fetch_allows_localhost_and_passes_bearer_without_returning_it(self):
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir="/home/agency/engagements/trueapply") as handle:
+            handle.write("TRUEAPPLY_MARKETING_READ_TOKEN=secret-token\n")
+            handle.flush()
+            seen = {}
+            def fetcher(url, token):
+                seen.update(url=url, token=token)
+                return {"totals": {k: 0 for k in ("signups", "resume_processed", "profile_confirmed", "job_selected", "kit_completed", "download_served")}}
+            result = seo.fetch_activation("http://127.0.0.1:3100", handle.name, fetcher=fetcher)
+        self.assertEqual(result["status"], "available")
+        self.assertEqual(seen["token"], "secret-token")
+        self.assertEqual(seo.fetch_activation("https://trueapply.in", handle.name)["status"], "source_unavailable")
+    def test_activation_aggregate_is_bounded_and_secret_free(self):
+        result = seo.normalize_activation({
+            "schema_version": 1, "window": {"days": 28, "start": "2026-09-01", "end": "2026-09-28"},
+            "totals": {"signups": 2, "resume_processed": 1, "profile_confirmed": 1, "job_selected": 1, "kit_completed": 1, "download_served": 1},
+            "cohorts": [{"source": "blog", "medium": "organic", "campaign": "", "landing_path": "/blog/x", "signups": 1, "kit_completed": 1, "user_id": "secret"}],
+            "coverage": {"consented_signups": 2, "unattributed_signups": 0}, "health": {"last_event_at": "2026-09-28T00:00:00Z", "status": "healthy"},
+        })
+        self.assertEqual(result["status"], "available")
+        self.assertNotIn("user_id", result["cohorts"][0])
+        self.assertEqual(seo.normalize_activation({"totals": {}})["status"], "source_unavailable")
     def test_url_parser_and_fields(self):
         self.assertEqual(seo.normalize_url("/x/", "https://Example.test"), "https://example.test/x/")
         self.assertEqual(seo.normalize_url("https://Example.test:8443/x#f"), "https://example.test:8443/x")
