@@ -1,8 +1,86 @@
 # Marketing delivery plan for Agency OS, Dashboard, TrueApply and Deployden
 
-Status: initial implementation slice verified locally, pending controlled database integration and core deployment. Prepared 2026-09-14 UTC.
+Status: initial assessment slice deployed and verified on 2026-09-14. Growth
+measurement deployed and verified 2026-09-19. Remaining batches below are open.
 
-## Implementation checkpoint, 2026-09-14 UTC
+## Accepted growth review and continuation, 2026-09-19
+
+Recovered feedback from Lavish session dd710c60b6aae114:
+
+- TrueApply's first acquisition audience is experienced professionals seeking
+  evidence-led resume tailoring.
+- Require explicit approval for the first ten publications, then review policy.
+  Publication eleven is not automatically authorized; a revised policy is needed.
+- The immediate engineering batch adds aggregate GSC/GA4 measurement for two
+  nonoverlapping 28-day periods, deterministic comparisons and dashboard answers.
+  Existing immutable audit records hold these snapshots without a new database.
+- Subsequent batches remain content calendar/backlog, isolated static publication,
+  experiments, and scheduled measurement/evaluation. These are planned, not live.
+
+## Calendar implementation checkpoint, 2026-09-23 UTC
+
+Core 7f7ba0b and dashboard 43b79a7 are deployed with additive migration 015.
+Dashboard `/content/calendar` supports evidence-linked planning, bounded source
+editing, cancellation and idempotent research kickoff. Its dates do not schedule
+publication. Calendar intent and the planned title survive research and outline
+creation; task links show real research outcomes without implying publication.
+TrueApply candidate plan 1 was created through the dashboard API. Query demand,
+source coverage and existing-site overlap must be researched before drafting.
+
+Fixed missing-history recommendations without treating absent GA4 rows as zeros.
+Closed the research fetch redirect/SSRF gap: public address validation, pinned
+connections, verified TLS, bounded redirects/body size, and secret-free failures.
+Verification: 127 core tests, 45 dashboard tests and one opt-in real PostgreSQL
+integration test passed. The SQL test uses only temporary tables and rolls back.
+Reproduce it from agency-dashboard with
+`AGENCY_CALENDAR_DB_TEST=1 python3 -m unittest discover -s tests -p test_calendar_postgres.py`.
+Live calendar/brand report/health routes return 200. A public HTTPS fetch of
+Deployden passed. No model-generated content or publication was triggered.
+Fresh dashboard tasks 347/348 completed as audits 45/46. Both correctly report
+`historical_unavailable` for GA4 and recommend collecting a complete comparison
+window, not restoring access. A live private-source update returned HTTP 400
+without changing the plan. The TrueApply candidate and source editor render live.
+
+Recovery: verified core-backup-20260923T123438Z.tar.gz, including root state.
+Prior worker and growth module are retained in
+`/home/agency/backups/releases/content-calendar-20260923-EX9TVn/`.
+Prior dashboard image is
+`sha256:7039f38d80768418a81d6e1ea53d5f0d50044018dad85c129333e2f658813bc6`.
+Rollback restores those runtime files/image in an empty-queue window and keeps
+the additive calendar table and records. The worker was stopped/started once,
+with no running tasks to orphan. The backup policy pruned one expired bundle.
+
+Verified historical release evidence: assessment 2 and tasks 340 through 344
+completed with stored report and dashboard rendering. This proves workflow
+execution, not growth, indexing, or recommendation quality. The richer growth
+loop must validate suggestions against observed site features before proposing
+repairs such as adding schema that already exists.
+
+## Growth implementation checkpoint, 2026-09-19 UTC
+
+Core commit 074674e and dashboard commits 08acd15/b548141 are deployed.
+113 core and 36 dashboard tests passed, plus collector-to-template integration.
+Dashboard-initiated tasks 345/346 completed as audits 43/44; both live report
+routes and health routes return 200. Worker restarted once with no active tasks.
+A second dashboard-only correction removed misleading legacy user sums and
+labeled dimensional search/landing-page rows as samples, not property totals.
+Jobs 8 through 12 remain disabled. No content was published or credentials changed.
+
+The live prior GA4 window returned metadata without metric headers or rows.
+The collector keeps that window unavailable rather than manufacturing zeros.
+Current GA4 and GSC work for both properties. Follow-up wording still needs to
+distinguish historical coverage from missing access; it must not imply that a
+working current connection needs new credentials. See ROADMAP.md for measured
+counts and remaining growth-loop batches.
+
+Rollback: prior worker at
+`/home/agency/backups/releases/growth-measurement-20260919-6w8ZXM/worker.py`;
+prior dashboard image
+`sha256:3f410d9cb059fdccb055e383857412e490948021440b248a1302bc404cd692c2`.
+Keep immutable audits and tasks. Restore runtime only through an empty-queue
+maintenance window. The new module may remain unused if the worker is reverted.
+
+## Historical implementation checkpoint, 2026-09-14 UTC
 
 The initial reusable foundation is implemented in canonical source: versioned
 assessment persistence, idempotent collection and synthesis, deterministic report

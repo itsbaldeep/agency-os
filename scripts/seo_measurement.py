@@ -4,13 +4,92 @@ import base64, hashlib, json, os, re, subprocess, time
 import urllib.parse, urllib.request
 import urllib.robotparser as robotparser
 import xml.etree.ElementTree as ET
+from pathlib import Path
 from datetime import datetime, timezone
 from html.parser import HTMLParser
+
+import public_fetch
 
 MAX_PAGES, MAX_BYTES, TIMEOUT, MIN_DELAY = 50, 1_000_000, 15, .2
 USER_AGENT = "AgencyOS SEO Measurement/1.0 (+https://deployden.tech)"
 SERVICE_ACCOUNT_FILE = "/home/agency/.config/agency/gsc-service-account.json"
 PARSER_VERSION = "seo-parser-2"
+
+
+def normalize_activation(payload, days=28):
+    """Validate the engagement aggregate without retaining identifiers or PII.
+
+    The TrueApply endpoint is optional.  Missing or malformed responses remain
+    unavailable and are never converted into zero conversions.
+    """
+    if not isinstance(payload, dict) or not isinstance(payload.get("totals"), dict):
+        return {"status": "source_unavailable", "error": "malformed activation response"}
+    window = payload.get("window") if isinstance(payload.get("window"), dict) else {}
+    totals = payload["totals"]
+    total_keys = ("signups", "resume_processed", "profile_confirmed", "job_selected", "kit_completed", "download_served")
+    clean_totals = {}
+    for key in total_keys:
+        value = totals.get(key)
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
+            return {"status": "source_unavailable", "error": "invalid activation total"}
+        clean_totals[key] = int(value)
+    cohorts = []
+    for row in payload.get("cohorts") or []:
+        if not isinstance(row, dict):
+            continue
+        cohorts.append({
+            key: str(row.get(key) or "")[:200] for key in ("source", "medium", "campaign", "landing_path")
+        } | {key: max(0, int(row.get(key) or 0)) for key in ("signups", "kit_completed")})
+    coverage = payload.get("coverage") if isinstance(payload.get("coverage"), dict) else {}
+    health = payload.get("health") if isinstance(payload.get("health"), dict) else {}
+    cohort_raw = payload.get("signup_cohort_totals") if isinstance(payload.get("signup_cohort_totals"), dict) else None
+    cohort = {}
+    if cohort_raw:
+        for key in total_keys:
+            value = cohort_raw.get(key)
+            if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
+                cohort[key] = int(value)
+    return {
+        "status": "available",
+        "schema_version": 1,
+        "window": {"days": int(window.get("days") or days), "start": str(window.get("start") or ""), "end": str(window.get("end") or "")},
+        "totals": clean_totals,
+        "signup_cohort_totals": cohort,
+        "kit_evidence_only": payload.get("kit_evidence_only") if isinstance(payload.get("kit_evidence_only"), dict) else {},
+        "cohorts": cohorts[:500],
+        "coverage": {"consented_signups": max(0, int(coverage.get("consented_signups") or 0)), "unattributed_signups": max(0, int(coverage.get("unattributed_signups") or 0))},
+        "health": {"last_event_at": str(health.get("last_event_at") or ""), "status": str(health.get("status") or "unknown")[:40]},
+    }
+
+
+def fetch_activation(base_url, credential_path, *, endpoint_path="/marketing/summary", credential_name="TRUEAPPLY_MARKETING_READ_TOKEN", days=28, fetcher=None):
+    """Fetch the optional TrueApply aggregate through an allowlisted localhost route."""
+    parsed = urllib.parse.urlsplit(str(base_url or ""))
+    if parsed.scheme not in ("http", "https") or parsed.hostname not in ("127.0.0.1", "localhost", "::1") or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in ("", "/"):
+        return {"status": "source_unavailable", "error": "activation endpoint is not allowlisted"}
+    if not str(endpoint_path).startswith("/") or "?" in str(endpoint_path):
+        return {"status": "source_unavailable", "error": "activation endpoint path is invalid"}
+    try:
+        days = max(1, min(int(days), 90))
+        credential = Path(str(credential_path)).resolve()
+        credential.relative_to(Path("/home/agency/engagements/trueapply").resolve())
+        with open(credential_path, encoding="utf-8") as handle:
+            token = next((line.split("=", 1)[1].strip().strip('"').strip("'") for line in handle if line.startswith(str(credential_name) + "=")), "")
+        if not token:
+            return {"status": "source_unavailable", "error": "activation credential unavailable"}
+        url = str(base_url).rstrip("/") + str(endpoint_path) + "?days=" + str(int(days))
+        if fetcher:
+            payload = fetcher(url, token)
+        else:
+            class NoRedirect(urllib.request.HTTPRedirectHandler):
+                def redirect_request(self, req, fp, code, msg, headers, newurl):
+                    raise ValueError("activation endpoint redirect rejected")
+            opener = urllib.request.build_opener(NoRedirect())
+            req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token, "Accept": "application/json"})
+            payload = json.loads(opener.open(req, timeout=TIMEOUT).read(MAX_BYTES))
+        return normalize_activation(payload, days=days)
+    except Exception as exc:
+        return {"status": "source_unavailable", "error": type(exc).__name__}
 
 def now(): return datetime.now(timezone.utc).isoformat()
 
@@ -93,11 +172,10 @@ def parse_robots(body, origin):
 
 def _fetch(url, max_bytes=MAX_BYTES, timeout=TIMEOUT, fetcher=None):
     if fetcher: return fetcher(url)
-    req=urllib.request.Request(url,headers={"User-Agent":USER_AGENT,"Accept":"text/html,application/xml,text/plain,*/*"})
-    with urllib.request.urlopen(req,timeout=timeout) as r:
-        data=r.read(max_bytes+1)
-        if len(data)>max_bytes: raise ValueError("response exceeds byte limit")
-        return getattr(r,"status",200),data,normalize_url(r.geturl(), url) or url, r.headers.get("Content-Type", "")
+    result = public_fetch.fetch(url, max_bytes=max_bytes, timeout=timeout)
+    if not result.get("ok"):
+        raise ValueError(result.get("error") or "public fetch failed")
+    return result.get("status", 200), result.get("body", b""), url, result.get("content_type", "")
 
 def _response(value, requested):
     if len(value) == 2:
@@ -153,7 +231,19 @@ def crawl(start,max_pages=MAX_PAGES,fetcher=None,sleep=time.sleep):
                 elif not same_origin(link,origin): excluded.append({"url":link,"reason":"external"})
         except Exception as exc: last=time.monotonic(); broken.append({"url":url,"source_url":referrers.get(url,origin),"status":None,"error":type(exc).__name__})
     page_status = "unavailable" if not pages else ("partial" if broken or unavailable else "available")
-    return {"status":page_status,"pages":pages,"broken_links":broken,"robots":{"status":"available" if robots_url not in unavailable else "unavailable"},"sitemap":{"status":sitemap_status,"members":sorted(sitemap_members),"unavailable":sorted(set(unavailable)-{robots_url})},"excluded":excluded,"bounded":{"max_pages":cap,"max_bytes":MAX_BYTES,"timeout":TIMEOUT,"min_delay":MIN_DELAY,"parser_version":PARSER_VERSION,"page_cap_reached":len(pages)>=cap and bool(queue),"queued_count":len(queue)}}
+    result = {"status":page_status,"pages":pages,"broken_links":broken,"robots":{"status":"available" if robots_url not in unavailable else "unavailable"},"sitemap":{"status":sitemap_status,"members":sorted(sitemap_members),"unavailable":sorted(set(unavailable)-{robots_url})},"excluded":excluded,"bounded":{"max_pages":cap,"max_bytes":MAX_BYTES,"timeout":TIMEOUT,"min_delay":MIN_DELAY,"parser_version":PARSER_VERSION,"page_cap_reached":len(pages)>=cap and bool(queue),"queued_count":len(queue)}}
+    # Keep the established crawl keys unchanged and append the independently
+    # bounded content-link inventory.  The injected fetcher is forwarded so
+    # deterministic callers do not unexpectedly access the network.
+    try:
+        from content_links import audit_links
+        result["link_audit"] = audit_links(origin, max_pages=cap, fetcher=fetcher,
+                                             external_fetcher=fetcher, sleep=sleep)
+    except Exception as exc:
+        result["link_audit"] = {"status": "unavailable", "page_inventory": [],
+                                 "internal_links": [], "external_links": [],
+                                 "coverage": {"error": type(exc).__name__}}
+    return result
 
 def evidence_id(rule,url,*_ignored): return "seo-"+hashlib.sha256(json.dumps([rule,normalize_url(url)],separators=(",",":"),sort_keys=True).encode()).hexdigest()[:24]
 def make_findings(crawl_result):
@@ -178,6 +268,10 @@ def make_findings(crawl_result):
             for u in urls: add("duplicate_description",u,value,"unique description")
     for broken in crawl_result.get("broken_links",[]):
         add("broken_internal_link",broken["url"],{"source_url":broken.get("source_url"),"status":broken.get("status"),"error":broken.get("error")},"2xx")
+    for broken in (crawl_result.get("link_audit") or {}).get("external_links", []):
+        if broken.get("state") == "broken":
+            add("broken_external_link", broken.get("url", ""),
+                {"source_url": broken.get("source_url"), "status": broken.get("status")}, "2xx")
     unavailable=crawl_result.get("sitemap",{}).get("unavailable",[])
     if crawl_result.get("sitemap",{}).get("status")!="available" and not unavailable: add("sitemap_missing",pages[0]["url"] if pages else "",crawl_result.get("sitemap",{}).get("status"),"available")
     for u in crawl_result.get("sitemap",{}).get("unavailable",[]): add("sitemap_unavailable",u,"unavailable","2xx XML sitemap")

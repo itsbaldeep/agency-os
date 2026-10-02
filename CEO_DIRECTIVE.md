@@ -9,9 +9,29 @@ chat decisions. Update it when strategy changes.
 ## 0. What this VPS is (one sentence)
 
 A self-hosted AI digital-marketing agency platform that does **real client
-work** for black-box brands — marketing, SEO, AEO, content — with the human
+work** for black-box brands: marketing, SEO, AEO, and content, with the human
 co-CEO steering from the dashboard at :5001 and AI co-CEO executing behind
 approval gates.
+
+### Growth programme decisions accepted 2026-09-19
+
+The recovered Lavish feedback selects evidence-led tailoring for experienced
+professionals as TrueApply's first acquisition audience. TrueApply's public site
+and blog are the owned learning project for reusable Agency OS growth features.
+The first ten publications require explicit human approval. After ten successful
+publications, review the policy with the owner; reaching ten does not automatically
+grant publication authority. Existing product privacy and draft-only rules remain.
+Build measurement and dashboard answers first, then content planning, isolated
+publication with rollback, experiments, and scheduled evaluation. Retired core
+deployment jobs remain retired. This authorizes implementation, not unreviewed
+marketing publication or spending.
+
+On 2026-09-23 the owner authorized a dedicated scalable blog service for TrueApply
+on the existing domain. Ghost with a custom theme is deployed at `/blog/`, with
+separate engagement-owned MySQL/content storage and a tailnet-only editor. This
+changes the publishing destination, not the first-ten publication approval policy.
+Daily measurement is authorized; newsletter sending, advertising spend and
+autonomous publication remain outside this release.
 
 ## 1. The three project types
 
@@ -235,6 +255,34 @@ TrueApply's later SaaS phases remain governed by its own engine-first exit crite
     traces, and Lavish are pulled in only when they add material value. No agent fleet
     may reintroduce autonomous deploy, review, or merge.
 
+## Content visual quality (human direction, 2026-09-24)
+
+Consider useful images, illustrations, diagrams, charts, tables and annotated
+examples during planning and review, not decorative visual quotas. Clearly label
+hypothetical examples and qualitative editorial guidance. Quantitative charts
+require verified source evidence; never invent measurements to fill a visual.
+Visual editing does not grant publication approval.
+
+### Editorial assets and help content, owner direction 2026-09-26
+
+Provide a real searchable/uploadable editorial asset library with editable alt
+text, provenance and previews. Agency owns editorial originals; publication
+copies reviewed immutable media into the engagement's separate public storage.
+Never expose private user-document buckets. Reject unresolved placeholders and
+empty sections before publication. Ground product help in current verified
+behavior, discover published internal pages for contextual links, cite factual
+sources beside their claims, warn readers before external navigation, and audit
+internal and external links across landing, help and blog surfaces. Draft 22 is
+authorized for regeneration and review, not publication. Help drafts retain the
+existing individual publication approval policy.
+
+On 2026-09-27 the owner requested automatic image search suggestions, prefetched
+candidates, prefilled metadata and a suitable default embedded in each draft,
+with a simple replacement picker. This authorizes bounded draft asset imports,
+not publication. Preserve existing selected media. Suggested descriptions and
+metadata matching are not visual verification. Never substitute unrelated stock
+photography for a requested explanatory diagram or fabricate image rights.
+
 ## 8. Retired and parked estate (verified 2026-08-22)
 
 | What | Action | Reversible via |
@@ -245,3 +293,13 @@ TrueApply's later SaaS phases remain governed by its own engine-first exit crite
 | Hearth | Source/data/context preserved; containers and public routes stopped | Use its recovery refs/manifests for an explicit unpark |
 | Streamwise | Source/data/context preserved; no live containers or DNS route | Use its recovery refs/manifests for an explicit unpark |
 | Other legacy projects/docs | Recovery snapshot retained; live ledger/source clutter removed | Review the archived bundle, never silently re-import it |
+
+### TrueApply launch implementation, accepted 2026-10-02
+
+The owner accepted integrated progress on existing pages, a resume-for-role
+proposition, replayable illustration and contextual help, then authorized continued
+implementation toward a production ready v1.0.0. This includes the dashboard SEO,
+content planning and acquisition-to-activation feedback loop. Release-specific
+verification and explicit unresolved business decisions remain visible. Exact
+marketing publications, paid spend and future email/SMS/WhatsApp sends retain their
+existing approval gates. Removing beta wording alone is not launch acceptance.

@@ -1,0 +1,20 @@
+{
+  "30": {
+    "type": "ghost",
+    "enabled": true,
+    "base_url": "https://trueapply.in/blog/",
+    "api_url": "http://127.0.0.1:2370/blog/ghost/api/admin/",
+    "admin_host": "vps-agency.agency.internal:4443",
+    "env_file": "apps/blog/.env",
+    "credential_ref": "BLOG_AGENCY_ADMIN_KEY",
+    "asset_storage": {
+      "project_root": "/home/agency/engagements/trueapply",
+      "env_file": "apps/blog/.media.env",
+      "access_key_ref": "PUBLIC_MEDIA_ACCESS_KEY",
+      "secret_key_ref": "PUBLIC_MEDIA_SECRET_KEY",
+      "endpoint": "http://127.0.0.1:9100",
+      "bucket": "trueapply-marketing",
+      "public_base": "https://trueapply.in/blog/media"
+    }
+  }
+}

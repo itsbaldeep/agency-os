@@ -27,3 +27,5 @@
 15 4 * * 0 /home/agency/agency-os/scripts/run-job.sh 15 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
 # Catch urgent agent alerts missed by the immediate notifier; sent events are deduplicated.
 * * * * * /home/agency/agency-os/scripts/run-job.sh 16 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
+# Opted-in owned growth measurement, daily 06:30 UTC. No publish/deploy actions.
+30 6 * * * /home/agency/agency-os/scripts/run-job.sh 17 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
