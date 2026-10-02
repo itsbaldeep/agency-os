@@ -303,3 +303,16 @@ content planning and acquisition-to-activation feedback loop. Release-specific
 verification and explicit unresolved business decisions remain visible. Exact
 marketing publications, paid spend and future email/SMS/WhatsApp sends retain their
 existing approval gates. Removing beta wording alone is not launch acceptance.
+
+### TrueApply release hold, freemium and retention, owner direction 2026-10-02
+
+The owner holds the full production v1.0.0 release until unfamiliar-user testing
+this weekend has been reviewed. Continue implementation and isolated verification.
+The commercial model is B2C freemium with automatically refreshed credits and
+usage limits. Exact paid prices, merchant setup and payment activation remain
+reviewable decisions. Implement recurring in-app job matches, saved searches,
+watchlist updates and notifications now. Prepare consent-aware digest previews
+and a blocked email outbox; actual provider wiring and sends remain deferred.
+The owner authorizes configuring the owned TrueApply GA4 property once Editor
+access is granted. Questions during active work are queued follow-ups and do
+not end the authorized task unless the owner explicitly pauses or redirects it.
