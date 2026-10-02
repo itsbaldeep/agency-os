@@ -16,6 +16,30 @@ SERVICE_ACCOUNT_FILE = "/home/agency/.config/agency/gsc-service-account.json"
 PARSER_VERSION = "seo-parser-2"
 
 
+RETENTION_KEYS = (
+    "notifications_generated", "notifications_read", "notifications_clicked",
+    "unread_notifications", "active_watchlist_jobs", "active_saved_searches",
+    "digest_previews", "email_blocked", "email_failed",
+)
+
+
+def normalize_retention(payload):
+    """Accept aggregate integer counts only, without notifications or recipients."""
+    if not isinstance(payload, dict):
+        return {"status": "unavailable"}
+    counts = {}
+    for key in RETENTION_KEYS:
+        value = payload.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 10**12:
+            counts[key] = value
+    if not counts:
+        return {"status": "unavailable"}
+    email_status = payload.get("email_status")
+    if email_status not in {"not_connected", "disabled", "ready"}:
+        email_status = "unavailable"
+    return {"status": "available", "counts": counts, "email_status": email_status}
+
+
 def normalize_activation(payload, days=28):
     """Validate the engagement aggregate without retaining identifiers or PII.
 
@@ -26,28 +50,30 @@ def normalize_activation(payload, days=28):
         return {"status": "source_unavailable", "error": "malformed activation response"}
     window = payload.get("window") if isinstance(payload.get("window"), dict) else {}
     totals = payload["totals"]
-    total_keys = ("signups", "resume_processed", "profile_confirmed", "job_selected", "kit_completed", "download_served")
+    total_keys = ("signups", "resume_processed", "profile_confirmed", "job_selected", "kit_completed", "kit_evidence_only", "download_served")
     clean_totals = {}
     for key in total_keys:
         value = totals.get(key)
-        if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
+        if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 10**12:
             return {"status": "source_unavailable", "error": "invalid activation total"}
         clean_totals[key] = int(value)
+    cohort_keys = ("signups", "consented_signups", "resume_processed", "profile_confirmed", "kit_started", "kit_completed", "kit_evidence_only", "download_served")
     cohorts = []
-    for row in payload.get("cohorts") or []:
+    raw_rows = payload.get("cohorts")
+    for row in raw_rows[:500] if isinstance(raw_rows, list) else []:
         if not isinstance(row, dict):
             continue
         cohorts.append({
             key: str(row.get(key) or "")[:200] for key in ("source", "medium", "campaign", "landing_path")
-        } | {key: max(0, int(row.get(key) or 0)) for key in ("signups", "kit_completed")})
+        } | {key: value for key in cohort_keys if isinstance(value := row.get(key), int) and not isinstance(value, bool) and 0 <= value <= 10**12})
     coverage = payload.get("coverage") if isinstance(payload.get("coverage"), dict) else {}
     health = payload.get("health") if isinstance(payload.get("health"), dict) else {}
     cohort_raw = payload.get("signup_cohort_totals") if isinstance(payload.get("signup_cohort_totals"), dict) else None
     cohort = {}
     if cohort_raw:
-        for key in total_keys:
+        for key in cohort_keys:
             value = cohort_raw.get(key)
-            if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
+            if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 10**12:
                 cohort[key] = int(value)
     return {
         "status": "available",
@@ -55,7 +81,7 @@ def normalize_activation(payload, days=28):
         "window": {"days": int(window.get("days") or days), "start": str(window.get("start") or ""), "end": str(window.get("end") or "")},
         "totals": clean_totals,
         "signup_cohort_totals": cohort,
-        "kit_evidence_only": payload.get("kit_evidence_only") if isinstance(payload.get("kit_evidence_only"), dict) else {},
+        "retention": normalize_retention(payload.get("retention")),
         "cohorts": cohorts[:500],
         "coverage": {"consented_signups": max(0, int(coverage.get("consented_signups") or 0)), "unattributed_signups": max(0, int(coverage.get("unattributed_signups") or 0))},
         "health": {"last_event_at": str(health.get("last_event_at") or ""), "status": str(health.get("status") or "unknown")[:40]},
