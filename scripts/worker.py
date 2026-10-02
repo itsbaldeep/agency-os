@@ -3902,6 +3902,19 @@ def _cap_outline_blocks(blocks):
     return capped, original_count
 
 
+def _content_outline_title_errors(title, target_keyword, provided_title=None):
+    if not title:
+        return ["title is required"]
+    if len(title) > 90:
+        return [f"title is {len(title)} characters; maximum is 90"]
+    def normalized(value):
+        return " ".join(str(value or "").casefold().split())
+    preserves_title = bool(provided_title) and normalized(title) == normalized(provided_title)
+    if not preserves_title and normalized(target_keyword) not in normalized(title):
+        return ["a generated title must contain the target_keyword verbatim or preserve the provided title"]
+    return []
+
+
 def handle_content_outline(task):
     """Stage 2: read the full research row, then one call_zen translates the
     competitive strategy into a typed block array without unsupported data."""
@@ -4057,12 +4070,7 @@ def handle_content_outline(task):
         compacted_from = source_count or compacted_from
         gen_title = (parsed_obj.get("title") or "").strip()
         fails = _content_outline_validate(blocks, r.get("facts") or [])
-        if not gen_title:
-            fails.append("title is required")
-        elif len(gen_title) > 90:
-            fails.append(f"title is {len(gen_title)} characters; maximum is 90")
-        elif r["target_keyword"].casefold() not in gen_title.casefold():
-            fails.append("title must contain the target_keyword verbatim")
+        fails.extend(_content_outline_title_errors(gen_title, r["target_keyword"], params.get("title")))
         if fails:
             attempt_reasons.append("; ".join(fails))
             if attempt == 0:

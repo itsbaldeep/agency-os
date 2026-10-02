@@ -611,6 +611,18 @@ class WorkerWorkflowTests(unittest.TestCase):
         self.assertEqual(safe["facts"], [])
         self.assertTrue(any("not present" in failure for failure in failures))
 
+    def test_outline_title_preserves_provided_wording_without_keyword_stuffing(self):
+        title = "How to review an evidence match before creating a tailored kit"
+        self.assertEqual(worker._content_outline_title_errors(title, "review resume evidence match", title), [])
+        self.assertEqual(worker._content_outline_title_errors(title.upper(), "review resume evidence match", title), [])
+        self.assertTrue(worker._content_outline_title_errors("Unrelated new title", "review resume evidence match", title))
+        self.assertTrue(worker._content_outline_title_errors(title, "review resume evidence match"))
+
+    def test_outline_title_keeps_length_and_generated_keyword_checks(self):
+        self.assertTrue(worker._content_outline_title_errors("", "resume"))
+        self.assertTrue(worker._content_outline_title_errors("x" * 91, "resume", "x" * 91))
+        self.assertEqual(worker._content_outline_title_errors("Resume review: a practical guide", "resume review"), [])
+
     def test_data_blocks_require_known_fact_ids(self):
         blocks = [
             {"type": "intro", "brief": "Open directly"},
