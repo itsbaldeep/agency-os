@@ -96,6 +96,37 @@ class SeoMeasurementTests(unittest.TestCase):
         canonical = [f for f in findings if f["rule"] == "canonical_mismatch"]
         self.assertEqual(canonical[0]["evidence_id"], seo.evidence_id("canonical_mismatch", "https://example.test/new"))
 
+    def test_redirect_alias_and_final_url_are_one_page_and_keep_sitemap_redirect(self):
+        body = b"<title>Blog</title><meta name='description' content='Blog'><link rel='canonical' href='/blog/'><h1>Blog</h1>"
+        pages = {
+            "https://example.test/robots.txt": (200, b"User-agent: *\nAllow: /"),
+            "https://example.test/sitemap.xml": (200, b"<urlset><url><loc>/blog</loc></url><url><loc>/blog/</loc></url></urlset>"),
+            "https://example.test/": (200, b"<title>Home</title>"),
+            "https://example.test/blog": (200, body, "https://example.test/blog/"),
+            "https://example.test/blog/": (200, body),
+        }
+        result = seo.crawl("https://example.test/", max_pages=3,
+                           fetcher=lambda url: pages[url], sleep=lambda _: None)
+        self.assertEqual([page["url"] for page in result["pages"]],
+                         ["https://example.test/", "https://example.test/blog/"])
+        self.assertTrue(any(item["reason"] == "duplicate_final_url"
+                            for item in result["excluded"]))
+        findings = seo.make_findings(result)
+        self.assertFalse(any(item["rule"] == "canonical_mismatch" and
+                             item["url"] == "https://example.test/blog/"
+                             for item in findings))
+        redirects = [item for item in findings if item["rule"] == "sitemap_redirect"]
+        self.assertEqual([item["url"] for item in redirects], ["https://example.test/blog"])
+
+    def test_public_fetch_preserves_validated_final_url(self):
+        with mock.patch.object(seo.public_fetch, "fetch", return_value={
+                "ok": True, "status": 200, "body": b"ok",
+                "content_type": "text/html",
+                "final_url": "https://example.test/final"}) as fetch:
+            result = seo._fetch("https://example.test/alias")
+        self.assertEqual(result[2], "https://example.test/final")
+        self.assertTrue(fetch.call_args.kwargs["return_final_url"])
+
     def test_deterministic_ids_and_comparison(self):
         self.assertEqual(seo.evidence_id("rule", "u", True), seo.evidence_id("rule", "u", True))
         self.assertEqual(seo.compare_runs({"counts": {"pages": 1}}, {"counts": {"pages": 2}})["delta"], {"pages": 1})

@@ -172,10 +172,12 @@ def parse_robots(body, origin):
 
 def _fetch(url, max_bytes=MAX_BYTES, timeout=TIMEOUT, fetcher=None):
     if fetcher: return fetcher(url)
-    result = public_fetch.fetch(url, max_bytes=max_bytes, timeout=timeout)
+    result = public_fetch.fetch(url, max_bytes=max_bytes, timeout=timeout,
+                                return_final_url=True)
     if not result.get("ok"):
         raise ValueError(result.get("error") or "public fetch failed")
-    return result.get("status", 200), result.get("body", b""), url, result.get("content_type", "")
+    return (result.get("status", 200), result.get("body", b""),
+            result.get("final_url") or url, result.get("content_type", ""))
 
 def _response(value, requested):
     if len(value) == 2:
@@ -206,7 +208,7 @@ def crawl(start,max_pages=MAX_PAGES,fetcher=None,sleep=time.sleep):
                 doc=parse_sitemap_document(body,origin); sitemap_members.update(doc["urls"]); sitemap_status="available"
             else: unavailable.append(sm)
         except Exception: unavailable.append(sm)
-    queue=list(dict.fromkeys([origin]+sorted(sitemap_members))); referrers={u: ("sitemap" if u != origin else origin) for u in queue}; seen=set(); pages=[]; broken=[]; excluded=[]; last=0
+    queue=list(dict.fromkeys([origin]+sorted(sitemap_members))); referrers={u: ("sitemap" if u != origin else origin) for u in queue}; seen=set(); final_seen=set(); pages=[]; broken=[]; excluded=[]; last=0
     while queue and len(pages)<cap:
         url=queue.pop(0)
         if url in seen: continue
@@ -223,6 +225,16 @@ def crawl(start,max_pages=MAX_PAGES,fetcher=None,sleep=time.sleep):
             if content_type and "html" not in content_type.lower():
                 excluded.append({"url": final_url, "reason": "non_html"})
                 continue
+            if final_url in final_seen:
+                excluded.append({
+                    "url": url,
+                    "final_url": final_url,
+                    "reason": "duplicate_final_url",
+                    "redirected": final_url != url,
+                    "sitemap_member": url in sitemap_members,
+                })
+                continue
+            final_seen.add(final_url)
             fields=extract_html(body[:MAX_BYTES],final_url); fields["sitemap_member"]=url in sitemap_members or final_url in sitemap_members
             pages.append({"requested_url":url,"final_url":final_url,"url":final_url,"redirected":final_url != url,"redirect_chain":[url, final_url] if final_url != url else [url],"status":status,"content_type":content_type,"fields":fields})
             for link in fields["internal_links"]:
@@ -260,6 +272,11 @@ def make_findings(crawl_result):
         if crawl_result.get("sitemap",{}).get("status")=="available" and f["indexable"] and not f["sitemap_member"]: add("indexable_absent_sitemap",page["url"],False,True)
         if f["canonical"] != page["url"]: add("canonical_mismatch",page["url"],f["canonical"] or "missing",page["url"])
         if page.get("redirected") and page.get("requested_url") in crawl_result.get("sitemap",{}).get("members",[]): add("sitemap_redirect",page["requested_url"],page["final_url"],"final 2xx canonical URL in sitemap")
+    for excluded in crawl_result.get("excluded",[]):
+        if (excluded.get("reason") == "duplicate_final_url" and excluded.get("redirected")
+                and excluded.get("sitemap_member")):
+            add("sitemap_redirect", excluded["url"], excluded["final_url"],
+                "final 2xx canonical URL in sitemap")
     for value,urls in titles.items():
         if value and len(urls)>1:
             for u in urls: add("duplicate_title",u,value,"unique title")
