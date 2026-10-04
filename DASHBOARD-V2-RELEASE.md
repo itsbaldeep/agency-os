@@ -104,3 +104,17 @@ campaign runs. No delivery was approved or sent. Brand-owned source endpoints,
 idempotent outbox execution and current provider access remain required before
 live campaign delivery is usable. TrueApply's existing Brevo verification still
 reports HTTP 403. Public marketing actions need separate exact approval.
+
+
+### TrueApply integration source provenance
+
+Verified 2026-10-04 17:17 UTC: the canonical engagement checkout is
+`/home/agency/engagements/trueapply`, HEAD `d2f116d`, and lacks the retention
+modules found in `/home/agency/worktrees/trueapply-v1.0.0`, HEAD `e30e70e`.
+The running `trueapply-api-1` Compose labels name the latter worktree and
+`/tmp/trueapply-prod-override.yaml` as its deployment origin. Its running image is
+`sha256:7486b80b1eb1496634b99d8608c13256e72333025484c30d2a0cd5be78e7bb74`.
+Canonical source and runtime origin therefore differ. Reconcile the retained
+release lineage before authoring or deploying a campaign adapter. Canonical
+compose files alone are insufficient evidence of the live application version.
+No TrueApply source or runtime was changed during this verification.
