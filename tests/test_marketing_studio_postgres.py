@@ -154,6 +154,38 @@ class MarketingStudioPostgresTests(unittest.TestCase):
             self.assertEqual(params["brand_id"], 101)
             self.assertEqual(params["revision"], 1)
 
+    def test_campaign_rules_persist_exact_revision_without_recipient_transfer(self):
+        import marketing_campaigns
+        sys.path.insert(0, str(ROOT.parents[0] / 'agency-dashboard'))
+        import app as dashboard
+        cur = self.cursor()
+        cur.execute("INSERT INTO marketing_work_items(brand_id,kind,channel,title,brief,body,state) VALUES (101,'email_campaign','email','Fixture campaign','{}','Approved copy','ready') RETURNING id")
+        item_id = cur.fetchone()['id']
+        url = f'/api/brands/101/work-items/{item_id}/campaign'
+        with mock.patch.object(dashboard.models, 'db', return_value=self._dashboard_conn()):
+            client = dashboard.app.test_client()
+            client.environ_base['HTTP_ORIGIN'] = 'http://localhost'
+            policy = marketing_campaigns.default_policy()
+            response = client.post(url, json={'revision': 1, 'policy': policy})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json['revision'], 2)
+            self.assertFalse(response.json['sent'])
+            self.assertEqual(client.post(url, json={'revision': 1, 'policy': policy}).status_code, 409)
+            review = client.get(url)
+            self.assertEqual(review.json['policy'], policy)
+            self.assertFalse(review.json['dispatch_available'])
+            self.assertEqual(client.get(f'/api/brands/202/work-items/{item_id}/campaign').status_code, 404)
+            detail = client.get(f'/brands/101/work/{item_id}')
+            self.assertEqual(detail.status_code, 200)
+            self.assertIn(b'id="campaign-policy"', detail.data)
+        cur.execute('SELECT revision,state,brief FROM marketing_work_items WHERE id=%s', (item_id,))
+        saved = cur.fetchone()
+        self.assertEqual(saved['state'], 'draft')
+        self.assertEqual(saved['revision'], 2)
+        self.assertEqual(saved['brief']['campaign_policy'], policy)
+        cur.execute('SELECT count(*) AS n FROM tasks')
+        self.assertEqual(cur.fetchone()['n'], 0)
+
     def test_static_withdrawal_route_and_worker_preserve_exact_receipt(self):
         import tempfile
         import publication_recovery, static_publisher

@@ -102,6 +102,14 @@ def validate_work_item(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(result["brief"], dict) or len(str(result["brief"])) > 20000:
         raise ValueError("brief must be a bounded object")
     _inspect(result["brief"])
+    if 'campaign_policy' in result['brief']:
+        if kind != 'email_campaign' or channel != 'email':
+            raise ValueError('Campaign rules require an email campaign')
+        import marketing_campaigns
+        policy = marketing_campaigns.validate_policy(result['brief']['campaign_policy'])
+        if result['brief'].get('email_category', policy['category']) != policy['category']:
+            raise ValueError('Change the message category in campaign rules before editing the draft')
+        result['brief'] = {**result['brief'], 'campaign_policy': policy, 'email_category': policy['category']}
     result["body"] = _text(payload.get("body"), "body", 50000)
     result["state"] = payload.get("state", "draft")
     if result["state"] not in STATES:

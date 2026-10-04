@@ -41,3 +41,11 @@ Tracked tasks 432/433 completed fresh measurement snapshots 63/64. Both brands h
 Task 436 imported the owner-referenced TrueApply launch session as eight draft work items 4 through 11. Original artifacts are served only through brand-scoped download routes. Tasks 437 through 439 prepared Deployden social, account-setup and enquiry follow-up drafts. No post, campaign or new article has been published or sent.
 
 The full goal remains active: verified provider adapters and exact social/email campaign execution, actual account onboarding, retention runtime connection, static rollback UI, richer campaign eligibility/preview and scheduled approved execution still require delivery or owner access. Do not mark the enterprise objective complete based on this initial live v2 release.
+
+## Portfolio consolidation and static recovery, 2026-10-04 UTC
+
+Core `1c31c97` and dashboard `8316a2d` are committed, pushed and deliberately deployed. Portfolio is the single cross-brand overview; `/brands` redirects to `/dashboard`. Individual brand workspace routes remain available. Live redirect, portfolio navigation and both owned brand workspaces were verified. Dashboard image is `sha256:ba55836c042f03c9b054bfa905234d28f62081f29dee8068eb495fb910b88583`.
+
+Owned static articles now have an exact-receipt withdrawal review and tracked recovery worker. Recovery preserves a checksummed private archive and repairs indexes on retry. The dashboard binds withdrawal to the original completed publication receipt and current destination. Isolated tests prove the route-to-worker workflow against real PostgreSQL and temporary files; no live client article was withdrawn. Acceptance included 117 dashboard tests (one skipped), seven recovery-worker tests, thirteen static publisher tests and four PostgreSQL workflow tests.
+
+The queue was empty before the worker stop/start. Recovery copies and the captured task list are in `/home/agency/backups/releases/dashboard-v2-recovery-20261004`. Worker service is active after deployment. Unrelated working changes remain excluded from the runtime copy.
