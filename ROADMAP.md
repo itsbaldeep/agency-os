@@ -310,3 +310,15 @@ all measured loading states stayed below 60 seconds. These results do not close
 the original broad quality exits or unfamiliar-user acceptance. Existing content
 planning dates are October 5/8/12 for articles and October 6/9/13 for help drafts.
 Live queue counts are three per lane; dates never authorize publication.
+
+## TrueApply blog SEO completion, verified 2026-10-04
+
+Core PR 86 and TrueApply PR 41 are merged and deployed as scoped changes. All
+three published posts have verified SEO descriptions/titles/excerpts. The reading
+container, ten stable fallback illustrations and real-image thumbnail precedence
+pass live responsive checks. Approved Ghost publication now transmits and checks
+metadata, with opt-in sitemap submission and indexed-version inspection receipts.
+Root and blog sitemaps were accepted; all three articles are discovered but not
+indexed as of 16:36 UTC. Task 451/audit 65 resolves all four description warnings.
+Release task 448 and the latest audit hold validation/recovery evidence.
+No additional article, campaign or schedule was authorized by this release.
