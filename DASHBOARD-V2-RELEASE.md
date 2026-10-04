@@ -27,3 +27,17 @@ Prior Deployden image: `sha256:e33e626502cabf11f1710a69b36feee8a8a833d66c12322b2
 Additive migrations 020, 021 and 022 are awaiting deliberate deployment. Source verification and live deployment evidence will be appended after acceptance. Preserve the unrelated working ROADMAP changes outside this release commit.
 
 Reference schemas verified 2026-10-04: [GA4 dimensions and metrics](https://developers.google.com/analytics/devguides/reporting/data/v1/api-schema), [Search Console Search Analytics](https://developers.google.com/webmaster-tools/v1/searchanalytics/query). GSC query results are bounded samples, not a backlink inventory.
+
+## Live release checkpoint, 2026-10-04 UTC
+
+Committed and deployed: core `12351017883781af7839e501830f699b0b0495e9`, dashboard `6d0ecdc73bb676fb93674e0991a9d7b6ea5df1b5`, Deployden `b39dfc1af1811bc37d26f60e17f27f7e442bbf75`. Migrations 020 through 022 applied transactionally. Queue had zero running tasks before the one deliberate worker stop/start, so no restart orphans existed. Runtime recovery copies and committed source archives are in `/home/agency/backups/releases/dashboard-v2-20261004`.
+
+New dashboard image `sha256:fca7dcb692d0abe2e36bfb8888ed8363e8b8268c6084ca2c3be389d6a79050c7`, Deployden image `sha256:ba050c7bd0e18f1f68b3d907a7f234e67b2fdd5ddb42493181e4064815528f69`. Existing lead storage mount remains `/home/agency/core/deployden/data:/data`.
+
+Verification: 284 core tests (2 skipped), 112 dashboard tests (1 skipped), 5 Deployden tests passed. Live health, all fourteen brand tabs, portfolio, calendar, reports, alerts and operations return 200. Public site and six destination routes return 200. Browser verification on fourteen live dashboard routes at 1440 and 390 pixels passed overflow checks with no page errors; mobile menu settled at left 0, width 192. Public desktop/mobile screenshots inspected. Browser fixture font configuration is `/tmp/agency-browser-fonts.conf`, harness `/tmp/dashboard_v2_live.cjs`; this host requires a font configuration for Chromium.
+
+Tracked tasks 432/433 completed fresh measurement snapshots 63/64. Both brands have available GA4, GSC, crawl and PageSpeed evidence. TrueApply GA4 journey reporting is available. First-party activation is unavailable: the running TrueApply API has no marketing read token set, and the configured aggregate endpoint returns 404. A credential reference alone does not activate an engagement runtime. That runtime change remains outside the core-only deployment completed here.
+
+Task 436 imported the owner-referenced TrueApply launch session as eight draft work items 4 through 11. Original artifacts are served only through brand-scoped download routes. Tasks 437 through 439 prepared Deployden social, account-setup and enquiry follow-up drafts. No post, campaign or new article has been published or sent.
+
+The full goal remains active: verified provider adapters and exact social/email campaign execution, actual account onboarding, retention runtime connection, static rollback UI, richer campaign eligibility/preview and scheduled approved execution still require delivery or owner access. Do not mark the enterprise objective complete based on this initial live v2 release.
