@@ -38,17 +38,21 @@ def _email(value: Any) -> str:
     return address
 
 
+def _validate_reference(ref, name):
+    """Validate a named file reference without reading any credential."""
+    if not isinstance(ref, str) or not ref or len(ref) > MAX_CONFIG_PATH or not os.path.isabs(ref) or any(c in ref for c in ('\x00', '\r', '\n')) or '..' in Path(ref).parts:
+        raise ValueError("credential_ref must be an absolute bounded path")
+    if not isinstance(name, str) or not re.fullmatch(r'[A-Z][A-Z0-9_]{0,127}', name):
+        raise ValueError("credential_name must be an uppercase environment name")
+    return ref, name
+
+
 def validate_config(payload: dict[str, Any]) -> dict[str, str]:
     if not isinstance(payload, dict) or set(payload) != {"provider", "credential_ref", "credential_name", "sender_email"}:
         raise ValueError("Brevo configuration fields are incomplete or unsupported")
     if payload.get("provider") != "brevo":
         raise ValueError("provider must be brevo")
-    ref = payload.get("credential_ref")
-    if not isinstance(ref, str) or not ref or len(ref) > MAX_CONFIG_PATH or not os.path.isabs(ref) or any(c in ref for c in ('\x00', '\r', '\n')) or '..' in Path(ref).parts:
-        raise ValueError("credential_ref must be an absolute bounded path")
-    name = payload.get("credential_name")
-    if not isinstance(name, str) or not re.fullmatch(r'[A-Z][A-Z0-9_]{0,127}', name):
-        raise ValueError("credential_name must be an uppercase environment name")
+    ref, name = _validate_reference(payload.get('credential_ref'), payload.get('credential_name'))
     return {"provider": "brevo", "credential_ref": ref, "credential_name": name,
             "sender_email": _email(payload.get("sender_email"))}
 
@@ -79,11 +83,17 @@ def _safe_root(project: dict[str, Any]) -> Path:
 
 def read_credential(config: dict[str, Any], project: dict[str, Any]) -> str:
     config = validate_config(config)
+    return read_owned_reference(config['credential_ref'], config['credential_name'], project)
+
+
+def read_owned_reference(credential_ref: str, credential_name: str, project: dict[str, Any]) -> str:
+    """Read one named credential from its authoritative owning ledger root."""
+    credential_ref, credential_name = _validate_reference(credential_ref, credential_name)
     root = _safe_root(project)
     try:
         if root.is_symlink() or not root.is_dir():
             raise ValueError("credential root unavailable")
-        path = Path(config["credential_ref"])
+        path = Path(credential_ref)
         path.relative_to(root)
         relative = path.relative_to(root)
         if not relative.parts:
@@ -116,9 +126,9 @@ def read_credential(config: dict[str, Any], project: dict[str, Any]) -> str:
             raise ValueError("credential file is too large")
         text = raw.decode("utf-8")
         for line in text.splitlines():
-            if line.startswith(config["credential_name"] + "="):
+            if line.startswith(credential_name + "="):
                 value = line.split("=", 1)[1].strip().strip('"').strip("'")
-                if value and "\r" not in value and "\n" not in value:
+                if value and len(value) <= 4096 and all(32 < ord(char) < 127 for char in value):
                     return value
         raise ValueError("named credential is unavailable")
     except (OSError, UnicodeDecodeError) as exc:
