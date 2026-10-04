@@ -17,6 +17,7 @@ import seo_cleanup
 import growth_planner
 import marketing_studio_workflow
 import marketing_kit_import
+import publication_recovery
 
 ENV_PATH = os.environ.get("AGENCY_ENV_FILE", "/home/agency/.config/agency/core.env")
 
@@ -123,7 +124,7 @@ def get_conn():
     return psycopg2.connect(host=DB_HOST, port=5432, dbname=DB_NAME, user=DB_USER, password=DB_PASS)
 
 
-SIDE_EFFECT_TASKS = frozenset({"publish_content", "execute_approval", "execute_suggestion", "propose_fix", "seo_cleanup", "seo_cleanup_notify"})
+SIDE_EFFECT_TASKS = frozenset({"static_publish_rollback", "publish_content", "execute_approval", "execute_suggestion", "propose_fix", "seo_cleanup", "seo_cleanup_notify"})
 _failure_alerted_at = {}
 
 
@@ -5701,6 +5702,7 @@ def handle_retired_development(task):
 
 
 DISPATCH = {
+    "static_publish_rollback": lambda task: publication_recovery.handle(task, get_conn),
     "marketing_kit_import": lambda task: marketing_kit_import.handle(task, get_conn),
     "marketing_studio_draft": lambda task: marketing_studio_workflow.handle(task, get_conn,
         lambda prompt: call_zen(prompt, model=MODEL_CONFIG['quality'], max_tokens=3000,

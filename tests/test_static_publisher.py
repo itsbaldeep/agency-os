@@ -146,8 +146,11 @@ class StaticPublisherTests(unittest.TestCase):
         self.assertEqual(archive.read_bytes(), original)
         self.assertFalse(any((static_publisher._receipt_root()).glob("4/23.json")))
         self.assertNotIn("article/23/", (self.root / "index.html").read_text())
+        retry = rollback(self.destination(), result["manifest_hash"])
+        self.assertTrue(retry["unpublished"])
+        self.assertEqual(Path(retry["archived_path"]).read_bytes(), original)
         with self.assertRaisesRegex(StaticPublishError, "not owned"):
-            rollback(self.destination(), result["manifest_hash"])
+            rollback(self.destination(), "0" * 64)
 
     def test_brand_name_has_no_implicit_deployden_default(self):
         value = item()
@@ -201,6 +204,19 @@ class StaticPublisherTests(unittest.TestCase):
         self.assertTrue(repaired["idempotent"])
         self.assertIn("article/23/", (self.root / "index.html").read_text())
         self.assertIn("article/23/", (self.root / "sitemap.xml").read_text())
+
+    def test_rollback_retry_repairs_indexes_after_injected_failure(self):
+        value=item()
+        result=publish(value,self.destination(),content_digest(value))
+        write=static_publisher._write_atomic
+        def fail_sitemap(path,content):
+            if path.name=='sitemap.xml':raise OSError('fixture interruption')
+            return write(path,content)
+        with mock.patch.object(static_publisher,'_write_atomic',side_effect=fail_sitemap):
+            with self.assertRaises(OSError):rollback(self.destination(),result['manifest_hash'])
+        retry=rollback(self.destination(),result['manifest_hash'])
+        self.assertTrue(retry['unpublished'])
+        self.assertNotIn('article/23/',(self.root/'sitemap.xml').read_text())
 
 
 if __name__ == "__main__":

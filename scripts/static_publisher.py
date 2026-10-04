@@ -278,30 +278,44 @@ def _rollback_unlocked(destination: dict, manifest_hash: str) -> dict:
     root, base_url = _destination(destination, brand_hint)
     if not isinstance(manifest_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", manifest_hash):
         _fail("manifest hash is invalid")
+    brand_id = str(brand_hint)
+    recovery_path = _receipt_root() / "archive" / brand_id / f"rollback-{manifest_hash}.json"
+    _assert_no_symlink(recovery_path, _receipt_root())
+    recovery = _read_json(recovery_path)
     manifest = None
     manifest_path = None
-    for candidate in _receipt_root().glob("*/*.json"):
+    for candidate in (_receipt_root() / brand_id).glob("*.json"):
+        _assert_no_symlink(candidate, _receipt_root())
         row = _read_json(candidate)
         if row and row.get("output_root") == str(root) and row.get("manifest_hash") == manifest_hash:
             manifest, manifest_path = row, candidate
             break
-    if not manifest:
+    if not manifest and recovery:
+        manifest = recovery.get("manifest")
+    if not isinstance(manifest, dict) or manifest.get("output_root") != str(root) or manifest.get("brand_id") != brand_id or manifest.get("manifest_hash") != manifest_hash:
         _fail("static publication manifest is not owned or has changed")
-    article_path = Path(str(manifest.get("article_path") or ""))
-    try:
-        article_path.resolve(strict=False).relative_to(root.resolve(strict=False))
-    except ValueError as exc:
-        raise StaticPublishError("static publication manifest path is invalid") from exc
+    content_id = str(manifest.get("content_id") or "")
+    if not _ID.fullmatch(content_id):
+        _fail("static publication content identity is invalid")
+    article_path = root / "article" / content_id / "index.html"
+    if str(article_path) != manifest.get("article_path"):
+        _fail("static publication manifest path is invalid")
     _assert_no_symlink(article_path, PUBLICATION_ROOT.resolve(strict=False))
-    if not article_path.is_file() or hashlib.sha256(article_path.read_bytes()).hexdigest() != manifest_hash:
+    archive = _receipt_root() / "archive" / brand_id / f"{content_id}-{manifest_hash}.html"
+    _assert_no_symlink(archive, _receipt_root())
+    if article_path.is_file():
+        document = article_path.read_bytes()
+        if hashlib.sha256(document).hexdigest() != manifest_hash:
+            _fail("static publication bytes no longer match the manifest")
+        _write_atomic(archive, document.decode("utf-8"))
+    elif not recovery or not archive.is_file() or hashlib.sha256(archive.read_bytes()).hexdigest() != manifest_hash:
         _fail("static publication bytes no longer match the manifest")
-    archive = _receipt_root() / "archive" / str(manifest.get("brand_id")) / f"{manifest.get('content_id')}-{manifest_hash}.html"
-    _write_atomic(archive, article_path.read_text(encoding="utf-8"))
-    article_path.unlink()
-    if manifest_path and manifest_path.exists():
-        manifest_path.unlink()
-    _refresh_indexes(root, base_url, str(manifest.get("brand_id")))
-    return {"ok": True, "manifest_hash": manifest_hash, "archived_path": str(archive)}
+    _write_atomic(recovery_path, json.dumps({"manifest": manifest, "archived_path": str(archive)}, sort_keys=True))
+    article_path.unlink(missing_ok=True)
+    if manifest_path:
+        manifest_path.unlink(missing_ok=True)
+    _refresh_indexes(root, base_url, brand_id)
+    return {"ok": True, "brand_id": brand_id, "content_id": content_id, "manifest_hash": manifest_hash, "archived_path": str(archive), "unpublished": True}
 
 
 def rollback(destination: dict, manifest_hash: str) -> dict:

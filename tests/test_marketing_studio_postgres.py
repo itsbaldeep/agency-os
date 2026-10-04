@@ -154,6 +154,46 @@ class MarketingStudioPostgresTests(unittest.TestCase):
             self.assertEqual(params["brand_id"], 101)
             self.assertEqual(params["revision"], 1)
 
+    def test_static_withdrawal_route_and_worker_preserve_exact_receipt(self):
+        import tempfile
+        import publication_recovery, static_publisher
+        from ghost_publisher import content_digest
+        from publication_settings import destination_digest
+        cur=self.cursor()
+        cur.execute("ALTER TABLE brands ADD COLUMN project_id integer")
+        cur.execute("ALTER TABLE tasks ADD COLUMN result_ref text")
+        cur.execute("CREATE TABLE projects (id integer PRIMARY KEY,lifecycle text)")
+        cur.execute("INSERT INTO projects VALUES (303,'active')")
+        cur.execute("UPDATE brands SET project_id=303 WHERE id=101")
+        cur.execute("CREATE TABLE content_items (id integer PRIMARY KEY,brand_id integer,status text,publish_task_id integer,structured jsonb,updated_at timestamptz)")
+        dashboard_root=ROOT.parents[0]/'agency-dashboard'
+        sys.path.insert(0,str(dashboard_root))
+        import app as dashboard
+        import publication_recovery_routes as routes
+        with tempfile.TemporaryDirectory() as temporary:
+            public_root=Path(temporary)/'publications'
+            destination={'type':'static','enabled':True,'output_root':str(public_root/'101'),'base_url':'https://fixture.example/journal','brand_name':'Fixture'}
+            article={'id':9,'brand_id':101,'title':'Fixture article','body':'Fixture text','content_blocks':[{'type':'prose','markdown':'Fixture text.'}],'structured':{},'project_status':'active','publication_status':'publishing'}
+            with mock.patch.object(static_publisher,'PUBLICATION_ROOT',public_root):
+                receipt=static_publisher.publish(article,destination,content_digest(article))
+                approval={'content_item_id':9,'approved_destination':destination_digest(destination)}
+                cur.execute("INSERT INTO tasks(type,status,params,triggered_by,result_ref) VALUES ('publish_content','done',%s,'fixture',%s) RETURNING id",(json.dumps(approval),json.dumps(receipt)))
+                original_id=cur.fetchone()['id']
+                cur.execute("INSERT INTO content_items VALUES (9,101,'published',%s,'{}',now())",(original_id,))
+                conn=self._dashboard_conn()
+                with mock.patch.object(dashboard.models,'db',return_value=conn),mock.patch.object(routes,'project_destination',return_value=destination):
+                    client=dashboard.app.test_client();client.environ_base['HTTP_ORIGIN']='http://localhost'
+                    review=client.get('/api/brands/101/content/9/withdraw')
+                    self.assertEqual(review.status_code,200)
+                    queued=client.post('/api/brands/101/content/9/withdraw',json=review.json['review'])
+                    self.assertEqual(queued.status_code,201)
+                with mock.patch.object(publication_recovery,'project_destination',return_value=destination):
+                    result=publication_recovery.handle({'id':queued.json['task_id'],'params':review.json['review']},lambda:conn)
+                self.assertTrue(result['ok'],result)
+                self.assertFalse((public_root/'101/article/9/index.html').exists())
+                cur.execute('SELECT status,publish_task_id FROM content_items WHERE id=9')
+                state=cur.fetchone();self.assertEqual(state['status'],'draft');self.assertEqual(state['publish_task_id'],original_id)
+
     def test_worker_draft_execution_keeps_source_facts_and_revision(self):
         cur = self.cursor()
         cur.execute("INSERT INTO marketing_brand_profiles(brand_id,profile) VALUES (202,%s)", (json.dumps({"positioning": "South tools"}),))
