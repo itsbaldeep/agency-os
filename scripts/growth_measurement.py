@@ -20,6 +20,7 @@ WINDOW_DAYS = 28
 GSC_MIN_IMPRESSIONS = 100
 GA4_MIN_USERS = 30
 GA4_MIN_SESSIONS = 30
+JOURNEY_ROW_CAP = 250
 
 
 def _date(value):
@@ -246,3 +247,101 @@ def collect_growth(token, gsc_property=None, ga4_property=None, captured_at=None
     result = {"schema_version": 1, "status": "available" if gsc["status"] == "available" and ga4["status"] == "available" else "partial" if gsc_current_available or ga4_current_available else "source_unavailable", "captured_at": captured, "windows": period_windows, "sources": {"gsc": gsc, "ga4": ga4}, "confidence": "unavailable" if not gsc_current_available and not ga4_current_available else "partial" if gsc["status"] != "available" or ga4["status"] != "available" else "insufficient_evidence" if gsc_low or ga4_low else "available", "recommendations": []}
     result["recommendations"] = recommendations(gsc, ga4)
     return result
+
+
+def _journey_number(value, name, *, rate=False):
+    number = _number(value, name)
+    if rate and number > 1:
+        raise ValueError("invalid " + name)
+    return number
+
+
+def _journey_report(result, *, dimension, metrics, row_mapper):
+    """Normalize one bounded GA4 dimension report without retaining PII."""
+    if not isinstance(result, dict) or result.get("status") != "available":
+        return {"status": "source_unavailable", "error": "provider request unavailable", "rows": []}
+    payload = result.get("data")
+    if not isinstance(payload, dict):
+        return {"status": "source_unavailable", "error": "malformed journey response", "rows": []}
+    headers = payload.get("metricHeaders")
+    dimensions = payload.get("dimensionHeaders")
+    if (not isinstance(headers, list) or {h.get("name") for h in headers if isinstance(h, dict)} != set(metrics)
+            or len(headers) != len(metrics) or not isinstance(dimensions, list)
+            or [d.get("name") for d in dimensions if isinstance(d, dict)] != [dimension]):
+        return {"status": "source_unavailable", "error": "journey headers unavailable", "rows": []}
+    rows = payload.get("rows")
+    row_count = payload.get("rowCount", len(rows) if isinstance(rows, list) else -1)
+    if not isinstance(rows, list) or not isinstance(row_count, int) or isinstance(row_count, bool) or row_count < 0:
+        return {"status": "source_unavailable", "error": "journey rows unavailable", "rows": []}
+    if row_count != len(rows) and row_count <= JOURNEY_ROW_CAP:
+        return {"status": "source_unavailable", "error": "journey row count mismatch", "rows": []}
+    truncated = row_count > JOURNEY_ROW_CAP or len(rows) > JOURNEY_ROW_CAP
+    clean = []
+    dropped = 0
+    for row in rows[:JOURNEY_ROW_CAP]:
+        try:
+            if not isinstance(row, dict) or not isinstance(row.get("dimensionValues"), list) or len(row["dimensionValues"]) != 1:
+                raise ValueError("invalid dimension")
+            value = str(row["dimensionValues"][0].get("value") or "")[:500]
+            if not value or "?" in value or "#" in value:
+                dropped += 1
+                continue
+            metric_values = row.get("metricValues")
+            if not isinstance(metric_values, list) or len(metric_values) != len(headers):
+                raise ValueError("invalid metrics")
+            metrics_out = {}
+            for header, metric in zip(headers, metric_values):
+                name = header["name"]
+                metrics_out[name] = _journey_number(metric["value"], name, rate=name == "engagementRate")
+            clean.append({dimension: value, "metrics": metrics_out})
+        except (KeyError, TypeError, ValueError):
+            dropped += 1
+    if truncated or dropped:
+        status = "partial" if clean or row_count == 0 else "source_unavailable"
+    else:
+        status = "available"
+    return {"status": status, "rows": clean, "row_count": row_count,
+            "returned_rows": len(clean), "row_cap": JOURNEY_ROW_CAP,
+            "truncated": truncated, "dropped_rows": dropped}
+
+
+def collect_journey(token, ga4_property, captured_at=None, request_fn=None):
+    """Collect aggregate GA4 journey reports for one delayed 28-day window.
+
+    The dimensions are limited to page paths, event names, and channel groups.
+    The result does not contain users, emails, demographics, or query strings;
+    event stages are aggregate counts and are not sequential distinct-user
+    funnel measurements.
+    """
+    captured = captured_at or datetime.now(timezone.utc).isoformat()
+    period = windows(captured)["current"]
+    unavailable = {"status": "source_unavailable", "error": "property or access unavailable", "rows": []}
+    if not token or not ga4_property:
+        return {"schema_version": 1, "status": "source_unavailable", "property": str(ga4_property) if ga4_property else None,
+                "captured_at": captured, "window": period, "sources": {"page_views": unavailable, "events": unavailable, "channels": unavailable},
+                "coverage": {"row_cap": JOURNEY_ROW_CAP, "available_sources": 0, "requested_sources": 3},
+                "limitation": "Event stage counts are aggregate events, not sequential distinct-user funnel counts."}
+    fetch = request_fn or seo_measurement.google_metric
+    endpoint = "https://analyticsdata.googleapis.com/v1beta/properties/" + str(ga4_property) + ":runReport"
+
+    def request(dimensions, metrics):
+        payload = {"dateRanges": [{"startDate": period["start_date"], "endDate": period["end_date"]}],
+                   "dimensions": [{"name": name} for name in dimensions],
+                   "metrics": [{"name": name} for name in metrics], "limit": JOURNEY_ROW_CAP}
+        try:
+            result = fetch(endpoint, token, payload)
+            return result if isinstance(result, dict) else {"status": "source_unavailable"}
+        except Exception as exc:
+            return {"status": "source_unavailable", "error": type(exc).__name__}
+
+    page_views = _journey_report(request(["pagePath"], ["screenPageViews", "sessions", "engagementRate"]), dimension="pagePath", metrics=("screenPageViews", "sessions", "engagementRate"), row_mapper=None)
+    events = _journey_report(request(["eventName"], ["eventCount"]), dimension="eventName", metrics=("eventCount",), row_mapper=None)
+    channels = _journey_report(request(["sessionDefaultChannelGroup"], ["sessions"]), dimension="sessionDefaultChannelGroup", metrics=("sessions",), row_mapper=None)
+    sources = {"page_views": page_views, "events": events, "channels": channels}
+    available = sum(source["status"] == "available" for source in sources.values())
+    partial = sum(source["status"] == "partial" for source in sources.values())
+    status = "available" if available == 3 else "partial" if available or partial else "source_unavailable"
+    return {"schema_version": 1, "status": status, "property": str(ga4_property), "captured_at": captured,
+            "window": period, "sources": sources,
+            "coverage": {"row_cap": JOURNEY_ROW_CAP, "available_sources": available, "partial_sources": partial, "requested_sources": 3},
+            "limitation": "Event stage counts are aggregate events, not sequential distinct-user funnel counts."}

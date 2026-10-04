@@ -1,0 +1,6 @@
+#!/bin/sh
+export HYPERFRAMES_BROWSER_PATH=/home/agency/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome
+export HYPERFRAMES_FFMPEG_PATH=/home/agency/.local/lib/python3.14/site-packages/imageio_ffmpeg/binaries/ffmpeg-linux-x86_64-v7.0.2
+export HYPERFRAMES_FFPROBE_PATH=/home/agency/tools/marketing-media/node_modules/@ffprobe-installer/linux-x64/ffprobe
+export LD_LIBRARY_PATH=/home/agency/.local/lib/playwright/usr/lib/x86_64-linux-gnu
+exec /home/agency/.nvm/versions/node/v24.19.0/bin/node /home/agency/tools/marketing-media/node_modules/hyperframes/dist/cli.js "$@"

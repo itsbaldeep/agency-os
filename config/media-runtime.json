@@ -1,0 +1,6 @@
+{
+  "executable": "/home/agency/tools/marketing-media/bin/hyperframes",
+  "args": [],
+  "version": "hyperframes-0.8.119",
+  "gsap_source": "vendor/marketing-media/gsap.min.js"
+}

@@ -1,0 +1,5 @@
+Font: KaTeX_SansSerif-Regular.ttf
+Source package: KaTeX (Khan Academy and contributors)
+License: MIT, see KaTeX-LICENSE.txt
+Source path at provisioning time: vscode-server/node_modules/katex/dist/fonts/KaTeX_SansSerif-Regular.ttf
+Used by: Agency OS marketing media storyboard rasterization and local HyperFrames composition

@@ -1,4 +1,5 @@
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -69,6 +70,15 @@ class SeoCleanupTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             seo_cleanup.enrich_ghost_findings([], {"credential_path": "/tmp/secret", "credential_ref": "GHOST_API"})
 
+    def test_generic_publication_root_is_required_and_project_scoped(self):
+        with tempfile.TemporaryDirectory(dir="/home/agency/engagements") as project:
+            env = Path(project) / "marketing.env"
+            env.write_text("GENERIC_GHOST_KEY=fixture\n", encoding="utf-8")
+            destination = {"project_root": project, "credential_root": project, "credential_path": str(env), "credential_ref": "GENERIC_GHOST_KEY"}
+            self.assertEqual(seo_cleanup._credential_context(destination), env.resolve())
+            with self.assertRaises(ValueError):
+                seo_cleanup._credential_context({"project_path": project, "credential_path": str(env), "credential_ref": "GENERIC_GHOST_KEY"})
+
 
 class GrowthPlannerTests(unittest.TestCase):
     def test_existing_human_queue_is_preserved_and_capped(self):
@@ -83,7 +93,7 @@ class GrowthPlannerTests(unittest.TestCase):
         self.assertFalse(result["evidence_available"])
 
     def test_query_is_ranked_before_generic_finding(self):
-        audit = {"sources": {"gsc": {"query": {"row_summaries": [
+        audit = {"brand_context": {"query_terms": ["resume"]}, "sources": {"gsc": {"query": {"row_summaries": [
             {"keys": ["truepal"], "impressions": 99},
             {"keys": ["truthful resume tailoring"], "impressions": 4},
         ]}}}, "findings": [{"rule": "canonical_mismatch", "url": "https://trueapply.in/a"}]}
@@ -92,7 +102,7 @@ class GrowthPlannerTests(unittest.TestCase):
         self.assertEqual(result["repairs"][0]["rule"], "canonical_mismatch")
 
     def test_owner_feedback_creates_help_lane_without_demand_claim(self):
-        result = growth_planner.recommend({}, [], owner_feedback=True)
+        result = growth_planner.recommend({"brand_context": {"help_topics": ["How to configure a workspace", "How to review a report", "How to export results"]}}, [], owner_feedback=True)
         self.assertEqual(len(result["articles"]), 0)
         self.assertEqual(len(result["help"]), 3)
         self.assertEqual(result["help"][0]["evidence_status"], "owner_feedback")
@@ -113,10 +123,25 @@ class GrowthPlannerTests(unittest.TestCase):
         self.assertEqual(result["articles"][0]["evidence"]["audit_id"], 2)
 
     def test_zero_gsc_owner_goal_fills_open_article_slot_with_honest_evidence(self):
-        result = growth_planner.recommend({"audit_id": 9, "sources": {"crawl": {"pages": [{"url": "https://trueapply.in/", "fields": {"title": "TrueApply"}}]}}, "competitor_urls": ["https://example.test"]}, [{"kind": "article", "title": "Existing outline", "status": "outline"}], owner_feedback=True, max_articles=2)
+        result = growth_planner.recommend({"audit_id": 9, "brand_context": {"goals": [{"title": "How to configure a workspace", "keyword": "workspace setup", "hypothesis": "Owners need a clear setup path."}]}, "sources": {"crawl": {"pages": [{"url": "https://example.test/", "fields": {"title": "Example"}}]}}, "competitor_urls": ["https://competitor.test"]}, [{"kind": "article", "title": "Existing outline", "status": "outline"}], owner_feedback=True, max_articles=2)
         self.assertEqual(len(result["articles"]), 2)
         self.assertEqual(result["articles"][1]["evidence_status"], "owner_goal_hypothesis")
         self.assertIn("unverified", result["articles"][1]["rationale"])
+
+    def test_generic_brand_context_drives_topics_and_journey_gaps(self):
+        audit = {
+            "brand_context": {
+                "query_terms": ["warehouse", "inventory"],
+                "goals": [{"title": "Warehouse inventory setup", "keyword": "warehouse inventory", "hypothesis": "Setup friction is owner-reported."}],
+                "journey_stages": [{"from": "visitors", "to": "trial_started", "hypothesis": "Trial conversion needs review."}],
+            },
+            "sources": {"gsc": {"query": {"row_summaries": [{"keys": ["warehouse inventory"], "impressions": 4}, {"keys": ["resume tailoring"], "impressions": 99}]}}, "crawl": {"pages": [{"url": "https://example.test/", "fields": {"title": "Example"}}]}},
+            "activation": {"signup_cohort_totals": {"visitors": 10, "trial_started": 2}},
+        }
+        result = growth_planner.recommend(audit, [], owner_feedback=True)
+        self.assertEqual(result["articles"][0]["target_keyword"], "warehouse inventory")
+        self.assertTrue(any(g.get("from_stage") == "visitors" for g in result["gaps"]))
+        self.assertFalse(any("resume" in str(item).lower() for item in result["articles"]))
 
 
 if __name__ == "__main__":

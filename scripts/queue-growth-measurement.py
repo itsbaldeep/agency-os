@@ -25,7 +25,7 @@ def queue(brand_id, directory=STATE, day=None, opener=urlopen):
         if prior.get('day') == today:
             return {**prior, 'deduplicated_day': True}
         request = Request(f'{BASE}/api/brands/{brand_id}/seo-measurement', data=b'{}',
-                          headers={'Content-Type': 'application/json'}, method='POST')
+                          headers={'Content-Type': 'application/json', 'Origin': BASE}, method='POST')
         try:
             with opener(request, timeout=30) as response:
                 result = json.loads(response.read(16384))
@@ -49,9 +49,27 @@ def queue(brand_id, directory=STATE, day=None, opener=urlopen):
         return record
 
 
+def configured_brands():
+    import psycopg2
+    values = {}
+    with open('/home/agency/.config/agency/core.env') as source:
+        for line in source:
+            if '=' in line and not line.startswith('#'):
+                key,value=line.strip().split('=',1);values[key]=value.strip('"').strip("'")
+    conn=psycopg2.connect(host='100.64.0.1',dbname='agencyos',user='agency',password=values.get('POSTGRES_PASSWORD'))
+    try:
+        cur=conn.cursor()
+        cur.execute("""SELECT ms.brand_id FROM marketing_measurement_schedules ms
+            JOIN brands b ON b.id=ms.brand_id LEFT JOIN projects p ON p.id=b.project_id
+            WHERE ms.enabled AND (b.project_id IS NULL OR p.lifecycle='active') ORDER BY ms.brand_id""")
+        return [row[0] for row in cur.fetchall()]
+    finally:conn.close()
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('brand_id', type=int, nargs='+')
+    parser.add_argument('brand_id', type=int, nargs='*')
+    parser.add_argument('--configured', action='store_true')
     args = parser.parse_args()
-    for brand_id in dict.fromkeys(args.brand_id):
+    for brand_id in dict.fromkeys(configured_brands() if args.configured else args.brand_id):
         print(json.dumps(queue(brand_id)))

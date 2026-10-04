@@ -191,6 +191,38 @@ def read_named_credential(path, name):
     raise ValueError("named credential was not found")
 
 
+def _credential_context(destination):
+    """Resolve a configured engagement root and credential file safely."""
+    if not isinstance(destination, dict):
+        raise ValueError("publication destination is required")
+    project_root = destination.get("project_root")
+    if not project_root and isinstance(destination.get("asset_storage"), dict):
+        project_root = destination["asset_storage"].get("project_root")
+    credential_root = destination.get("credential_root") or project_root
+    if not project_root or not credential_root:
+        raise ValueError("publication project_root and credential_root are required")
+    engagement_root = Path("/home/agency/engagements").resolve()
+    project = Path(str(project_root)).resolve(strict=True)
+    root = Path(str(credential_root)).resolve(strict=True)
+    project.relative_to(engagement_root)
+    root.relative_to(project)
+    credential_path = destination.get("credential_path")
+    if not credential_path and destination.get("env_file"):
+        env_file = Path(str(destination["env_file"]))
+        if env_file.is_absolute():
+            credential_path = str(env_file)
+        else:
+            credential_path = str(project / env_file)
+    if not credential_path:
+        raise ValueError("publication credential_path or env_file is required")
+    credential = Path(str(credential_path)).resolve(strict=True)
+    credential.relative_to(root)
+    credential.relative_to(engagement_root)
+    if not credential.is_file():
+        raise ValueError("publication credential must be a file")
+    return credential
+
+
 def apply_ghost_metadata(item, destination, *, client=None, allow_empty=False):
     """Apply one approved description and verify exact readback.
 
@@ -208,19 +240,10 @@ def apply_ghost_metadata(item, destination, *, client=None, allow_empty=False):
         raise ValueError("Ghost post id is required")
     if client is None:
         from ghost_publisher import GhostAdminClient, _endpoint
-        credential_path = destination.get("credential_path")
-        if not credential_path and destination.get("project_path") and destination.get("env_file"):
-            credential_path = str((Path(destination["project_path"]).resolve() / str(destination["env_file"])).resolve())
         credential_name = destination.get("credential_ref")
         if not credential_name:
             raise ValueError("Ghost credential_ref is required")
-        if not credential_path:
-            raise ValueError("engagement credential path is required")
-        root = destination.get("credential_root") or "/home/agency/engagements/trueapply"
-        try:
-            Path(str(credential_path)).resolve().relative_to(Path(str(root)).resolve())
-        except ValueError as exc:
-            raise ValueError("credential path is outside the engagement scope") from exc
+        credential_path = _credential_context(destination)
         key = read_named_credential(credential_path, credential_name)
         client = GhostAdminClient(_endpoint(destination), key, admin_host=destination.get("admin_host"))
     import urllib.parse
@@ -264,11 +287,7 @@ def enrich_ghost_findings(findings, destination, *, client=None):
         credential_ref = destination.get("credential_ref")
         if not credential_ref:
             raise ValueError("Ghost credential_ref is required")
-        credential_path = destination.get("credential_path") or str((Path(destination["project_path"]).resolve() / str(destination["env_file"])).resolve())
-        try:
-            Path(credential_path).resolve().relative_to(Path("/home/agency/engagements/trueapply").resolve())
-        except ValueError as exc:
-            raise ValueError("credential path is outside the engagement scope") from exc
+        credential_path = _credential_context(destination)
         key = read_named_credential(credential_path, credential_ref)
         client = GhostAdminClient(_endpoint(destination), key, admin_host=destination.get("admin_host"))
     response = client.request("GET", "/ghost/api/admin/posts/?limit=100&fields=id,url,canonical_url,updated_at,meta_description,custom_excerpt,excerpt")

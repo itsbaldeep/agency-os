@@ -118,6 +118,77 @@ class GrowthMeasurementTests(unittest.TestCase):
         self.assertEqual(result["confidence"], "available")
         self.assertEqual(result["sources"]["ga4"]["state"], "available")
 
+    @staticmethod
+    def _journey_response(dimension, metrics, values):
+        return {"status": "available", "data": {
+            "dimensionHeaders": [{"name": dimension}],
+            "metricHeaders": [{"name": name} for name in metrics],
+            "rowCount": len(values),
+            "rows": [{"dimensionValues": [{"value": label}],
+                      "metricValues": [{"value": str(value)} for value in row]}
+                     for label, row in values],
+        }}
+
+    def test_collect_journey_requests_bounded_safe_reports(self):
+        calls = []
+
+        def request(url, token, payload):
+            calls.append((url, token, payload))
+            dimension = payload["dimensions"][0]["name"]
+            if dimension == "pagePath":
+                return self._journey_response(dimension, ("screenPageViews", "sessions", "engagementRate"), [("/home", (12, 8, .75))])
+            if dimension == "eventName":
+                return self._journey_response(dimension, ("eventCount",), [("generate_lead", (3,))])
+            return self._journey_response(dimension, ("sessions",), [("Organic Search", (8,))])
+
+        result = growth.collect_journey("token", "123", "2026-09-16T00:00:00+00:00", request)
+        self.assertEqual(result["status"], "available")
+        self.assertEqual(len(calls), 3)
+        self.assertEqual({call[2]["limit"] for call in calls}, {250})
+        self.assertEqual({call[2]["dateRanges"][0]["startDate"] for call in calls}, {"2026-08-17"})
+        self.assertEqual(result["sources"]["page_views"]["rows"][0]["metrics"]["screenPageViews"], 12.0)
+        self.assertEqual(result["sources"]["events"]["rows"][0]["eventName"], "generate_lead")
+        self.assertIn("not sequential distinct-user", result["limitation"])
+
+    def test_collect_journey_rejects_query_strings_and_keeps_safe_zero_values(self):
+        def request(_url, _token, payload):
+            dimension = payload["dimensions"][0]["name"]
+            metric = ("screenPageViews", "sessions", "engagementRate") if dimension == "pagePath" else ("eventCount",) if dimension == "eventName" else ("sessions",)
+            labels = [("/private?email=user@example.com", (0,) * len(metric)), ("/safe", (0,) * len(metric))]
+            return self._journey_response(dimension, metric, labels)
+
+        result = growth.collect_journey("token", "123", "2026-09-16T00:00:00+00:00", request)
+        self.assertEqual(result["status"], "partial")
+        for source in result["sources"].values():
+            self.assertTrue(all("?" not in str(row) for row in source["rows"]))
+        self.assertEqual(result["sources"]["events"]["rows"][0]["metrics"]["eventCount"], 0.0)
+        self.assertNotIn("user@example.com", str(result))
+
+    def test_collect_journey_unavailable_and_malformed_are_explicit(self):
+        result = growth.collect_journey(None, "123", "2026-09-16T00:00:00+00:00")
+        self.assertEqual(result["status"], "source_unavailable")
+        self.assertEqual(result["coverage"]["available_sources"], 0)
+        def malformed(_url, _token, _payload):
+            return {"status": "available", "data": {"rows": []}}
+        result = growth.collect_journey("token", "123", "2026-09-16T00:00:00+00:00", malformed)
+        self.assertEqual(result["status"], "source_unavailable")
+
+    def test_collect_journey_partial_source_and_row_cap_are_visible(self):
+        def request(_url, _token, payload):
+            dimension = payload["dimensions"][0]["name"]
+            if dimension == "eventName":
+                return {"status": "source_unavailable", "error": "denied"}
+            metric = ("screenPageViews", "sessions", "engagementRate") if dimension == "pagePath" else ("sessions",)
+            values = [(f"/page-{index}", tuple(1 for _ in metric)) for index in range(250)]
+            response = self._journey_response(dimension, metric, values)
+            response["data"]["rowCount"] = 251
+            return response
+        result = growth.collect_journey("token", "123", "2026-09-16T00:00:00+00:00", request)
+        self.assertEqual(result["status"], "partial")
+        self.assertTrue(result["sources"]["page_views"]["truncated"])
+        self.assertEqual(result["sources"]["page_views"]["returned_rows"], 250)
+        self.assertEqual(result["sources"]["events"]["status"], "source_unavailable")
+
 
 if __name__ == "__main__":
     unittest.main()

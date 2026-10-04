@@ -4,6 +4,30 @@ Authority: human co-CEO + AI co-CEO (Codex CLI). This file is the persistent
 strategic context — read it on every session start. It supersedes informal
 chat decisions. Update it when strategy changes.
 
+## Dashboard v2 and agency positioning, owner direction 2026-10-04
+
+Deployden is the current, renameable agency brand. Its offer is human-led design,
+development and digital marketing for buyers seeking a smaller, more affordable
+service partner. The marketing dashboard is an internal operator console, not a
+self-service marketing SaaS sold to clients. Do not invent prices, savings,
+enterprise customers or performance claims.
+
+The owner authorizes a tested v2 redesign and deliberate deployment across
+Agency Dashboard, Agency OS and Deployden. Reconsider navigation and the stack;
+use compact, classic, professional, action-oriented and report-oriented design.
+Project coding and development stay in Codex. The dashboard owns brand marketing:
+setup, strategy, auditing, reporting, GA4/GSC, editorial assets, blog/help content,
+social posts and videos, campaign planning and consented retention workflows.
+All shared workers must be project-agnostic with brand-owned configuration and
+credentials. Include the brag launch-video workflow. Collection may run on demand;
+new schedules remain opt-in. This direction supersedes the earlier decision to
+park campaign implementation, but does not grant campaign sending authority.
+
+Marketing publication, social posting, outreach and campaign sending require
+separate exact-action approval. Account access and consent must be verified;
+missing integrations must never be presented as working. Preserve engagement
+isolation, existing publication approvals and retired jobs 8 through 12.
+
 ---
 
 ## 0. What this VPS is (one sentence)
@@ -303,3 +327,16 @@ content planning and acquisition-to-activation feedback loop. Release-specific
 verification and explicit unresolved business decisions remain visible. Exact
 marketing publications, paid spend and future email/SMS/WhatsApp sends retain their
 existing approval gates. Removing beta wording alone is not launch acceptance.
+
+### TrueApply release hold, freemium and retention, owner direction 2026-10-02
+
+The owner holds the full production v1.0.0 release until unfamiliar-user testing
+this weekend has been reviewed. Continue implementation and isolated verification.
+The commercial model is B2C freemium with automatically refreshed credits and
+usage limits. Exact paid prices, merchant setup and payment activation remain
+reviewable decisions. Implement recurring in-app job matches, saved searches,
+watchlist updates and notifications now. Prepare consent-aware digest previews
+and a blocked email outbox; actual provider wiring and sends remain deferred.
+The owner authorizes configuring the owned TrueApply GA4 property once Editor
+access is granted. Questions during active work are queued follow-ups and do
+not end the authorized task unless the owner explicitly pauses or redirects it.

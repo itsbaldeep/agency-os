@@ -51,6 +51,20 @@ FAIL_STATES = ("failed", "error")
 DASHBOARD_URL = os.environ.get("DASHBOARD_URL", "http://100.64.0.1:5001")
 
 
+def format_task_duration(started, finished):
+    """Format task runtime using the dashboard's duration convention."""
+    if not started or not finished:
+        return ""
+    seconds = int((finished - started).total_seconds())
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, seconds = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m {seconds}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes}m"
+
+
 def q(sql, args=(), fetch=True):
     """One short-lived connection per query: simple and stale-proof."""
     with psycopg2.connect(
@@ -487,6 +501,7 @@ async def push_loop():
                 _primed = True
 
             rows = q("""SELECT id, type, status, cost, error, result_ref,
+                                triggered_by, started_at, finished_at,
                                 COALESCE(params->>'question', params->>'prompt', params->>'spec', params->>'description', '') AS spec
                         FROM tasks
                         WHERE finished_at IS NOT NULL AND announced_at IS NULL
@@ -496,6 +511,13 @@ async def push_loop():
                 if r["status"] not in DONE_STATES + FAIL_STATES:
                     continue
                 if r["status"] in DONE_STATES and r["type"] == "ask":
+                    duration = format_task_duration(r.get("started_at"), r.get("finished_at")) or "unknown"
+                    await channel.send(
+                        f"✅ **task {r['id']}** done · type: `{r['type']}` · "
+                        f"triggered by: `{r['triggered_by']}` · duration: `{duration}` · "
+                        f"cost: `${float(r['cost'] or 0):.4f}`\n"
+                        f"🔎 {DASHBOARD_URL}/tasks/{r['id']}"
+                    )
                     answer = r["result_ref"] or "no answer"
                     if len(answer) > 9500:
                         import io as _io
@@ -510,9 +532,12 @@ async def push_loop():
                     m = _re.search(r"https://github\.com/\S+/pull/\d+", r.get("result_ref") or "")
                     pr = f"\n🔗 {m.group(0)}" if m else ""
                     ref = f"\n```{r['result_ref'][:900]}```" if r['type'] == 'agent_task' and r['result_ref'] else ""
+                    duration = format_task_duration(r.get("started_at"), r.get("finished_at")) or "unknown"
                     await channel.send(
-                        f"✅ **task {r['id']}** done (${float(r['cost'] or 0):.4f}) "
-                        f"— {r['spec'][:120]}{pr}{ref}"
+                        f"✅ **task {r['id']}** done\n"
+                        f"type: `{r['type']}` · triggered by: `{r['triggered_by']}` · "
+                        f"duration: `{duration}` · cost: `${float(r['cost'] or 0):.4f}`"
+                        f"{pr}{ref}"
                         f"\n🔎 {DASHBOARD_URL}/tasks/{r['id']}")
                 elif r["status"] in FAIL_STATES:
                     await channel.send(

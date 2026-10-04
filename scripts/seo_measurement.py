@@ -16,38 +16,92 @@ SERVICE_ACCOUNT_FILE = "/home/agency/.config/agency/gsc-service-account.json"
 PARSER_VERSION = "seo-parser-2"
 
 
-def normalize_activation(payload, days=28):
-    """Validate the engagement aggregate without retaining identifiers or PII.
+RETENTION_KEYS = (
+    "notifications_generated", "notifications_read", "notifications_clicked",
+    "unread_notifications", "active_watchlist_jobs", "active_saved_searches",
+    "digest_previews", "email_blocked", "email_failed", "email_sent",
+    "email_delivered", "email_opened", "email_clicked", "email_bounced",
+    "email_spam", "email_suppressed", "email_unsubscribed", "email_eligible",
+)
+STAGE_KEY = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
-    The TrueApply endpoint is optional.  Missing or malformed responses remain
-    unavailable and are never converted into zero conversions.
-    """
+
+def _safe_aggregate_counts(value, *, limit=50):
+    if not isinstance(value, dict) or len(value) > limit:
+        return None
+    clean = {}
+    for key, raw in value.items():
+        if not isinstance(key, str) or not STAGE_KEY.fullmatch(key):
+            return None
+        if not isinstance(raw, int) or isinstance(raw, bool) or not 0 <= raw <= 10**12:
+            return None
+        clean[key] = int(raw)
+    return clean
+
+
+def _safe_text(value, limit=200):
+    if not isinstance(value, str) or len(value) > limit or any(ord(char) < 32 for char in value):
+        return None
+    return value
+
+
+def _safe_nonnegative_int(value, *, default=None, maximum=10**12):
+    if value is None and default is not None:
+        return default
+    if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= maximum:
+        return None
+    return int(value)
+
+
+def normalize_retention(payload):
+    """Accept aggregate integer counts only, without notifications or recipients."""
+    if not isinstance(payload, dict):
+        return {"status": "unavailable"}
+    counts = {}
+    for key in RETENTION_KEYS:
+        value = payload.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 10**12:
+            counts[key] = value
+    if not counts:
+        return {"status": "unavailable"}
+    email_status = payload.get("email_status")
+    if email_status not in {"not_connected", "disabled", "ready"}:
+        email_status = "unavailable"
+    if email_status == "ready" and payload.get("email_source_available") is not True:
+        email_status = "unavailable"
+    return {"status": "available", "counts": counts, "email_status": email_status}
+
+
+def _normalize_activation_v1(payload, days=28):
+    """Legacy schema-1 adapter; preserve its fixed historical fields safely."""
     if not isinstance(payload, dict) or not isinstance(payload.get("totals"), dict):
         return {"status": "source_unavailable", "error": "malformed activation response"}
     window = payload.get("window") if isinstance(payload.get("window"), dict) else {}
     totals = payload["totals"]
-    total_keys = ("signups", "resume_processed", "profile_confirmed", "job_selected", "kit_completed", "download_served")
+    total_keys = ("signups", "resume_processed", "profile_confirmed", "job_selected", "kit_completed", "kit_evidence_only", "download_served")
     clean_totals = {}
     for key in total_keys:
         value = totals.get(key)
-        if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
+        if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 10**12:
             return {"status": "source_unavailable", "error": "invalid activation total"}
         clean_totals[key] = int(value)
+    cohort_keys = ("signups", "consented_signups", "resume_processed", "profile_confirmed", "kit_started", "kit_completed", "kit_evidence_only", "download_served")
     cohorts = []
-    for row in payload.get("cohorts") or []:
+    raw_rows = payload.get("cohorts")
+    for row in raw_rows[:500] if isinstance(raw_rows, list) else []:
         if not isinstance(row, dict):
             continue
         cohorts.append({
             key: str(row.get(key) or "")[:200] for key in ("source", "medium", "campaign", "landing_path")
-        } | {key: max(0, int(row.get(key) or 0)) for key in ("signups", "kit_completed")})
+        } | {key: value for key in cohort_keys if isinstance(value := row.get(key), int) and not isinstance(value, bool) and 0 <= value <= 10**12})
     coverage = payload.get("coverage") if isinstance(payload.get("coverage"), dict) else {}
     health = payload.get("health") if isinstance(payload.get("health"), dict) else {}
     cohort_raw = payload.get("signup_cohort_totals") if isinstance(payload.get("signup_cohort_totals"), dict) else None
     cohort = {}
     if cohort_raw:
-        for key in total_keys:
+        for key in cohort_keys:
             value = cohort_raw.get(key)
-            if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
+            if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 10**12:
                 cohort[key] = int(value)
     return {
         "status": "available",
@@ -55,25 +109,127 @@ def normalize_activation(payload, days=28):
         "window": {"days": int(window.get("days") or days), "start": str(window.get("start") or ""), "end": str(window.get("end") or "")},
         "totals": clean_totals,
         "signup_cohort_totals": cohort,
-        "kit_evidence_only": payload.get("kit_evidence_only") if isinstance(payload.get("kit_evidence_only"), dict) else {},
+        "retention": normalize_retention(payload.get("retention")),
         "cohorts": cohorts[:500],
         "coverage": {"consented_signups": max(0, int(coverage.get("consented_signups") or 0)), "unattributed_signups": max(0, int(coverage.get("unattributed_signups") or 0))},
         "health": {"last_event_at": str(health.get("last_event_at") or ""), "status": str(health.get("status") or "unknown")[:40]},
     }
 
 
-def fetch_activation(base_url, credential_path, *, endpoint_path="/marketing/summary", credential_name="TRUEAPPLY_MARKETING_READ_TOKEN", days=28, fetcher=None):
-    """Fetch the optional TrueApply aggregate through an allowlisted localhost route."""
+def _normalize_activation_v2(payload, days=28):
+    stage_totals = _safe_aggregate_counts(payload.get("stage_totals"), limit=30)
+    if stage_totals is None or not stage_totals:
+        return {"status": "source_unavailable", "error": "invalid activation stage totals"}
+    labels = payload.get("stage_labels", {})
+    if not isinstance(labels, dict) or len(labels) > 30:
+        return {"status": "source_unavailable", "error": "invalid activation stage labels"}
+    clean_labels = {}
+    for key, value in labels.items():
+        if not isinstance(key, str) or not STAGE_KEY.fullmatch(key):
+            return {"status": "source_unavailable", "error": "invalid activation stage label key"}
+        safe = _safe_text(value)
+        if safe is None:
+            return {"status": "source_unavailable", "error": "invalid activation stage label"}
+        clean_labels[key] = safe
+    aggregate_counts = _safe_aggregate_counts(payload.get("aggregate_counts", {}), limit=50)
+    if aggregate_counts is None:
+        return {"status": "source_unavailable", "error": "invalid activation aggregate counts"}
+    cohorts = []
+    raw_cohorts = payload.get("cohorts", [])
+    if not isinstance(raw_cohorts, list) or len(raw_cohorts) > 500:
+        return {"status": "source_unavailable", "error": "invalid activation cohorts"}
+    allowed_text = ("source", "medium", "campaign", "landing_path")
+    for row in raw_cohorts:
+        if not isinstance(row, dict):
+            return {"status": "source_unavailable", "error": "invalid activation cohort"}
+        clean = {}
+        for key in allowed_text:
+            if key in row:
+                safe = _safe_text(row[key])
+                if safe is None:
+                    return {"status": "source_unavailable", "error": "invalid activation cohort text"}
+                clean[key] = safe
+        if "stage_totals" in row:
+            values = _safe_aggregate_counts(row["stage_totals"], limit=30)
+            if values is None:
+                return {"status": "source_unavailable", "error": "invalid activation cohort stages"}
+            clean["stage_totals"] = values
+        if "aggregate_counts" in row:
+            values = _safe_aggregate_counts(row["aggregate_counts"], limit=50)
+            if values is None:
+                return {"status": "source_unavailable", "error": "invalid activation cohort counts"}
+            clean["aggregate_counts"] = values
+        cohorts.append(clean)
+    window = payload.get("window") if isinstance(payload.get("window"), dict) else {}
+    coverage = payload.get("coverage") if isinstance(payload.get("coverage"), dict) else {}
+    health = payload.get("health") if isinstance(payload.get("health"), dict) else {}
+    window_days = _safe_nonnegative_int(window.get("days"), default=days, maximum=90)
+    consented = _safe_nonnegative_int(coverage.get("consented_signups"), default=0)
+    unattributed = _safe_nonnegative_int(coverage.get("unattributed_signups"), default=0)
+    if window_days is None or consented is None or unattributed is None:
+        return {"status": "source_unavailable", "error": "invalid activation metadata"}
+    last_event_at = _safe_text(health.get("last_event_at", ""), limit=80)
+    health_status = _safe_text(health.get("status", "unknown"), limit=40)
+    if last_event_at is None or health_status is None:
+        return {"status": "source_unavailable", "error": "invalid activation health"}
+    window_start = _safe_text(window.get("start", ""), limit=40)
+    window_end = _safe_text(window.get("end", ""), limit=40)
+    if window_start is None or window_end is None:
+        return {"status": "source_unavailable", "error": "invalid activation window"}
+    return {
+        "status": "available", "schema_version": 2,
+        "window": {"days": window_days, "start": window_start, "end": window_end},
+        "stage_totals": stage_totals, "stage_labels": clean_labels,
+        "aggregate_counts": aggregate_counts,
+        "retention": normalize_retention(payload.get("retention")),
+        "cohorts": cohorts,
+        "coverage": {"consented_signups": consented, "unattributed_signups": unattributed},
+        "health": {"last_event_at": last_event_at, "status": health_status},
+    }
+
+
+def normalize_activation(payload, days=28):
+    """Normalize v2 generic aggregates, with an explicit v1 compatibility adapter."""
+    if isinstance(payload, dict) and payload.get("schema_version") == 2:
+        return _normalize_activation_v2(payload, days=days)
+    return _normalize_activation_v1(payload, days=days)
+
+
+def fetch_activation(base_url, credential_path, *, credential_root=None, root_kind=None,
+                     endpoint_path="/marketing/summary", credential_name=None, days=28, fetcher=None):
+    """Fetch an optional project aggregate through an allowlisted localhost route.
+
+    ``credential_root`` is resolved from the project ledger by the worker.  It
+    is deliberately required here so this primitive cannot be used with an
+    arbitrary user-selected credential directory.
+    """
     parsed = urllib.parse.urlsplit(str(base_url or ""))
     if parsed.scheme not in ("http", "https") or parsed.hostname not in ("127.0.0.1", "localhost", "::1") or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in ("", "/"):
         return {"status": "source_unavailable", "error": "activation endpoint is not allowlisted"}
-    if not str(endpoint_path).startswith("/") or "?" in str(endpoint_path):
+    endpoint_path = str(endpoint_path or "")
+    if (not endpoint_path.startswith("/") or "?" in endpoint_path
+            or "#" in endpoint_path or "\\" in endpoint_path
+            or ".." in Path(endpoint_path).parts):
         return {"status": "source_unavailable", "error": "activation endpoint path is invalid"}
     try:
         days = max(1, min(int(days), 90))
-        credential = Path(str(credential_path)).resolve()
-        credential.relative_to(Path("/home/agency/engagements/trueapply").resolve())
-        with open(credential_path, encoding="utf-8") as handle:
+        if not credential_root or root_kind not in {"engagement", "core"} or not credential_name:
+            return {"status": "source_unavailable", "error": "activation credential configuration incomplete"}
+        root = Path(str(credential_root))
+        if not root.is_absolute() or not root.exists() or not root.is_dir():
+            return {"status": "source_unavailable", "error": "activation credential root unavailable"}
+        root = root.resolve(strict=True)
+        allowed_root = Path("/home/agency/engagements" if root_kind == "engagement" else "/home/agency/.config/agency").resolve()
+        root.relative_to(allowed_root)
+        credential = Path(str(credential_path))
+        if not credential.is_absolute():
+            credential = root / credential
+        credential = credential.resolve(strict=True)
+        credential.relative_to(root)
+        credential.relative_to(allowed_root)
+        if not credential.is_file():
+            return {"status": "source_unavailable", "error": "activation credential unavailable"}
+        with open(credential, encoding="utf-8") as handle:
             token = next((line.split("=", 1)[1].strip().strip('"').strip("'") for line in handle if line.startswith(str(credential_name) + "=")), "")
         if not token:
             return {"status": "source_unavailable", "error": "activation credential unavailable"}
