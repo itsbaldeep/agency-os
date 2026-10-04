@@ -15,6 +15,8 @@ import content_links
 import content_asset_workflow
 import seo_cleanup
 import growth_planner
+import marketing_studio_workflow
+import marketing_kit_import
 
 ENV_PATH = os.environ.get("AGENCY_ENV_FILE", "/home/agency/.config/agency/core.env")
 
@@ -3107,6 +3109,45 @@ def _seo_followups(params):
     return [(followup["type"], {key: followup[key] for key in ("queue_research", "operator_authorized", "requires_review", "owner_feedback") if key in followup})]
 
 
+def _owner_feedback_enabled(properties):
+    """Read the explicit per-brand policy flag without inferring from names."""
+    value = properties.get("owner_feedback")
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError):
+            value = value.strip().lower() in {"1", "true", "yes", "on"}
+    if isinstance(value, dict):
+        value = value.get("enabled")
+    return value is True
+
+
+def _activation_connection_config(properties, params):
+    """Map the dashboard v2 reference contract, retaining the legacy shape."""
+    props = properties if isinstance(properties, dict) else {}
+    p = params if isinstance(params, dict) else {}
+    configs = {}
+    for prop_name in ("trueapply_marketing", "activation_config"):
+        try:
+            value = props.get(prop_name)
+            decoded = json.loads(value) if isinstance(value, str) else value
+            if isinstance(decoded, dict):
+                configs.update(decoded)
+        except (TypeError, ValueError):
+            continue
+    new_config = isinstance(props.get("activation_config"), (dict, str)) and bool(props.get("activation_config"))
+    base_url = p.get("activation_base_url") or props.get("activation_base_url") or configs.get("base_url")
+    path = (p.get("activation_credential_path") or props.get("activation_credential_path") or
+            (configs.get("credential_ref") if new_config else configs.get("credential_path")))
+    name = (p.get("activation_credential_name") or
+            (p.get("activation_credential_ref") if not new_config else None) or
+            (configs.get("credential_name") if new_config else configs.get("credential_ref")))
+    if not new_config and not name and props.get("trueapply_marketing"):
+        name = configs.get("credential_name")
+    endpoint = p.get("activation_endpoint") or configs.get("endpoint") or "/marketing/summary"
+    return {"base_url": base_url, "credential_path": path, "credential_name": name, "endpoint": endpoint}
+
+
 def handle_seo_measurement(task):
     """Read-only bounded crawl and external measurement, with immutable evidence."""
     p = task.get("params") or {}; brand_id = p.get("brand_id")
@@ -3124,7 +3165,13 @@ def handle_seo_measurement(task):
         url = p.get("url") or props.get("domain"); url = url if not url or str(url).startswith(("http://", "https://")) else "https://" + str(url)
         project_id = p.get("project_id") or brand.get("project_id")
         if not url: return {"ok": False, "error": "seo_measurement: url or domain is required"}
-        if not project_id: return {"ok": False, "error": "seo_measurement: project_id is required for capabilities"}
+        project = {}
+        if project_id:
+            cur.execute("SELECT local_path,classification FROM projects WHERE id=%s", (project_id,)); project = cur.fetchone() or {}
+        classification = project.get("classification") or "engagement"
+        if classification not in {"core", "engagement"}:
+            return {"ok": False, "error": "seo_measurement: project classification is invalid"}
+        credential_root = project.get("local_path") if classification == "engagement" else "/home/agency/.config/agency"
         captured = datetime.now(timezone.utc).isoformat(); run_id = _seo_run_id(task.get("id"), brand_id, url)
         cur.execute("SELECT id,raw_data FROM audits WHERE brand_id=%s AND audit_type='seo_measurement' AND raw_data->>'run_id'=%s LIMIT 1", (brand_id, run_id))
         existing = cur.fetchone()
@@ -3161,27 +3208,25 @@ def handle_seo_measurement(task):
             else: ga4={"status":"source_unavailable","error":"property not configured"}
         else: gsc={"status":"source_unavailable","error":"access unavailable"}; ga4={"status":"source_unavailable","error":"access unavailable"}
         growth = growth_measurement.collect_growth(token, gsc_property=gsc_prop, ga4_property=ga4_prop, captured_at=captured)
-        growth_config = {}
-        for prop_name in ("trueapply_marketing", "activation_config"):
-            try:
-                value = props.get(prop_name)
-                if value:
-                    decoded = json.loads(value) if isinstance(value, str) else value
-                    if isinstance(decoded, dict): growth_config.update(decoded)
-            except (TypeError, ValueError):
-                pass
-        activation_base = p.get("activation_base_url") or props.get("activation_base_url") or growth_config.get("base_url")
-        activation_path = p.get("activation_credential_path") or props.get("activation_credential_path") or growth_config.get("credential_path")
-        activation = seo_measurement.fetch_activation(activation_base, activation_path,
-            endpoint_path=p.get("activation_endpoint") or growth_config.get("endpoint") or "/marketing/summary",
-            credential_name=p.get("activation_credential_ref") or growth_config.get("credential_ref") or "TRUEAPPLY_MARKETING_READ_TOKEN", days=28) if activation_base and activation_path else {"status": "source_unavailable", "error": "integration not configured"}
-        sources={"crawl":crawl,"pagespeed":ps,"gsc":gsc,"ga4":ga4,"activation":activation}; evidence={"run_id":run_id,"captured_at":captured,"parser_version":seo_measurement.PARSER_VERSION,"sources":sources,"activation":activation,"growth":growth,"counts":counts,"finding_ids":[f["evidence_id"] for f in findings],"findings":findings}
+        journey = growth_measurement.collect_journey(token, ga4_prop, captured_at=captured)
+        connection = _activation_connection_config(props, p)
+        activation_base = connection["base_url"]
+        # v2 dashboard setup stores credential_ref as the path and
+        # credential_name as the environment variable.  Keep the old shape,
+        # where credential_path is the path and credential_ref is the name,
+        # as an explicit compatibility adapter.
+        activation = seo_measurement.fetch_activation(activation_base, connection["credential_path"],
+            credential_root=credential_root, root_kind=classification,
+            endpoint_path=connection["endpoint"], credential_name=connection["credential_name"],
+            days=28) if activation_base and connection["credential_path"] and connection["credential_name"] else {"status": "source_unavailable", "error": "integration not configured"}
+        sources={"crawl":crawl,"pagespeed":ps,"gsc":gsc,"ga4":ga4,"activation":activation,"journey":journey}; evidence={"run_id":run_id,"captured_at":captured,"parser_version":seo_measurement.PARSER_VERSION,"sources":sources,"activation":activation,"growth":growth,"journey":journey,"counts":counts,"finding_ids":[f["evidence_id"] for f in findings],"findings":findings}
         cur.execute("SELECT raw_data FROM audits WHERE brand_id=%s AND audit_type='seo_measurement' ORDER BY created_at DESC LIMIT 1",(brand_id,)); prior=cur.fetchone(); previous=prior.get("raw_data") if prior else None
         comparison=seo_measurement.compare_runs(previous,evidence); statuses={k:v.get("status") for k,v in sources.items()}
         cur.execute("INSERT INTO audits (brand_id,audit_type,summary,raw_data,sources) VALUES (%s,'seo_measurement',%s,%s,%s) RETURNING id",(brand_id,json.dumps({"source_statuses":statuses,"counts":counts,"comparison":comparison}),json.dumps(evidence),json.dumps([{"name":k,"status":v.get("status")} for k,v in sources.items()])))
         audit_id=cur.fetchone()["id"]
         for f in findings: f["audit_id"] = audit_id
-        for cap,source in sources.items(): cur.execute("INSERT INTO capabilities (project_id,capability,status,evidence,checked_at) VALUES (%s,%s,%s,%s,now()) ON CONFLICT (project_id,capability) DO UPDATE SET status=EXCLUDED.status,evidence=EXCLUDED.evidence,checked_at=now()",(project_id,cap,source.get("status","source_unavailable"),json.dumps({"status":source.get("status"),"run_id":run_id})))
+        if project_id:
+            for cap,source in sources.items(): cur.execute("INSERT INTO capabilities (project_id,capability,status,evidence,checked_at) VALUES (%s,%s,%s,%s,now()) ON CONFLICT (project_id,capability) DO UPDATE SET status=EXCLUDED.status,evidence=EXCLUDED.evidence,checked_at=now()",(project_id,cap,source.get("status","source_unavailable"),json.dumps({"status":source.get("status"),"run_id":run_id})))
         titles={"missing_title":"Add a unique page title","missing_description":"Add a unique meta description","h1_count":"Make the page contain one H1","missing_jsonld":"Add valid JSON-LD structured data","invalid_jsonld":"Repair invalid JSON-LD structured data","canonical_mismatch":"Set the canonical URL to this page","indexable_absent_sitemap":"Add the indexable page to the sitemap","broken_internal_link":"Fix the broken internal link","sitemap_missing":"Publish an XML sitemap","sitemap_unavailable":"Restore the unavailable sitemap","sitemap_redirect":"Replace a redirected sitemap URL"}
         for f in findings:
             cur.execute("SELECT 1 FROM suggestions WHERE brand_id=%s AND status IN ('pending','approved','executing') AND sources @> %s::jsonb LIMIT 1",(brand_id,json.dumps([{ "evidence_id":f["evidence_id"]}])))
@@ -3195,7 +3240,7 @@ def handle_seo_measurement(task):
         for followup_type, followup_extra in followups:
             queued_params = {"brand_id": brand_id, "audit_id": audit_id,
                              "revision": run_id, "owned_origin": url,
-                             "owner_feedback": str(brand.get("name") or "").lower() == "trueapply"}
+                             "owner_feedback": _owner_feedback_enabled(props)}
             queued_params.update(followup_extra)
             cur.execute("""INSERT INTO tasks (type,status,params,triggered_by,parent_task_id)
                 SELECT %s,'queued',%s,'seo_measurement',%s
@@ -3445,6 +3490,14 @@ def handle_growth_plan(task):
             existing.append({"kind": kind, "title": row["title"], "target_keyword": structured.get("target_keyword", ""), "status": row["status"], "evidence_status": "existing_outline", "refreshed_at": row["updated_at"].isoformat() if row.get("updated_at") else ""})
         cur.execute("SELECT domain FROM competitors WHERE brand_id=%s ORDER BY last_scanned_at DESC NULLS LAST,id LIMIT 5", (brand_id,))
         raw["competitor_urls"] = ["https://" + row["domain"].strip() + "/" for row in cur.fetchall() if row.get("domain")]
+        cur.execute("SELECT value FROM brand_properties WHERE brand_id=%s AND property_type='growth_context'", (brand_id,))
+        context_row = cur.fetchone()
+        if context_row:
+            try:
+                context_value = context_row.get("value")
+                raw["brand_context"] = json.loads(context_value) if isinstance(context_value, str) else context_value
+            except (ValueError, TypeError):
+                raw["brand_context"] = {}
         queue = growth_planner.recommend(raw, existing, owner_feedback=params.get("owner_feedback") is True)
         if params.get("queue_research") is True and (params.get("operator_authorized") is not True or params.get("requires_review") is not True):
             return {"ok": False, "error": "growth_plan: operator_authorized and requires_review are required to queue research"}
@@ -5159,23 +5212,10 @@ def handle_execute_suggestion(task):
             result["workflow_status"] = "content_planning"
         return result
 
-    if not suggestion.get("agent_allowed") or not suggestion.get("local_path") or not suggestion.get("repo_name"):
-        return _needs_input(
-            "This action has no authorized implementation surface. Add project access or concrete manual instructions.",
-            ["project_access_or_manual_instructions"],
-        )
-    routed = dict(task)
-    instructions = (params.get("instructions") or "").strip()
-    routed["params"] = {
-        "repo": suggestion["repo_name"],
-        "description": f"{title}\n\n{rationale}\n\nOperator context: {instructions}"[:3000],
-        "base": "main",
-        "suggestion_id": suggestion_id,
-    }
-    result = handle_propose_fix(routed)
-    if result.get("ok"):
-        result["workflow_status"] = "implementation_proposed"
-    return result
+    return _needs_input(
+        "This recommendation requires a developer. Export the evidence and implement it in Codex, then refresh measurement.",
+        ["developer_implementation"],
+    )
 
 
 def _project_env_value(project_path, name):
@@ -5331,7 +5371,7 @@ def handle_publish_content(task):
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute(
-            "SELECT ci.id,ci.title,ci.body,ci.status,ci.content_blocks,ci.structured,b.project_id,p.local_path,p.agent_allowed,p.lifecycle,"
+            "SELECT ci.id,ci.brand_id,ci.title,ci.body,ci.status,ci.content_blocks,ci.structured,b.project_id,p.local_path,p.agent_allowed,p.lifecycle,"
             "c.intake_params FROM content_items ci JOIN brands b ON b.id=ci.brand_id "
             "LEFT JOIN projects p ON p.id=b.project_id "
             "LEFT JOIN clients c ON c.brand_id=b.id WHERE ci.id=%s",
@@ -5354,6 +5394,23 @@ def handle_publish_content(task):
 
     from publication_settings import project_destination, destination_digest
     project_config = project_destination(item.get('project_id'))
+    if project_config.get('type') == 'static':
+        if params.get('approved_destination') != destination_digest(project_config):
+            return _needs_input('The publishing destination changed. Review it again.', ['fresh dashboard approval'])
+        if item.get('lifecycle') != 'active' or item.get('status') not in ('publishing','publish_failed'):
+            return {'ok':False,'error':'Static publishing requires an active project and an approved publishing task.'}
+        from static_publisher import publish, StaticPublishError
+        from ghost_publisher import GhostPublishError
+        lock_conn=get_conn()
+        try:
+            lock_cur=lock_conn.cursor()
+            lock_cur.execute('SELECT pg_try_advisory_lock(72392,%s)', (int(item['brand_id']),))
+            if not lock_cur.fetchone()[0]:return {'ok':False,'error':'Another publication for this brand is in progress.'}
+            result=publish({**item,'project_status':'active','publication_status':item['status']},project_config,params.get('approved_digest'))
+            return {'ok':True,'content':json.dumps(result),'workflow_status':'published','model':'deterministic','prompt_tokens':0,'completion_tokens':0,'cost':0}
+        except (StaticPublishError,GhostPublishError):
+            return {'ok':False,'error':'Static publication failed content, ownership or destination validation.'}
+        finally:lock_conn.close()
     if project_config.get('type') == 'ghost':
         if not project_config.get('enabled'):
             return _needs_input('Ghost connection is not enabled.', ['verified Ghost connection'])
@@ -5485,6 +5542,8 @@ def handle_execute_approval(task):
             "approval_id": approval_id,
             "content_item_id": payload["content_item_id"],
             "destination": destination,
+            "approved_digest": payload.get("approved_digest"),
+            "approved_destination": payload.get("approved_destination"),
         }
         result = handle_publish_content(routed)
         result["linked_content_item_id"] = payload["content_item_id"]
@@ -5637,7 +5696,16 @@ def handle_operator_chore(task):
     }
 
 
+def handle_retired_development(task):
+    return {"ok": False, "error": "Development workflows are retired. Use Codex for development and the dashboard for marketing."}
+
+
 DISPATCH = {
+    "marketing_kit_import": lambda task: marketing_kit_import.handle(task, get_conn),
+    "marketing_studio_draft": lambda task: marketing_studio_workflow.handle(task, get_conn,
+        lambda prompt: call_zen(prompt, model=MODEL_CONFIG['quality'], max_tokens=3000,
+                                temperature=MODEL_CONFIG['temp_structured'], json_mode=True)),
+    "marketing_media_generate": lambda task: marketing_studio_workflow.handle_media(task, get_conn),
     "marketing_audit": handle_marketing_audit,
     "marketing_assessment_synthesis": handle_marketing_assessment_synthesis,
     "seo_measurement": handle_seo_measurement,
@@ -5652,14 +5720,14 @@ DISPATCH = {
     "content_asset_suggestions": lambda task: content_asset_workflow.handle(task, get_conn),
     "content_link_check": handle_content_link_check,
     "generate_draft": handle_generate_draft,
-    "propose_fix": handle_propose_fix,
+    "propose_fix": handle_retired_development,
     "agent_task": handle_agent_task,
     "run_brand_audit": handle_run_brand_audit,
-    "client_import_repo": handle_client_import_repo,
-    "client_new_project": handle_client_new_project,
+    "client_import_repo": handle_retired_development,
+    "client_new_project": handle_retired_development,
     "ask": handle_ask,
-    "design_page": handle_design_page,
-    "onboard_project": handle_onboard_project,
+    "design_page": handle_retired_development,
+    "onboard_project": handle_retired_development,
     "competitor_scan": handle_competitor_scan,
     "execute_suggestion": handle_execute_suggestion,
     "publish_content": handle_publish_content,

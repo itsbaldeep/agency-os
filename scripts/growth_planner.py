@@ -1,11 +1,9 @@
-"""Evidence bounded TrueApply content recommendations after SEO refreshes."""
+"""Evidence-bounded content recommendations after SEO refreshes."""
 from __future__ import annotations
 import re
 
 MAX_ARTICLES, MAX_HELP = 3, 3
-QUERY_RE = re.compile(r"\b(resume|résumé|resum|tailor|tailoring|job|application|ats|cover letter|career|experience|bullet|profile|match)\b", re.I)
 TECHNICAL_RULES = frozenset({"missing_title", "missing_description", "duplicate_title", "duplicate_description", "missing_jsonld", "invalid_jsonld", "canonical_mismatch", "sitemap_redirect", "indexable_absent_sitemap"})
-OWNER_HELP = ("How to upload and build your TrueApply profile", "How to review your TrueApply profile", "How to read an evidence match and create a tailored kit")
 
 def _query_rows(audit):
     query = ((audit or {}).get("sources") or {}).get("gsc", {})
@@ -14,6 +12,19 @@ def _query_rows(audit):
 def _query_value(row):
     values = row.get("keys") if isinstance(row, dict) else []
     return str(values[0]).strip() if values else ""
+
+
+def _brand_context(audit):
+    context = (audit or {}).get("brand_context")
+    return context if isinstance(context, dict) else {}
+
+
+def _query_re(audit):
+    terms = _brand_context(audit).get("query_terms")
+    if isinstance(terms, str):
+        terms = [terms]
+    terms = [str(term).strip() for term in (terms or []) if str(term).strip()]
+    return re.compile("|".join(re.escape(term) for term in terms), re.I) if terms else None
 
 def _candidate(query, rank, audit_id=None):
     return {"kind": "article", "title": query[:120].capitalize(), "target_keyword": query[:200], "rank": rank,
@@ -26,11 +37,11 @@ def _goal_candidates(audit, seen, competitors, audit_id):
     if not pages:
         return []
     inventory = " ".join(str((page.get("url") or "") + " " + str((page.get("fields") or {}).get("title") or "")).lower() for page in pages if isinstance(page, dict))
-    goals = (
-        ("How to tailor a resume for a chosen role without inventing experience", "resume tailoring chosen role", "experienced professionals need a truthful role-specific tailoring path"),
-        ("How to review an evidence match before creating a tailored kit", "review resume evidence match", "users need to understand the evidence before generating a kit"),
-        ("Career change resume tailoring: review your transferable experience", "career change resume tailoring", "career changers need a grounded way to frame transferable experience"),
-    )
+    goals = []
+    for raw in _brand_context(audit).get("goals", []):
+        if not isinstance(raw, dict) or not raw.get("title") or not raw.get("keyword"):
+            continue
+        goals.append((str(raw["title"])[:160], str(raw["keyword"])[:200], str(raw.get("hypothesis") or "Owner-supplied goal; search demand and conversion intent are unverified.")[:500]))
     out = []
     for title, keyword, hypothesis in goals:
         key = _title_key(title)
@@ -67,9 +78,10 @@ def recommend(audit, existing=None, *, max_articles=MAX_ARTICLES, max_help=MAX_H
         if isinstance(finding, dict) and finding.get("rule") in TECHNICAL_RULES:
             repairs.append({"kind": "repair", "rule": finding.get("rule"), "url": finding.get("url"), "evidence": finding.get("evidence_id"), "rationale": "Repair the existing page using deterministic SEO evidence."})
     ranked = []
+    query_re = _query_re(audit)
     for row in _query_rows(audit):
         query = _query_value(row)
-        if query and QUERY_RE.search(query) and query.lower() not in {"truepal", "how well known"}:
+        if query and (query_re is None or query_re.search(query)):
             ranked.append((float(row.get("impressions") or 0), float(row.get("clicks") or 0), query))
     ranked.sort(key=lambda x: (-x[0], -x[1], x[2].lower()))
     for _impressions, _clicks, query in ranked:
@@ -83,8 +95,12 @@ def recommend(audit, existing=None, *, max_articles=MAX_ARTICLES, max_help=MAX_H
             if len(articles) >= max_articles:
                 break
             articles.append(candidate); seen.add(("article", _title_key(candidate["title"])))
-    if owner_feedback:
-        for title in OWNER_HELP:
+    help_topics = _brand_context(audit).get("help_topics")
+    if isinstance(help_topics, str):
+        help_topics = [help_topics]
+    help_topics = [str(topic).strip()[:160] for topic in (help_topics or []) if str(topic).strip()]
+    if owner_feedback and help_topics:
+        for title in help_topics:
             if len(helps) >= max_help: break
             if ("help", _title_key(title)) in seen: continue
             helps.append({"kind": "help", "title": title, "target_keyword": "", "rank": len(helps) + 1,
@@ -94,11 +110,15 @@ def recommend(audit, existing=None, *, max_articles=MAX_ARTICLES, max_help=MAX_H
     activation = audit.get("activation") or {}
     cohort = activation.get("signup_cohort_totals") or {}
     gaps = []
-    if cohort.get("signups", 0) and cohort.get("resume_processed", 0) < cohort.get("signups", 0):
-        gaps.append({"kind": "activation", "hypothesis": "Some signups do not reach resume processing; improve first-use guidance before claiming content demand.", "evidence": "activation"})
-    if cohort.get("resume_processed", 0) and cohort.get("kit_completed", 0) < cohort.get("resume_processed", 0):
-        gaps.append({"kind": "activation", "hypothesis": "Users drop between resume processing and kit completion; inspect onboarding and help coverage.", "evidence": "activation"})
+    for stage in _brand_context(audit).get("journey_stages", []):
+        if not isinstance(stage, dict):
+            continue
+        source, target = stage.get("from"), stage.get("to")
+        if not isinstance(source, str) or not isinstance(target, str):
+            continue
+        if isinstance(cohort.get(source), int) and isinstance(cohort.get(target), int) and cohort[source] and cohort[target] < cohort[source]:
+            gaps.append({"kind": "activation", "hypothesis": str(stage.get("hypothesis") or "Observed journey-stage drop; inspect the supplied product guidance before claiming content demand.")[:500], "evidence": "activation", "from_stage": source, "to_stage": target})
     crawl_pages = (((audit.get("sources") or {}).get("crawl") or {}).get("pages") or [])
     gaps.append({"kind": "coverage", "hypothesis": "Current owned pages should be checked for overlap before adding a topic.", "evidence": {"owned_pages": len(crawl_pages), "competitor_urls": [str(url) for url in (audit.get("competitor_urls") or [])[:5]], "competitor_evidence": bool((audit.get("competitors") or (audit.get("sources") or {}).get("competitors")) or audit.get("competitor_urls")), "activation_cohort_available": bool(cohort)}})
     return {"articles": articles, "article": articles, "help": helps, "repairs": repairs[:50], "gaps": gaps,
-            "evidence_available": bool(ranked or repairs or owner_feedback or cohort or crawl_pages)}
+            "evidence_available": bool(ranked or repairs or help_topics or cohort or crawl_pages)}

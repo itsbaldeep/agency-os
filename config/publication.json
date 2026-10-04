@@ -16,5 +16,12 @@
       "bucket": "trueapply-marketing",
       "public_base": "https://trueapply.in/blog/media"
     }
+  },
+  "10": {
+    "type": "static",
+    "enabled": true,
+    "brand_name": "Deployden",
+    "base_url": "https://deployden.tech/journal",
+    "output_root": "/home/agency/.local/share/agency-marketing/publications/27"
   }
 }

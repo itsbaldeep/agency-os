@@ -4,6 +4,30 @@ Authority: human co-CEO + AI co-CEO (Codex CLI). This file is the persistent
 strategic context — read it on every session start. It supersedes informal
 chat decisions. Update it when strategy changes.
 
+## Dashboard v2 and agency positioning, owner direction 2026-10-04
+
+Deployden is the current, renameable agency brand. Its offer is human-led design,
+development and digital marketing for buyers seeking a smaller, more affordable
+service partner. The marketing dashboard is an internal operator console, not a
+self-service marketing SaaS sold to clients. Do not invent prices, savings,
+enterprise customers or performance claims.
+
+The owner authorizes a tested v2 redesign and deliberate deployment across
+Agency Dashboard, Agency OS and Deployden. Reconsider navigation and the stack;
+use compact, classic, professional, action-oriented and report-oriented design.
+Project coding and development stay in Codex. The dashboard owns brand marketing:
+setup, strategy, auditing, reporting, GA4/GSC, editorial assets, blog/help content,
+social posts and videos, campaign planning and consented retention workflows.
+All shared workers must be project-agnostic with brand-owned configuration and
+credentials. Include the brag launch-video workflow. Collection may run on demand;
+new schedules remain opt-in. This direction supersedes the earlier decision to
+park campaign implementation, but does not grant campaign sending authority.
+
+Marketing publication, social posting, outreach and campaign sending require
+separate exact-action approval. Account access and consent must be verified;
+missing integrations must never be presented as working. Preserve engagement
+isolation, existing publication approvals and retired jobs 8 through 12.
+
 ---
 
 ## 0. What this VPS is (one sentence)

@@ -11,14 +11,18 @@ import seo_measurement as seo
 
 class SeoMeasurementTests(unittest.TestCase):
     def test_activation_fetch_allows_localhost_and_passes_bearer_without_returning_it(self):
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir="/home/agency/engagements/trueapply") as handle:
-            handle.write("TRUEAPPLY_MARKETING_READ_TOKEN=secret-token\n")
-            handle.flush()
-            seen = {}
-            def fetcher(url, token):
-                seen.update(url=url, token=token)
-                return {"totals": {k: 0 for k in ("signups", "resume_processed", "profile_confirmed", "job_selected", "kit_completed", "kit_evidence_only", "download_served")}}
-            result = seo.fetch_activation("http://127.0.0.1:3100", handle.name, fetcher=fetcher)
+        with tempfile.TemporaryDirectory(dir="/home/agency/engagements") as root:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=root) as handle:
+                handle.write("GENERIC_MARKETING_READ_TOKEN=secret-token\n")
+                handle.flush()
+                seen = {}
+                def fetcher(url, token):
+                    seen.update(url=url, token=token)
+                    return {"totals": {k: 0 for k in ("signups", "resume_processed", "profile_confirmed", "job_selected", "kit_completed", "kit_evidence_only", "download_served")}}
+                result = seo.fetch_activation("http://127.0.0.1:3100", handle.name,
+                                              credential_root=root, root_kind="engagement",
+                                              credential_name="GENERIC_MARKETING_READ_TOKEN",
+                                              fetcher=fetcher)
         self.assertEqual(result["status"], "available")
         self.assertEqual(seen["token"], "secret-token")
         self.assertEqual(seo.fetch_activation("https://trueapply.in", handle.name)["status"], "source_unavailable")
@@ -32,6 +36,34 @@ class SeoMeasurementTests(unittest.TestCase):
         self.assertEqual(result["status"], "available")
         self.assertNotIn("user_id", result["cohorts"][0])
         self.assertEqual(seo.normalize_activation({"totals": {}})["status"], "source_unavailable")
+
+    def test_activation_rejects_cross_project_credential_and_missing_ref(self):
+        with tempfile.TemporaryDirectory(dir="/home/agency/engagements") as root_a, tempfile.TemporaryDirectory(dir="/home/agency/engagements") as root_b:
+            outside = Path(root_b) / "marketing.env"
+            outside.write_text("GENERIC_MARKETING_READ_TOKEN=secret\n", encoding="utf-8")
+            result = seo.fetch_activation(
+                "http://127.0.0.1:3100", str(outside), credential_root=root_a,
+                root_kind="engagement", credential_name="GENERIC_MARKETING_READ_TOKEN",
+                fetcher=lambda *_: {"totals": {key: 0 for key in ("signups", "resume_processed", "profile_confirmed", "job_selected", "kit_completed", "kit_evidence_only", "download_served")}},
+            )
+            self.assertEqual(result["status"], "source_unavailable")
+            self.assertEqual(
+                seo.fetch_activation("http://127.0.0.1:3100", str(outside), credential_root=root_a, root_kind="engagement", fetcher=lambda *_: {} )["status"],
+                "source_unavailable",
+            )
+
+    def test_activation_rejects_symlink_escape_directory_and_bad_endpoint(self):
+        with tempfile.TemporaryDirectory(dir="/home/agency/engagements") as root, tempfile.TemporaryDirectory(dir="/home/agency/engagements") as outside_root:
+            outside = Path(outside_root) / "outside.env"
+            outside.write_text("GENERIC_MARKETING_READ_TOKEN=secret\n", encoding="utf-8")
+            link = Path(root) / "link.env"
+            link.symlink_to(outside)
+            fetcher = lambda *_: {"totals": {key: 0 for key in ("signups", "resume_processed", "profile_confirmed", "job_selected", "kit_completed", "kit_evidence_only", "download_served")}}
+            self.assertEqual(seo.fetch_activation("http://127.0.0.1:3100", str(link), credential_root=root, root_kind="engagement", credential_name="GENERIC_MARKETING_READ_TOKEN", fetcher=fetcher)["status"], "source_unavailable")
+            directory = Path(root) / "directory"
+            directory.mkdir()
+            self.assertEqual(seo.fetch_activation("http://127.0.0.1:3100", str(directory), credential_root=root, root_kind="engagement", credential_name="GENERIC_MARKETING_READ_TOKEN", fetcher=fetcher)["status"], "source_unavailable")
+            self.assertEqual(seo.fetch_activation("http://127.0.0.1:3100", str(outside), credential_root=root, root_kind="engagement", credential_name="GENERIC_MARKETING_READ_TOKEN", endpoint_path="/x/../y", fetcher=fetcher)["status"], "source_unavailable")
     def test_activation_preserves_evidence_only_and_full_cohort_funnel(self):
         totals = {key: 1 for key in ("signups", "resume_processed", "profile_confirmed", "job_selected", "kit_completed", "kit_evidence_only", "download_served")}
         cohort = {key: 1 for key in ("signups", "resume_processed", "profile_confirmed", "kit_started", "kit_completed", "kit_evidence_only", "download_served")}
@@ -44,6 +76,48 @@ class SeoMeasurementTests(unittest.TestCase):
         self.assertEqual(seo.normalize_activation({"totals": totals})["status"], "source_unavailable")
         totals["kit_evidence_only"] = 0.5
         self.assertEqual(seo.normalize_activation({"totals": totals})["status"], "source_unavailable")
+
+    def test_generic_schema2_ecommerce_stages_are_bounded_and_pii_free(self):
+        payload = {
+            "schema_version": 2,
+            "window": {"days": 28, "start": "2026-09-01", "end": "2026-09-28"},
+            "stage_totals": {"signup": 12, "cart_started": 7, "checkout_completed": 3},
+            "stage_labels": {"signup": "Account signup", "cart_started": "Cart started", "checkout_completed": "Checkout completed"},
+            "aggregate_counts": {"page_views": 100, "email_eligible": 4},
+            "retention": {"email_sent": 4, "email_delivered": 3, "email_opened": 2, "email_status": "ready"},
+            "cohorts": [{"source": "newsletter", "stage_totals": {"signup": 2}, "user_id": "private", "email": "private@example.test"}],
+        }
+        result = seo.normalize_activation(payload)
+        self.assertEqual(result["status"], "available")
+        self.assertEqual(result["schema_version"], 2)
+        self.assertEqual(result["stage_totals"]["checkout_completed"], 3)
+        self.assertNotIn("user_id", str(result))
+        self.assertNotIn("email", result["cohorts"][0])
+        self.assertEqual(result["retention"]["email_status"], "unavailable")
+
+    def test_schema2_email_ready_requires_explicit_source_and_zeroes_survive(self):
+        payload = {"schema_version": 2, "stage_totals": {"signup": 0, "cart_started": 0}, "aggregate_counts": {"orders": 0}, "retention": {"email_eligible": 0, "email_status": "ready", "email_source_available": True}}
+        result = seo.normalize_activation(payload)
+        self.assertEqual(result["stage_totals"], {"signup": 0, "cart_started": 0})
+        self.assertEqual(result["aggregate_counts"], {"orders": 0})
+        self.assertEqual(result["retention"]["email_status"], "ready")
+
+    def test_schema2_rejects_invalid_stage_keys_counts_and_labels(self):
+        base = {"schema_version": 2, "stage_totals": {"signup": 1}}
+        for payload in (
+            {**base, "stage_totals": {"Signup": 1}},
+            {**base, "stage_totals": {"signup": True}},
+            {**base, "aggregate_counts": {"orders": -1}},
+            {**base, "stage_labels": {"signup": "line\nbreak"}},
+        ):
+            self.assertEqual(seo.normalize_activation(payload)["status"], "source_unavailable")
+        result = seo.normalize_activation({
+            **base,
+            "cohorts": [{"stage_totals": {"signup": 1}, "user_id": "private", "email": "private@example.test"}],
+        })
+        self.assertEqual(result["status"], "available")
+        self.assertNotIn("user_id", result["cohorts"][0])
+        self.assertNotIn("email", result["cohorts"][0])
 
     def test_retention_counts_are_integer_only_and_strip_personal_payloads(self):
         result = seo.normalize_retention({

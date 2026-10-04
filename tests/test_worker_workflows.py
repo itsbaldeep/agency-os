@@ -39,6 +39,21 @@ class FakeConnection:
 
 
 class WorkerWorkflowTests(unittest.TestCase):
+    def test_retired_development_jobs_never_invoke_code_or_git(self):
+        for task_type in ('propose_fix','client_import_repo','client_new_project','design_page','onboard_project'):
+            with mock.patch.object(worker, 'handle_propose_fix') as coding:
+                result=worker.DISPATCH[task_type]({'params': {'repo': 'anything'}})
+            self.assertFalse(result['ok'])
+            self.assertIn('retired',result['error'])
+            coding.assert_not_called()
+
+    def test_technical_recommendation_requires_manual_development(self):
+        conn=FakeConnection({'id':1,'brand_id':2,'title':'Repair title','rationale':'Measured duplicate','action_type':'propose_fix','agent_allowed':True,'local_path':'/any','repo_name':'any'})
+        with mock.patch.object(worker,'get_conn',return_value=conn), mock.patch.object(worker,'handle_propose_fix') as coding:
+            result=worker.handle_execute_suggestion({'params':{'suggestion_id':1}})
+        self.assertEqual(result['status'],'needs_input')
+        coding.assert_not_called()
+
     def test_seo_followup_preserves_explicit_generate_contract(self):
         followups = worker._seo_followups({"followup": {"type": "growth_generate", "queue_research": True, "operator_authorized": True, "requires_review": True}})
         self.assertEqual(followups, [("growth_generate", {"queue_research": True, "operator_authorized": True, "requires_review": True})])
@@ -737,7 +752,7 @@ class WorkerWorkflowTests(unittest.TestCase):
         conn = FakeConnection({
             "id": 9,
             "type": "content",
-            "payload": {"content_item_id": 22, "destination": {"type": "wordpress"}},
+            "payload": {"content_item_id": 22, "destination": {"type": "wordpress"}, "approved_digest": "content-hash", "approved_destination": "destination-hash"},
         })
         seen = {}
 
@@ -751,6 +766,8 @@ class WorkerWorkflowTests(unittest.TestCase):
                 "id": 30,
                 "params": {"approval_id": 9, "destination": {"credential_ref": "WP_APP_PASSWORD"}},
             })
+        self.assertEqual(seen["approved_digest"], "content-hash")
+        self.assertEqual(seen["approved_destination"], "destination-hash")
         self.assertEqual(seen["content_item_id"], 22)
         self.assertEqual(seen["destination"]["credential_ref"], "WP_APP_PASSWORD")
         self.assertEqual(result["linked_content_item_id"], 22)
