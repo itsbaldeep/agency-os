@@ -5,7 +5,8 @@ import unittest
 from unittest import mock
 from pathlib import Path
 
-from ghost_publisher import GhostAdminClient, GhostPublishError, content_digest, publish, render_pipeline_html
+from ghost_publisher import (GhostAdminClient, GhostPublishError, content_digest,
+                             publish, render_pipeline_html, _ghost_metadata)
 
 
 class VoidHTMLTests(unittest.TestCase):
@@ -30,7 +31,7 @@ class FakeClient:
                 return {"posts": [self.existing]}
             raise GhostPublishError("Ghost API returned HTTP 404")
         if method == "POST":
-            self.post = {"id": "ghost-1", "html": payload["posts"][0]["html"],
+            self.post = {**payload["posts"][0], "id": "ghost-1",
                          "updated_at": "2026-09-24T00:00:00.000Z", "status": "draft"}
             return {"posts": [self.post]}
         if method == "GET" and "/ghost/api/admin/posts/ghost-1/" in path:
@@ -51,6 +52,8 @@ class GhostPublisherTests(unittest.TestCase):
     def test_digest_is_deterministic_and_exact(self):
         first = content_digest(item())
         self.assertEqual(first, content_digest(dict(item())))
+        changed = dict(item(), meta_description="A reviewed description.")
+        self.assertNotEqual(first, content_digest(changed))
         with self.assertRaisesRegex(GhostPublishError, "digest"):
             publish(item(), {"endpoint": "http://localhost:2370"}, "bad", client=FakeClient())
 
@@ -66,6 +69,64 @@ class GhostPublisherTests(unittest.TestCase):
         self.assertIn("agency-content-card", html)
         self.assertIn("pipeline-article", html)
         self.assertIn("Keep the evidence visible", html)
+
+    def test_metadata_defaults_and_reviewed_values_are_sent_and_read_back(self):
+        value = dict(item(), meta_title="Reviewed title", meta_description="Reviewed description",
+                     custom_excerpt="Reviewed excerpt")
+        fake = FakeClient()
+        publish(value, {"endpoint": "http://localhost:2370", "base_url": "https://example.com/blog"}, content_digest(value), client=fake)
+        post = fake.calls[1][2]["posts"][0]
+        self.assertEqual(post["meta_title"], "Reviewed title")
+        self.assertEqual(post["meta_description"], "Reviewed description")
+        self.assertEqual(post["custom_excerpt"], "Reviewed excerpt")
+
+    def test_explicit_metadata_preserves_punctuation_and_length_is_validated(self):
+        value = dict(item(), meta_title="ATS-ready resume: C++ / Python",
+                     meta_description="Use a job-specific, evidence-based summary -- without inventing claims.",
+                     custom_excerpt="A short, editorial excerpt -- with punctuation.")
+        fake = FakeClient()
+        publish(value, {"endpoint": "http://localhost:2370", "base_url": "https://example.com/blog"}, content_digest(value), client=fake)
+        post = fake.calls[1][2]["posts"][0]
+        self.assertEqual(post["meta_title"], value["meta_title"])
+        self.assertEqual(post["meta_description"], value["meta_description"])
+        self.assertEqual(post["custom_excerpt"], value["custom_excerpt"])
+        invalid = dict(item(), meta_description="x" * 2001)
+        with self.assertRaisesRegex(GhostPublishError, "meta_description"):
+            content_digest(invalid)
+
+    def test_feature_image_uses_reviewed_managed_article_image(self):
+        value = dict(item(), content_blocks=[{"type": "prose", "markdown": "A useful article."}, {"type": "image_slot", "brief": "cover",
+            "alt": "A resume cover", "caption": "A reviewed cover", "url": "https://assets.example/old.png",
+            "image_url": "https://assets.example/old.png", "reviewed": True,
+            "asset": {"sha256": "a" * 64, "object_key": "editorial/" + "a" * 64 + ".png",
+                      "provenance": {"kind": "owned"}}}])
+        fake = FakeClient()
+        with mock.patch("content_assets.read_core_asset", return_value=b"png"), \
+             mock.patch("content_assets.copy_to_engagement", return_value={"url": "https://media.example/cover.png", "object_key": "editorial/" + "a" * 64 + ".png"}):
+            approved = content_digest(value)
+            result = publish(value, {"endpoint": "http://localhost:2370", "base_url": "https://example.com/blog", "asset_storage": {"endpoint": "http://storage", "access_key": "a", "secret_key": "b", "bucket": "public", "public_base": "https://media.example"}}, approved, client=fake)
+        self.assertEqual(result["digest"], approved)
+        post = fake.calls[1][2]["posts"][0]
+        self.assertEqual(post["feature_image"], "https://media.example/cover.png")
+        self.assertEqual(post["feature_image_alt"], "A resume cover")
+        self.assertEqual(post["feature_image_caption"], "A reviewed cover")
+
+    def test_empty_first_image_does_not_hide_later_image(self):
+        value = dict(item(), content_blocks=[
+            {"type": "image_slot", "brief": "empty", "alt": "Empty", "reviewed": True,
+             "asset": {"sha256": "b" * 64, "object_key": "editorial/" + "b" * 64 + ".png",
+                       "provenance": {"kind": "owned"}}},
+            {"type": "prose", "markdown": "A useful article."},
+            {"type": "image_slot", "brief": "cover", "alt": "Cover", "url": "https://assets.example/cover.png",
+             "image_url": "https://assets.example/cover.png", "reviewed": True,
+             "asset": {"sha256": "c" * 64, "object_key": "editorial/" + "c" * 64 + ".png",
+                       "provenance": {"kind": "owned"}}}])
+        fake = FakeClient()
+        def copied(metadata, data, storage):
+            return {"url": "https://media.example/" + metadata["sha256"][:1] + ".png", "object_key": metadata["object_key"]}
+        with mock.patch("content_assets.read_core_asset", return_value=b"png"), mock.patch("content_assets.copy_to_engagement", side_effect=copied):
+            publish(value, {"endpoint": "http://localhost:2370", "base_url": "https://example.com/blog", "asset_storage": {"endpoint": "http://storage", "access_key": "a", "secret_key": "b", "bucket": "public", "public_base": "https://media.example"}}, content_digest(value), client=fake)
+        self.assertEqual(fake.calls[1][2]["posts"][0]["feature_image"], "https://media.example/c.png")
 
     def test_long_title_slug_ends_at_word_boundary(self):
         value = item()
@@ -83,6 +144,34 @@ class GhostPublisherTests(unittest.TestCase):
         self.assertEqual(result["status"], "draft")
         self.assertNotIn("PUT", [call[0] for call in fake.calls])
 
+    def test_search_discovery_is_opt_in_and_receipt_contains_published_url(self):
+        fake = FakeClient()
+        destination = {"endpoint": "http://localhost:2370", "base_url": "https://example.com/blog",
+                       "search_discovery": {"enabled": True, "property": "https://example.com/",
+                                             "sitemaps": ["https://example.com/sitemap.xml"], "urls": []}}
+        with mock.patch("search_discovery.discover", return_value={"status": "available", "mode": "submit", "property": "https://example.com/", "sitemaps": {"submitted": []}, "inspections": []}) as discover:
+            result = publish(item(), destination, content_digest(item()), client=fake)
+        self.assertEqual(result["search_discovery"]["status"], "available")
+        config = discover.call_args.args[0]
+        self.assertTrue(discover.call_args.kwargs["submit"])
+        self.assertIn(result["url"], config["urls"])
+        self.assertTrue(destination["search_discovery"]["enabled"])
+
+    def test_search_discovery_failure_does_not_fail_publication_or_prepare(self):
+        fake = FakeClient()
+        destination = {"endpoint": "http://localhost:2370", "base_url": "https://example.com/blog",
+                       "search_discovery": {"enabled": True, "property": "https://example.com/"}}
+        with mock.patch("search_discovery.discover", side_effect=RuntimeError("unavailable")):
+            result = publish(item(), destination, content_digest(item()), client=fake)
+        self.assertEqual(result["status"], "published")
+        self.assertEqual(result["search_discovery"]["status"], "source_unavailable")
+
+        private = FakeClient()
+        with mock.patch("search_discovery.discover") as discover:
+            draft = publish(item(), destination, content_digest(item()), publish=False, client=private)
+        self.assertEqual(draft["status"], "draft")
+        discover.assert_not_called()
+
     def test_unrelated_existing_slug_is_not_overwritten(self):
         existing = {"id": "other", "tags": [{"name": "someone-else"}]}
         with self.assertRaisesRegex(GhostPublishError, "not owned"):
@@ -91,9 +180,9 @@ class GhostPublisherTests(unittest.TestCase):
 
     def test_matching_existing_marker_is_idempotent(self):
         marker = "#agency-content-23-" + content_digest(item())[:16]
-        fake = FakeClient({"id": "ghost-1", "tags": [{"name": marker}],
+        fake = FakeClient({"id": "ghost-1", "tags": [{"name": marker}], **_ghost_metadata(item()),
                            "updated_at": "2026-09-24T00:00:00.000Z", "status": "draft"})
-        fake.post = {"id": "ghost-1", "html": render_pipeline_html(item()), "status": "draft"}
+        fake.post = {"id": "ghost-1", "html": render_pipeline_html(item()), "status": "draft", **_ghost_metadata(item())}
         result = publish(item(), {"endpoint": "http://localhost:2370"}, content_digest(item()),
                          publish=False, client=fake)
         self.assertEqual(result["post_id"], "ghost-1")
@@ -119,8 +208,8 @@ class GhostPublisherTests(unittest.TestCase):
 
     def test_published_retry_performs_no_second_write(self):
         marker = '#agency-content-23-' + content_digest(item())[:16]
-        fake = FakeClient({'id': 'ghost-1', 'tags': [{'name': marker}]})
-        fake.post = {'id': 'ghost-1', 'html': render_pipeline_html(item()), 'status': 'published'}
+        fake = FakeClient({'id': 'ghost-1', 'tags': [{'name': marker}], **_ghost_metadata(item())})
+        fake.post = {'id': 'ghost-1', 'html': render_pipeline_html(item()), 'status': 'published', **_ghost_metadata(item())}
         result = publish(item(), {'base_url': 'https://example.com/blog'}, content_digest(item()), client=fake)
         self.assertEqual(result['status'], 'published')
         self.assertTrue(all(method == 'GET' for method, _, _ in fake.calls))

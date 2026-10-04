@@ -15,6 +15,15 @@
       "endpoint": "http://127.0.0.1:9100",
       "bucket": "trueapply-marketing",
       "public_base": "https://trueapply.in/blog/media"
+    },
+    "search_discovery": {
+      "enabled": true,
+      "property": "sc-domain:trueapply.in",
+      "service_account_file": "/home/agency/.config/agency/gsc-service-account.json",
+      "sitemaps": [
+        "https://trueapply.in/sitemap.xml",
+        "https://trueapply.in/blog/sitemap.xml"
+      ]
     }
   }
 }

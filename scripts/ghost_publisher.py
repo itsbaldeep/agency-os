@@ -27,7 +27,12 @@ class GhostPublishError(ValueError):
 
 
 def content_digest(item: dict) -> str:
-    """Return the approval digest for exactly the fields sent to Ghost."""
+    """Return the approval digest for content and source asset identities.
+
+    Managed assets are copied to engagement storage before the Ghost request,
+    so the approved digest intentionally binds the source item while the
+    request payload is verified against the copied public URL.
+    """
     if not isinstance(item, dict):
         raise GhostPublishError("content item must be an object")
     selected = {
@@ -35,10 +40,97 @@ def content_digest(item: dict) -> str:
         "body": item.get("body") or "",
         "content_blocks": item.get("content_blocks") or [],
         "structured": item.get("structured") or {},
+        "ghost_metadata": _ghost_metadata(item),
     }
     raw = json.dumps(selected, ensure_ascii=False, sort_keys=True,
                      separators=(",", ":"), allow_nan=False).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
+
+
+def _plain_text(value: object) -> str:
+    """Collapse editorial source text into deterministic metadata input."""
+    text = re.sub(r"<[^>]+>", " ", str(value or ""))
+    text = re.sub(r"[*_`#>-]", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _reviewed_text(value: object, field: str, limit: int) -> str | None:
+    """Validate an explicit reviewed string without rewriting its content."""
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str):
+        raise GhostPublishError(f"{field} must be a string")
+    if len(value) > limit:
+        raise GhostPublishError(f"{field} exceeds Ghost's {limit}-character limit")
+    return value
+
+
+def _metadata_source(item: dict, structured: dict, key: str) -> object:
+    for source in (item, structured):
+        if key in source and source[key] not in (None, ""):
+            return source[key]
+    return None
+
+
+def _bounded_default(value: object, limit: int) -> str:
+    text = _plain_text(value)
+    if len(text) <= limit:
+        return text
+    cut = text[:limit].rsplit(" ", 1)[0].rstrip()
+    return cut or text[:limit].rstrip()
+
+
+def _ghost_metadata(item: dict) -> dict:
+    """Return the complete, approval-bound Ghost metadata manifest.
+
+    The source item may provide reviewed values at the top level or under
+    ``structured``. Empty values receive stable defaults so a retry cannot
+    silently drop SEO metadata.
+    """
+    structured = item.get("structured") if isinstance(item.get("structured"), dict) else {}
+    title = _plain_text(item.get("title")) or "Untitled"
+    source_description = _metadata_source(item, structured, "meta_description")
+    source_excerpt = _metadata_source(item, structured, "custom_excerpt")
+    source_title = _metadata_source(item, structured, "meta_title")
+    body = item.get("body")
+    if not body:
+        body = " ".join(
+            str(block.get("markdown") or block.get("text") or block.get("caption") or "")
+            for block in item.get("content_blocks") or [] if isinstance(block, dict)
+        )
+    explicit_description = _reviewed_text(source_description, "meta_description", 2000)
+    explicit_excerpt = _reviewed_text(source_excerpt, "custom_excerpt", 300)
+    explicit_title = _reviewed_text(source_title, "meta_title", 2000)
+    excerpt = explicit_excerpt if explicit_excerpt is not None else _bounded_default(body or title, 300)
+    description = (explicit_description if explicit_description is not None
+                   else _bounded_default(excerpt or title, 160))
+    meta_title = explicit_title if explicit_title is not None else _bounded_default(title, 300)
+
+    feature_image = ""
+    feature_alt = ""
+    feature_caption = ""
+    for block in item.get("content_blocks") or []:
+        if not isinstance(block, dict):
+            continue
+        kind = block.get("type")
+        is_image = kind == "image_slot" or (kind == "editorial_visual" and block.get("kind") in {"image", "photo"})
+        if not is_image:
+            continue
+        if block.get("_ghost_feature_image_source_present") is False:
+            continue
+        candidate_image = str(block.get("url") or block.get("image_url") or "").strip()
+        if not candidate_image:
+            continue
+        feature_image = candidate_image
+        raw_alt = block.get("alt") if block.get("alt") not in (None, "") else block.get("title")
+        feature_alt = _reviewed_text(raw_alt, "feature_image_alt", 300)
+        if feature_alt is None:
+            feature_alt = _bounded_default(title, 300)
+        feature_caption = _reviewed_text(block.get("caption"), "feature_image_caption", 300) or ""
+        break
+    return {"meta_title": meta_title, "meta_description": description,
+            "custom_excerpt": excerpt, "feature_image": feature_image,
+            "feature_image_alt": feature_alt, "feature_image_caption": feature_caption}
 
 
 def _slug(value: str) -> str:
@@ -262,6 +354,8 @@ def _prepare_managed_assets(item: dict, destination: dict) -> dict:
         except Exception as exc:
             raise GhostPublishError(f"managed image {index} could not be copied and verified") from exc
         block = out["content_blocks"][index]
+        block["_ghost_feature_image_source_present"] = bool(
+            original.get("url") or original.get("image_url"))
         block["url"] = copied["url"]
         if block.get("type") == "image_slot":
             block["image_url"] = copied["url"]
@@ -302,6 +396,67 @@ def _validate_markup(markup: str) -> None:
         raise GhostPublishError("rendered content is not valid HTML") from exc
 
 
+def _ghost_payload(item: dict, title: str, slug: str, html_body: str, marker: str) -> dict:
+    metadata = _ghost_metadata(item)
+    post = {"title": title, "slug": slug, "html": html_body, "status": "draft",
+            "meta_title": metadata["meta_title"],
+            "meta_description": metadata["meta_description"],
+            "custom_excerpt": metadata["custom_excerpt"],
+            "tags": [{"name": marker, "visibility": "internal"}]}
+    if metadata["feature_image"]:
+        post["feature_image"] = metadata["feature_image"]
+        post["feature_image_alt"] = metadata["feature_image_alt"]
+        post["feature_image_caption"] = metadata["feature_image_caption"]
+    return post
+
+
+def _verify_ghost_metadata(post: dict, expected: dict) -> None:
+    """Reject read-back that drops or changes any approved Ghost field."""
+    for key, value in expected.items():
+        if value and (post or {}).get(key) != value:
+            raise GhostPublishError("Ghost read-back did not preserve approved metadata")
+        if not value and (post or {}).get(key) not in (None, ""):
+            raise GhostPublishError("Ghost read-back changed approved metadata")
+
+
+def _search_discovery_receipt(destination: dict, published_url: str) -> dict | None:
+    """Run explicitly enabled discovery without affecting publication success."""
+    setting = destination.get("search_discovery") if isinstance(destination, dict) else None
+    if not isinstance(setting, dict) or setting.get("enabled") is not True:
+        return None
+    config = copy.deepcopy(setting)
+    config.pop("enabled", None)
+    urls = config.get("urls")
+    if not isinstance(urls, list):
+        urls = []
+    if published_url not in urls:
+        urls.append(published_url)
+    config["urls"] = urls
+    try:
+        from search_discovery import discover
+        result = discover(config, submit=True)
+        if not isinstance(result, dict):
+            return {"status": "source_unavailable", "error": "malformed_receipt"}
+        # The discovery module already returns bounded, secret-free receipts.
+        allowed = ("status", "mode", "property", "sitemaps", "inspections",
+                   "submitted", "skipped", "checked_at", "inventory", "partial", "error")
+        return {key: result[key] for key in allowed if key in result}
+    except Exception as exc:
+        # Search Console is an auxiliary measurement operation. Never turn a
+        # confirmed Ghost publication into a failed publication.
+        return {"status": "source_unavailable", "error": type(exc).__name__}
+
+
+def _published_result(destination: dict, post_id: str, slug: str, digest: str,
+                      published_url: str) -> dict:
+    result = {"ok": True, "post_id": post_id, "slug": slug, "digest": digest,
+              "status": "published", "url": published_url}
+    receipt = _search_discovery_receipt(destination, published_url)
+    if receipt is not None:
+        result["search_discovery"] = receipt
+    return result
+
+
 def publish(item: dict, destination: dict, approved_digest: str, publish: bool = True,
             client: GhostAdminClient | None = None) -> dict:
     """Create, verify, and optionally publish one Ghost post.
@@ -336,6 +491,7 @@ def publish(item: dict, destination: dict, approved_digest: str, publish: bool =
     if "visual unavailable" in html_body.lower():
         raise GhostPublishError("rendered visual content is unavailable")
     _validate_markup(html_body)
+    metadata = _ghost_metadata(item_for_publish)
     existing = None
     try:
         existing = _post(client.request("GET", "/ghost/api/admin/posts/slug/" + urllib.parse.quote(slug, safe="") + "/?formats=html"))
@@ -349,10 +505,10 @@ def publish(item: dict, destination: dict, approved_digest: str, publish: bool =
             raise GhostPublishError("Ghost slug already exists and is not owned by this content item")
         post_id = existing.get("id")
     else:
-        draft = _post(client.request("POST", "/ghost/api/admin/posts/?source=html", {
-            "posts": [{"title": title, "slug": slug, "html": html_body, "status": "draft",
-                       "tags": [{"name": marker, "visibility": "internal"}] +
-                               ([{"name": "Help", "slug": "help"}] if (item_for_publish.get('structured') or {}).get('content_kind') == 'help' else [])}]}))
+        payload = _ghost_payload(item_for_publish, title, slug, html_body, marker)
+        if (item_for_publish.get('structured') or {}).get('content_kind') == 'help':
+            payload["tags"].append({"name": "Help", "slug": "help"})
+        draft = _post(client.request("POST", "/ghost/api/admin/posts/?source=html", {"posts": [payload]}))
         if not draft:
             raise GhostPublishError("Ghost draft did not preserve the rendered HTML")
         post_id = draft.get("id")
@@ -362,6 +518,7 @@ def publish(item: dict, destination: dict, approved_digest: str, publish: bool =
     checked_html = (checked or {}).get("html") or ""
     if any(fragment not in checked_html for fragment in _required_fragments(item_for_publish)) or _normal_html(checked_html) != _normal_html(html_body):
         raise GhostPublishError("Ghost read-back did not preserve the rendered HTML")
+    _verify_ghost_metadata(checked or {}, metadata)
     if not publish:
         status = (checked or {}).get("status")
         if status not in {"draft", "internal"}:
@@ -371,8 +528,8 @@ def publish(item: dict, destination: dict, approved_digest: str, publish: bool =
         public = destination.get("public_url") or destination.get("base_url") or ""
         if not str(public).startswith("https://"):
             raise GhostPublishError("published Ghost result requires an HTTPS base_url")
-        return {"ok": True, "post_id": post_id, "slug": slug, "digest": digest,
-                "status": "published", "url": str(public).rstrip("/") + "/" + slug + "/"}
+        return _published_result(destination, post_id, slug, digest,
+                                 str(public).rstrip("/") + "/" + slug + "/")
     updated_at = checked.get("updated_at") if checked else None
     payload = {"posts": [{"updated_at": updated_at, "status": "published"}]}
     client.request("PUT", "/ghost/api/admin/posts/" + urllib.parse.quote(str(post_id), safe="") + "/", payload)
@@ -381,8 +538,9 @@ def publish(item: dict, destination: dict, approved_digest: str, publish: bool =
         raise GhostPublishError("Ghost did not confirm publication")
     if _normal_html(final.get('html')) != _normal_html(html_body):
         raise GhostPublishError('Published HTML differs from the approved content; inspect the article before retrying')
+    _verify_ghost_metadata(final or {}, metadata)
     public = destination.get("public_url") or destination.get("base_url") or ""
     if not str(public).startswith("https://"):
         raise GhostPublishError("published Ghost result requires an HTTPS base_url")
-    return {"ok": True, "post_id": post_id, "slug": slug, "digest": digest,
-            "status": "published", "url": str(public).rstrip("/") + "/" + slug + "/"}
+    return _published_result(destination, post_id, slug, digest,
+                             str(public).rstrip("/") + "/" + slug + "/")

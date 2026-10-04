@@ -303,3 +303,18 @@ content planning and acquisition-to-activation feedback loop. Release-specific
 verification and explicit unresolved business decisions remain visible. Exact
 marketing publications, paid spend and future email/SMS/WhatsApp sends retain their
 existing approval gates. Removing beta wording alone is not launch acceptance.
+
+## TrueApply blog SEO and publishing, owner direction 2026-10-04
+
+The owner authorized implementing and deploying the reviewed blog SEO plan after
+publishing the evidence-first resume tailoring article. Align article navigation,
+titles and reading/sidebar columns inside a responsive shared container. Provide
+ten stable coordinated thumbnail variants; use an actual article image when
+available. Ghost publication must carry the reviewed SEO title, description,
+excerpt and selected image metadata, verify preservation, and retain individual
+publication approval. Approved publications may automatically submit configured
+TrueApply sitemaps and inspect the published URL using the existing Google
+integration. This authorization does not permit publishing another article,
+creating new schedules, sending campaigns or promising Google indexing. Google
+URL Inspection reads indexed-version status; manual Request indexing remains a
+Search Console action where no supported general-page API is available.
