@@ -6,6 +6,7 @@ single transaction, and rolls back everything.  It never uses production rows.
 from __future__ import annotations
 
 import json
+import itertools
 import os
 import re
 import sys
@@ -87,8 +88,12 @@ class MarketingStudioPostgresTests(unittest.TestCase):
         return cur
 
     class _TxConnection:
+        _ids = itertools.count()
+
         def __init__(self, conn, schema):
             self._conn, self._schema = conn, schema
+            self._savepoint = "fixture_call_%s" % next(self._ids)
+            conn.cursor().execute("SAVEPOINT " + self._savepoint)
 
         def cursor(self, *args, **kwargs):
             kwargs.setdefault("cursor_factory", psycopg2.extras.RealDictCursor)
@@ -97,10 +102,14 @@ class MarketingStudioPostgresTests(unittest.TestCase):
             return cur
 
         def commit(self):
-            pass
+            # Advance the simulated transaction boundary without committing the
+            # outer fixture transaction or exposing its rows to other sessions.
+            cur = self._conn.cursor()
+            cur.execute("RELEASE SAVEPOINT " + self._savepoint)
+            cur.execute("SAVEPOINT " + self._savepoint)
 
         def rollback(self):
-            self._conn.rollback()
+            self._conn.cursor().execute("ROLLBACK TO SAVEPOINT " + self._savepoint)
 
         def close(self):
             pass
@@ -220,6 +229,122 @@ class MarketingStudioPostgresTests(unittest.TestCase):
             self.assertEqual(readback['verification'], evidence)
             self.assertFalse(readback['sending_enabled'])
             self.assertEqual(client.get('/api/brands/202/email-provider').status_code, 409)
+
+    def test_exact_campaign_approval_schedule_dispatch_and_receipt_are_isolated(self):
+        from datetime import datetime, timedelta, timezone
+        import marketing_campaign_adapter as adapter
+        import marketing_campaign_execution as execution
+        import marketing_campaigns
+        sys.path.insert(0, str(ROOT.parents[0] / 'agency-dashboard'))
+        import app as dashboard
+        import campaign_execution_routes as routes
+        cur = self.cursor()
+        cur.execute('ALTER TABLE brands ADD COLUMN project_id integer')
+        cur.execute('CREATE TABLE projects(id integer PRIMARY KEY,local_path text,classification text,lifecycle text)')
+        cur.execute("INSERT INTO projects VALUES(303,'/home/agency/core/deployden','core','active')")
+        cur.execute('UPDATE brands SET project_id=303 WHERE id=101')
+        cur.execute('CREATE TABLE brand_properties(brand_id integer,property_type text,value text,accessible boolean,created_at timestamptz DEFAULT now(),UNIQUE(brand_id,property_type))')
+        cur.execute(_migration_sql(ROOT / 'infra/migrations/023_marketing_campaign_runs.sql'))
+        cur.execute('SELECT now() AS ts')
+        approval_time = cur.fetchone()['ts'] - timedelta(minutes=1)
+        class ApprovalClock(datetime):
+            @classmethod
+            def now(cls, tz=None): return approval_time
+        config = {'schema_version':1,'base_url':'http://127.0.0.1:8123','credential_ref':'/home/agency/.config/agency/fixture-campaign.env','credential_name':'CAMPAIGN_ADAPTER_TOKEN'}
+        brief = {'subject':'Fixture update','campaign_policy':marketing_campaigns.default_policy()}
+        cur.execute("INSERT INTO marketing_work_items(brand_id,kind,channel,title,brief,body,state,planned_at) VALUES(101,'email_campaign','email','Fixture update',%s,'Approved fixture copy','ready',now()) RETURNING id", (json.dumps(brief),))
+        item_id = cur.fetchone()['id']
+        url = f'/api/brands/101/work-items/{item_id}/campaign-execution'
+        conn = self._dashboard_conn()
+        calls = []
+        class Source:
+            @staticmethod
+            def request_preview(item, saved_config, project, now):
+                expected = adapter.preview_request(item, now)
+                return {**{k:expected[k] for k in ('schema_version','brand_id','item_id','revision','message_digest','policy_digest')},'audience_digest':'a'*64,'source_revision':'fixture_1','eligible_count':2,'suppressed_count':1,'generated_at':approval_time.isoformat(),'expires_at':(approval_time+timedelta(hours=1)).isoformat(),'provider_ready':True}
+            @staticmethod
+            def receipt(contract, status):
+                value={k:contract[k] for k in ('schema_version','brand_id','item_id','revision','idempotency_key','audience_digest','message_digest','policy_digest','source_revision')}
+                return {**value,'status':status,'eligible_count':1,'delivered_count':1 if status=='delivered' else 0,'suppressed_count':1}
+            @staticmethod
+            def request_dispatch(contract, saved_config, project):
+                cur.execute('SELECT state FROM marketing_campaign_runs WHERE id=%s',(run_id,))
+                assert cur.fetchone()['state']=='dispatching'
+                calls.append('POST')
+                return Source.receipt(contract,'accepted')
+            @staticmethod
+            def request_receipt(contract, saved_config, project):
+                calls.append('GET')
+                return Source.receipt(contract,'delivered')
+        with mock.patch.object(dashboard.models,'db',return_value=conn):
+            client = dashboard.app.test_client();client.environ_base['HTTP_ORIGIN']='http://localhost'
+            self.assertEqual(client.post(url, json={'action': 'preview', 'revision': 1}, headers={'Origin': 'https://untrusted.example'}).status_code, 403)
+            cur.execute("UPDATE projects SET classification='external' WHERE id=303")
+            self.assertEqual(client.get(url).status_code, 409)
+            cur.execute("UPDATE projects SET classification='core' WHERE id=303")
+            initial=client.get('/api/brands/101/campaign-source').json
+            self.assertEqual(client.post('/api/brands/101/campaign-source',json={'digest':initial['digest'],'config':config}).status_code,201)
+            queued=client.post(url,json={'action':'preview','revision':1})
+            self.assertEqual(queued.status_code,201)
+            cur.execute('SELECT * FROM tasks WHERE id=%s',(queued.json['task_id'],))
+            result=execution.handle_preview(dict(cur.fetchone()),lambda:conn,Source)
+            self.assertTrue(result['ok'], result)
+            with mock.patch.object(routes,'datetime',ApprovalClock):
+                payload={'revision':1,'send_at':(approval_time+timedelta(seconds=10)).isoformat()}
+                review=client.post(url,json={**payload,'action':'review'})
+                self.assertEqual(review.status_code,200,review.json)
+                approval={**payload,'action':'approve','approval_digest':review.json['review']['approval_digest']}
+                rejected=client.post(url,json={**approval,'approval_digest':'b'*64})
+                self.assertEqual(rejected.status_code,409)
+                approved=client.post(url,json=approval)
+                self.assertEqual(approved.status_code,201,approved.json)
+                run_id=approved.json['run_id']
+                self.assertEqual(client.post(url,json=approval).json['run_id'],run_id)
+            self.assertEqual(execution.enqueue_due(lambda:conn)['queued'],1)
+            self.assertEqual(execution.enqueue_due(lambda:conn)['queued'],0)
+            cur.execute('SELECT t.* FROM tasks t JOIN marketing_campaign_runs r ON r.task_id=t.id WHERE r.id=%s',(run_id,))
+            task=dict(cur.fetchone())
+            self.assertEqual(execution.handle_dispatch(task,lambda:conn,Source)['status'],'accepted')
+            self.assertEqual(execution.handle_dispatch(task,lambda:conn,Source)['status'],'accepted')
+            self.assertEqual(calls,['POST'])
+            receipt=client.post(url,json={'action':'receipt','run_id':run_id})
+            self.assertEqual(receipt.status_code, 201, receipt.json)
+            cur.execute('SELECT * FROM tasks WHERE id=%s',(receipt.json['task_id'],))
+            self.assertEqual(execution.handle_receipt(dict(cur.fetchone()),lambda:conn,Source)['status'],'delivered')
+            self.assertEqual(calls,['POST','GET'])
+            self.assertEqual(client.post(f'/api/brands/202/work-items/{item_id}/campaign-execution',json={'action':'cancel','run_id':run_id}).status_code,404)
+            self.assertEqual(client.post(url,json={'action':'cancel','run_id':run_id}).status_code,409)
+            # Each send time is a separate exact approval. Cancellation persists
+            # through duplicate approval and the scheduler never revives it.
+            def approve_offset(seconds):
+                with mock.patch.object(routes, 'datetime', ApprovalClock):
+                    fields = {'revision': 1, 'send_at': (approval_time + timedelta(seconds=seconds)).isoformat()}
+                    review = client.post(url, json={**fields, 'action': 'review'})
+                    self.assertEqual(review.status_code, 200, review.json)
+                    approval = {**fields, 'action': 'approve', 'approval_digest': review.json['review']['approval_digest']}
+                    result = client.post(url, json=approval)
+                    self.assertEqual(result.status_code, 201, result.json)
+                    return result.json['run_id'], approval
+            cancelled_id, cancelled_approval = approve_offset(20)
+            self.assertEqual(client.post(url, json={'action': 'cancel', 'run_id': cancelled_id}).status_code, 200)
+            with mock.patch.object(routes, 'datetime', ApprovalClock):
+                repeated = client.post(url, json=cancelled_approval)
+            self.assertEqual(repeated.json['state'], 'cancelled')
+            self.assertFalse(repeated.json['scheduled'])
+            self.assertEqual(execution.enqueue_due(lambda: conn)['queued'], 0)
+            self.assertEqual(client.post(url, json={'action': 'receipt', 'run_id': cancelled_id}).status_code, 409)
+            stale_id, _ = approve_offset(30)
+            self.assertEqual(execution.enqueue_due(lambda: conn)['queued'], 1)
+            cur.execute('SELECT t.* FROM tasks t JOIN marketing_campaign_runs r ON r.task_id=t.id WHERE r.id=%s', (stale_id,))
+            stale_task = dict(cur.fetchone())
+            cur.execute('UPDATE marketing_work_items SET revision=revision+1 WHERE id=%s', (item_id,))
+            conn.commit()
+            self.assertEqual(execution.handle_dispatch(stale_task, lambda: conn, Source)['status'], 'blocked')
+            cur.execute('SELECT state FROM marketing_campaign_runs WHERE id=%s', (stale_id,))
+            self.assertEqual(cur.fetchone()['state'], 'blocked')
+            self.assertEqual(calls, ['POST', 'GET'])
+        cur.execute('SELECT state,receipt FROM marketing_campaign_runs WHERE id=%s',(run_id,))
+        result=cur.fetchone();self.assertEqual(result['state'],'delivered');self.assertEqual(result['receipt']['suppressed_count'],1)
 
     def test_static_withdrawal_route_and_worker_preserve_exact_receipt(self):
         import tempfile

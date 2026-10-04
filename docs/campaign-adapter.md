@@ -28,7 +28,19 @@ accounts for the entire approved audience as delivered or newly suppressed.
 
 Digests detect changes; they do not grant human authorization. The core executor
 must require a durable exact approval record before using the dispatch transport.
-That executor and its dashboard approval surface are still being implemented.
+The prepared executor stores that approval in `marketing_campaign_runs` (migration
+023). Only due approved rows become tracked dispatch tasks. The worker checks the
+current draft revision and ownership, commits a dispatch claim before calling the
+source, and never retries an uncertain run through POST. The dashboard provides
+preview, exact review, approval, cancellation before dispatch, and receipt checks.
+These additions are source changes pending deployment and live browser verification.
+
+Verification uses a rollback-only PostgreSQL fixture for source configuration,
+preview, exact approval digest rejection, duplicate approval, scheduling, dispatch,
+receipt reconciliation, cancellation persistence, stale draft blocking, cross-brand
+isolation, classification boundaries and cross-origin rejection. Worker unit tests
+also cover commit-before-POST and post-claim persistence failure. The fixture does
+not prove external transaction visibility or concurrent source outbox execution.
 
 Before dispatch, the source must freshly recheck consent, suppression, service
 trigger, cooldown, and frequency caps. The eligible audience may shrink after

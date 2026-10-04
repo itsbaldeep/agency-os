@@ -17,6 +17,7 @@ import seo_cleanup
 import growth_planner
 import marketing_studio_workflow
 import marketing_email_provider
+import marketing_campaign_execution
 import marketing_kit_import
 import publication_recovery
 
@@ -125,7 +126,7 @@ def get_conn():
     return psycopg2.connect(host=DB_HOST, port=5432, dbname=DB_NAME, user=DB_USER, password=DB_PASS)
 
 
-SIDE_EFFECT_TASKS = frozenset({"static_publish_rollback", "publish_content", "execute_approval", "execute_suggestion", "propose_fix", "seo_cleanup", "seo_cleanup_notify"})
+SIDE_EFFECT_TASKS = frozenset({"marketing_campaign_dispatch", "static_publish_rollback", "publish_content", "execute_approval", "execute_suggestion", "propose_fix", "seo_cleanup", "seo_cleanup_notify"})
 _failure_alerted_at = {}
 
 
@@ -5703,6 +5704,9 @@ def handle_retired_development(task):
 
 
 DISPATCH = {
+    "marketing_campaign_preview": lambda task: marketing_campaign_execution.handle_preview(task, get_conn),
+    "marketing_campaign_dispatch": lambda task: marketing_campaign_execution.handle_dispatch(task, get_conn),
+    "marketing_campaign_receipt": lambda task: marketing_campaign_execution.handle_receipt(task, get_conn),
     "email_provider_verify": lambda task: marketing_email_provider.handle(task, get_conn),
     "static_publish_rollback": lambda task: publication_recovery.handle(task, get_conn),
     "marketing_kit_import": lambda task: marketing_kit_import.handle(task, get_conn),
@@ -5878,8 +5882,14 @@ def start_up():
 if __name__ == "__main__":
     start_up()
     print("[worker] Agency Worker started. Polling every 2s...", flush=True)
+    _campaign_due_checked = 0.0
     while True:
         try:
+            if time.monotonic() - _campaign_due_checked >= 30:
+                _campaign_schedule = marketing_campaign_execution.enqueue_due(get_conn)
+                _campaign_due_checked = time.monotonic()
+                if not _campaign_schedule.get('ok'):
+                    print('[worker] Campaign scheduling check failed', flush=True)
             poll()
         except Exception as e:
             print(f"[worker] Poll error: {e}", flush=True)
