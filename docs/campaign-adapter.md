@@ -33,7 +33,9 @@ The prepared executor stores that approval in `marketing_campaign_runs` (migrati
 current draft revision and ownership, commits a dispatch claim before calling the
 source, and never retries an uncertain run through POST. The dashboard provides
 preview, exact review, approval, cancellation before dispatch, and receipt checks.
-These additions are source changes pending deployment and live browser verification.
+These additions were deliberately deployed on 2026-10-04. Both brand sources remain
+unconfigured. Live desktop/mobile checks confirmed disabled delivery controls and
+zero campaign runs; no campaign was approved or sent.
 
 Verification uses a rollback-only PostgreSQL fixture for source configuration,
 preview, exact approval digest rejection, duplicate approval, scheduling, dispatch,

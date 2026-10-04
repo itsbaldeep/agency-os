@@ -71,3 +71,36 @@ Acceptance: ten provider tests, six rollback-only PostgreSQL workflow tests and 
 Deployment captured an empty queue, saved runtime recovery files in `/home/agency/backups/releases/dashboard-v2-email-provider-20261004`, copied only committed files and byte-verified them before starting the worker. Dashboard image: `sha256:152dbacec0978edc24b9c4a9cb4c5581a861d0e15f3b673f655d2c9e2b6cdc82`. Worker is active. Unrelated Ghost/search/publication-config working changes remain excluded.
 
 API references checked 2026-10-04: [Brevo account read](https://developers.brevo.com/reference/get-account), [sender inventory](https://developers.brevo.com/reference/get-senders), [API-key access](https://developers.brevo.com/docs/api-key-authentication). These checks do not call the email sending endpoint.
+
+
+## Exact campaign approval and scheduling, 2026-10-04 17:14 UTC
+
+Core `8451ea0` and dashboard `3715c30` are deployed. Migration 023 stores exact
+message, policy, audience, revision and send-time approvals, without recipient
+records. Due approved runs queue tracked dispatch tasks. The worker checks current
+ownership and draft revision, commits its claim before contacting the source, and
+requires receipt reconciliation after an uncertain outcome. Cancellation before
+dispatch persists through duplicate approval.
+
+Validation: 134 dashboard tests passed (one skip), 37 campaign tests passed,
+seven rollback-only PostgreSQL tests passed, and fixture-backed desktop/mobile
+exact-review checks passed without approval requests. Live GET-only checks passed
+at 1440 and 390 pixels for both email setup pages and Deployden's campaign detail,
+with disabled delivery controls, no overflow and no script errors. The PostgreSQL
+fixture uses savepoints to simulate commit/rollback boundaries while preserving
+its outer rollback; it does not prove concurrent source outbox behavior.
+
+The worker was stopped with an empty queue. Migration 023 was applied, four
+committed runtime modules were copied and byte-verified, and the worker restarted.
+Recovery files and the previous dashboard image are recorded in
+`/home/agency/backups/releases/dashboard-v2-exact-campaigns-20261004`.
+Live dashboard image:
+`sha256:4c1206d19410c266b7d51b4c48335982ff35201e04d5fc57e519ad0ee61cbaed`.
+Worker is active. No restart orphans were found. Unrelated dirty Ghost/search
+and publication configuration changes were excluded.
+
+Both brand campaign sources remain unconfigured, and the database contains zero
+campaign runs. No delivery was approved or sent. Brand-owned source endpoints,
+idempotent outbox execution and current provider access remain required before
+live campaign delivery is usable. TrueApply's existing Brevo verification still
+reports HTTP 403. Public marketing actions need separate exact approval.
