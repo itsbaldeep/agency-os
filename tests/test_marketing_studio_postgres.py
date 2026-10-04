@@ -245,6 +245,7 @@ class MarketingStudioPostgresTests(unittest.TestCase):
         cur.execute('UPDATE brands SET project_id=303 WHERE id=101')
         cur.execute('CREATE TABLE brand_properties(brand_id integer,property_type text,value text,accessible boolean,created_at timestamptz DEFAULT now(),UNIQUE(brand_id,property_type))')
         cur.execute(_migration_sql(ROOT / 'infra/migrations/023_marketing_campaign_runs.sql'))
+        cur.execute('CREATE TABLE content_calendar(id integer,brand_id integer,title text,status text,planned_date date)')
         cur.execute('SELECT now() AS ts')
         approval_time = cur.fetchone()['ts'] - timedelta(minutes=1)
         class ApprovalClock(datetime):
@@ -300,6 +301,11 @@ class MarketingStudioPostgresTests(unittest.TestCase):
                 self.assertEqual(approved.status_code,201,approved.json)
                 run_id=approved.json['run_id']
                 self.assertEqual(client.post(url,json=approval).json['run_id'],run_id)
+            calendar = client.get('/calendar?brand_id=101')
+            self.assertEqual(calendar.status_code, 200)
+            self.assertIn(b'Approved delivery runs', calendar.data)
+            self.assertIn(('href="/brands/101/work/%s"' % item_id).encode(), calendar.data)
+            self.assertNotIn(b'Fixture South', calendar.data.split(b'Approved delivery runs')[1])
             self.assertEqual(execution.enqueue_due(lambda:conn)['queued'],1)
             self.assertEqual(execution.enqueue_due(lambda:conn)['queued'],0)
             cur.execute('SELECT t.* FROM tasks t JOIN marketing_campaign_runs r ON r.task_id=t.id WHERE r.id=%s',(run_id,))

@@ -118,3 +118,24 @@ Canonical source and runtime origin therefore differ. Reconcile the retained
 release lineage before authoring or deploying a campaign adapter. Canonical
 compose files alone are insufficient evidence of the live application version.
 No TrueApply source or runtime was changed during this verification.
+
+
+## Unified planning and delivery calendar, 2026-10-04
+
+Dashboard `cf1bc65` separates planning metadata from exact campaign delivery runs
+at `/calendar`. An optional brand filter applies to both lanes. Approved runs show
+revision, UTC delivery time, state and a work-item link; cancellation remains
+visible. Queries never select contracts, recipients or credentials. Bounds reject
+invalid, Unicode-only and oversized brand identifiers.
+
+Validation: 137 dashboard tests passed (one skip) and seven rollback-only
+PostgreSQL tests passed, including actual calendar SQL and approved-run rendering.
+Desktop/mobile checks passed locally for all brands and brand filters. The
+previous dashboard image is preserved in
+`/home/agency/backups/releases/dashboard-v2-calendar-20261004`.
+No worker restart or TrueApply deployment was performed. The isolated adapter
+checkout `/home/agency/worktrees/trueapply-marketing-adapter` starts at current
+remote release lineage `29f0cdb`, preserving the dirty canonical and running
+checkouts. Existing retention code is present in that lineage; its staged module
+comment is stale because the worker now wires consented product notifications.
+This does not enable candidate application or outreach sending.
