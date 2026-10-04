@@ -186,6 +186,41 @@ class MarketingStudioPostgresTests(unittest.TestCase):
         cur.execute('SELECT count(*) AS n FROM tasks')
         self.assertEqual(cur.fetchone()['n'], 0)
 
+    def test_provider_setup_verification_task_and_receipt_are_brand_scoped(self):
+        import marketing_email_provider as provider
+        sys.path.insert(0, str(ROOT.parents[0] / 'agency-dashboard'))
+        import app as dashboard
+        cur = self.cursor()
+        cur.execute('ALTER TABLE brands ADD COLUMN project_id integer')
+        cur.execute('CREATE TABLE projects(id integer PRIMARY KEY, local_path text, classification text, lifecycle text)')
+        cur.execute("INSERT INTO projects VALUES (303,'/home/agency/core/deployden','core','active')")
+        cur.execute('UPDATE brands SET project_id=303 WHERE id=101')
+        cur.execute('CREATE TABLE brand_properties(brand_id integer,property_type text,value text,accessible boolean,created_at timestamptz DEFAULT now(),UNIQUE(brand_id,property_type))')
+        config = {'provider': 'brevo', 'credential_ref': '/home/agency/.config/agency/fixture-email.env', 'credential_name': 'BREVO_API_KEY', 'sender_email': 'hello@fixture.example'}
+        conn = self._dashboard_conn()
+        url = '/api/brands/101/email-provider'
+        with mock.patch.object(dashboard.models, 'db', return_value=conn):
+            client = dashboard.app.test_client()
+            client.environ_base['HTTP_ORIGIN'] = 'http://localhost'
+            initial = client.get(url).json
+            saved = client.post(url, json={'action': 'save', 'digest': initial['digest'], 'config': config})
+            self.assertEqual(saved.status_code, 201)
+            queued = client.post(url, json={'action': 'verify', 'digest': saved.json['digest']})
+            self.assertEqual(queued.status_code, 201)
+            again = client.post(url, json={'action': 'verify', 'digest': saved.json['digest']})
+            self.assertEqual(again.json['task_id'], queued.json['task_id'])
+            cur.execute('SELECT * FROM tasks WHERE id=%s', (queued.json['task_id'],))
+            task = dict(cur.fetchone())
+            evidence = {'status': 'verified', 'authenticated': True, 'sender_verified': True, 'checked_at': '2026-10-04T12:00:00+00:00', 'error': None}
+            with mock.patch.object(provider, 'verify', return_value=evidence) as verify:
+                result = provider.handle(task, lambda: conn)
+            self.assertTrue(result['ok'])
+            self.assertEqual(verify.call_args.args[0], config)
+            readback = client.get(url).json
+            self.assertEqual(readback['verification'], evidence)
+            self.assertFalse(readback['sending_enabled'])
+            self.assertEqual(client.get('/api/brands/202/email-provider').status_code, 409)
+
     def test_static_withdrawal_route_and_worker_preserve_exact_receipt(self):
         import tempfile
         import publication_recovery, static_publisher

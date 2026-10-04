@@ -16,6 +16,7 @@ import content_asset_workflow
 import seo_cleanup
 import growth_planner
 import marketing_studio_workflow
+import marketing_email_provider
 import marketing_kit_import
 import publication_recovery
 
@@ -5702,6 +5703,7 @@ def handle_retired_development(task):
 
 
 DISPATCH = {
+    "email_provider_verify": lambda task: marketing_email_provider.handle(task, get_conn),
     "static_publish_rollback": lambda task: publication_recovery.handle(task, get_conn),
     "marketing_kit_import": lambda task: marketing_kit_import.handle(task, get_conn),
     "marketing_studio_draft": lambda task: marketing_studio_workflow.handle(task, get_conn,
