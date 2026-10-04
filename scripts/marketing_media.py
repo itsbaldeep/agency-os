@@ -231,6 +231,8 @@ def create_media_artifacts(brand: Any, profile: dict[str, Any], item: dict[str, 
         runtime_config = _runtime_config()
         gsap_source = Path(str(runtime_config.get("gsap_source", ""))) if runtime_config.get("gsap_source") else None
         vendor_root = Path(__file__).resolve().parents[1] / "vendor" / "marketing-media"
+        if gsap_source and not gsap_source.is_absolute():
+            gsap_source = Path(__file__).resolve().parents[1] / gsap_source
         if gsap_source and gsap_source.is_file() and _inside(gsap_source, vendor_root):
             (root / "assets").mkdir(exist_ok=True)
             shutil.copyfile(gsap_source, root / "assets" / "gsap.min.js")
