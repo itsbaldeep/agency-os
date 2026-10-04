@@ -139,3 +139,8 @@ remote release lineage `29f0cdb`, preserving the dirty canonical and running
 checkouts. Existing retention code is present in that lineage; its staged module
 comment is stale because the worker now wires consented product notifications.
 This does not enable candidate application or outreach sending.
+
+Mobile screenshot review found excessive row wrapping. Dashboard `6061d75` fixes
+calendar table widths and compact UTC timestamps, retaining horizontal scrolling
+inside the table. Repeated live desktop/mobile checks passed after deployment.
+Final image: `sha256:3322be328850d19ddb614ba6ca70c1ce13561ad55775bbff45849e62f99d3b8a`.
