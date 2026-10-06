@@ -205,3 +205,57 @@ checks. Migrations 034 through 037, API/worker recreation and source settings
 remain undeployed. Source runtime approval and provider access remain pending;
 marketing sending still requires its own exact approval. The full enterprise
 goal remains active.
+
+## Owned enquiry measurement, verified 2026-10-06 UTC
+
+Deployden `3137b04`, Dashboard `5124dbe` and the core measurement module from
+`85d59f0` are committed, pushed and deliberately deployed. Core runtime keeps
+its existing release plus this byte-verified module; unrelated dirty source
+was excluded. The worker restarted once after capturing an empty queue and
+zero active campaign runs. The post-restart queue was empty, with no orphans.
+
+Deployden now serves authenticated, read-only `/marketing/summary?days=28`.
+Its dedicated core credential stays in the private central environment, mode
+0600. Missing or invalid configuration disables the endpoint; unauthenticated
+requests return 401 when configured. All summary responses are no-store.
+The source reads only timestamps and internal notification flags, with a
+one-second SQLite deadline. It returns enquiry and confirmed internal alert
+counts, never contact data, marketing consent, signup or retention claims.
+
+Connection setup task 457 records the brand-owned nonsecret references.
+Measurement task 458 completed audit 67, captured at
+`2026-10-06T03:02:49.084955+00:00`. Its 28-day window has zero enquiries and
+zero confirmed internal alerts. Empty coverage stays empty and retention
+remains unavailable. GA4, GSC, crawl, PageSpeed and first-party measurement
+are available. The separate journey reports remain unavailable with
+`journey rows unavailable` in all three lanes; this is a parsing/evidence gap
+under investigation, not evidence of an access failure.
+
+Shared schema 2 now accepts validated project stages or aggregate-only counts,
+preserves generic coverage and legitimate zeros, and rejects malformed counts,
+metadata and control characters. Dashboard reports and Lifecycle show source
+labels and additional counts without rendering the legacy resume/signup funnel.
+Optional retention counts are sanitized before exposure. Schema 1 remains
+compatible. Source health and event timestamps are visible in the full report.
+
+Acceptance: 149 dashboard tests passed, one PostgreSQL test skipped, including
+the built image with networking disabled; 22 website tests passed in the host
+and built image; 26 core measurement and seven isolated PostgreSQL workflow
+tests passed. The broad core run initially lacked Flask in its test environment;
+after installing the existing dashboard requirements, its affected PostgreSQL
+module passed. Independent review accepted the final validation corrections.
+Synthetic source-to-collector-to-dashboard and 1440/390-pixel report/Lifecycle
+checks passed, with no overflow or script errors. Five container source files
+and the deployed core module were byte-verified. Live report, Lifecycle, public
+home and privacy routes returned 200; authenticated summary returned 200 and
+unauthenticated summary returned 401.
+
+Recovery: `/home/agency/backups/releases/dashboard-v2-measurement-20261006T025453Z`.
+It holds private source/data/environment recovery, the previous core module,
+task checkpoints and verification. The old website image reference was no
+longer taggable, so its recovery image was rebuilt from the exact previous
+committed source. New images:
+Dashboard `sha256:72ab0d33d58cd35a706022e5ec6732bb89ea14a2738cb3873ce12845561c0ddb`;
+Deployden `sha256:0aeda1cb1a3a1a8ad11c1e78e123cc0c4cad60fb837ef6a939c18e0a86c80b39`.
+No new collection schedule, marketing publication, client runtime deployment
+or campaign send was enabled.
