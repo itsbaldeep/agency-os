@@ -189,6 +189,66 @@ class GrowthMeasurementTests(unittest.TestCase):
         self.assertEqual(result["sources"]["page_views"]["returned_rows"], 250)
         self.assertEqual(result["sources"]["events"]["status"], "source_unavailable")
 
+    def test_collect_journey_accepts_documented_empty_run_report_shape(self):
+        def request(_url, _token, payload):
+            dimension = payload["dimensions"][0]["name"]
+            metrics = ("screenPageViews", "sessions", "engagementRate") if dimension == "pagePath" else ("eventCount",) if dimension == "eventName" else ("sessions",)
+            return {"status": "available", "data": {
+                "kind": "analyticsData#runReport",
+                "dimensionHeaders": [{"name": dimension}],
+                "metricHeaders": [{"name": name} for name in metrics],
+            }}
+        result = growth.collect_journey("token", "123", "2026-09-16T00:00:00+00:00", request)
+        self.assertEqual(result["status"], "available")
+        self.assertTrue(all(source["rows"] == [] for source in result["sources"].values()))
+        self.assertEqual(result["coverage"]["available_sources"], 3)
+
+    def test_journey_empty_and_missing_row_variants_fail_closed(self):
+        valid_headers = {
+            "dimensionHeaders": [{"name": "eventName"}],
+            "metricHeaders": [{"name": "eventCount"}],
+        }
+        variants = (
+            ({**valid_headers}, "wrong kind"),
+            ({**valid_headers, "rowCount": 0}, "missing kind"),
+            ({**valid_headers, "rows": []}, "missing empty kind"),
+            ({**valid_headers, "rows": [], "kind": "wrong"}, "wrong explicit empty kind"),
+            ({**valid_headers, "rows": [{"dimensionValues": [{"value": "safe"}], "metricValues": [{"value": "1"}]}], "kind": "wrong"}, "wrong populated kind"),
+            ({**valid_headers, "kind": "analyticsData#runReport", "rows": None}, "rows unavailable"),
+            ({**valid_headers, "kind": "analyticsData#runReport", "rowCount": 1}, "rows unavailable"),
+            ({**valid_headers, "kind": "analyticsData#runReport", "rows": [], "rowCount": True}, "rows unavailable"),
+            ({**valid_headers, "kind": "analyticsData#runReport", "rows": [], "rowCount": "0"}, "rows unavailable"),
+        )
+        for payload, _label in variants:
+            result = growth._journey_report({"status": "available", "data": payload}, dimension="eventName", metrics=("eventCount",), row_mapper=None)
+            self.assertEqual(result["status"], "source_unavailable", payload)
+        for malformed_headers in (
+            {**valid_headers, "kind": "analyticsData#runReport", "metricHeaders": [{"name": []}]},
+            {**valid_headers, "kind": "analyticsData#runReport", "dimensionHeaders": [{"name": "eventName"}, {}]},
+        ):
+            result = growth._journey_report({"status": "available", "data": malformed_headers}, dimension="eventName", metrics=("eventCount",), row_mapper=None)
+            self.assertEqual(result["status"], "source_unavailable")
+        empty = {**valid_headers, "kind": "analyticsData#runReport", "rowCount": 0}
+        result = growth._journey_report({"status": "available", "data": empty}, dimension="eventName", metrics=("eventCount",), row_mapper=None)
+        self.assertEqual(result["status"], "available")
+        self.assertEqual(result["rows"], [])
+        result = growth._journey_report({"status": "available", "data": {**empty, "rows": []}}, dimension="eventName", metrics=("eventCount",), row_mapper=None)
+        self.assertEqual(result["status"], "available")
+
+    def test_journey_rejects_nonstring_controls_and_oversized_dimensions(self):
+        payload = self._journey_response("eventName", ("eventCount",), [("safe", (1,))])
+        payload["data"]["rows"].extend([
+            {"dimensionValues": [{"value": 12}], "metricValues": [{"value": "1"}]},
+            {"dimensionValues": [{"value": "bad\nvalue"}], "metricValues": [{"value": "1"}]},
+            {"dimensionValues": [{"value": "bad\x7fvalue"}], "metricValues": [{"value": "1"}]},
+            {"dimensionValues": [{"value": "x" * 501}], "metricValues": [{"value": "1"}]},
+        ])
+        payload["data"]["rowCount"] = 5
+        result = growth._journey_report(payload, dimension="eventName", metrics=("eventCount",), row_mapper=None)
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["dropped_rows"], 4)
+        self.assertEqual(result["rows"][0]["eventName"], "safe")
+
 
 if __name__ == "__main__":
     unittest.main()

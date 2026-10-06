@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Deterministic, aggregate-only acquisition measurement for SEO audits.
 
-This module deliberately requests no GSC or GA4 dimensions.  It compares two
-non-overlapping, delayed 28-day windows and leaves sparse results explicitly
-inconclusive instead of manufacturing a percentage or a trend.
+Comparison requests omit GSC and GA4 dimensions. They compare two
+non-overlapping, delayed 28-day windows and leave sparse results explicitly
+inconclusive. Separate journey reports use bounded page, event and channel
+dimensions without claiming a sequential user funnel.
 Google API semantics: GSC Search Analytics requests with no dimensions return
 property-level aggregation (https://developers.google.com/webmaster-tools/v1/searchanalytics/query),
 and GA4 reports with no dimensions return one property aggregate
@@ -263,15 +264,45 @@ def _journey_report(result, *, dimension, metrics, row_mapper):
     payload = result.get("data")
     if not isinstance(payload, dict):
         return {"status": "source_unavailable", "error": "malformed journey response", "rows": []}
+    if "kind" in payload and payload["kind"] != "analyticsData#runReport":
+        return {"status": "source_unavailable", "error": "journey response kind unavailable", "rows": []}
     headers = payload.get("metricHeaders")
     dimensions = payload.get("dimensionHeaders")
-    if (not isinstance(headers, list) or {h.get("name") for h in headers if isinstance(h, dict)} != set(metrics)
-            or len(headers) != len(metrics) or not isinstance(dimensions, list)
-            or [d.get("name") for d in dimensions if isinstance(d, dict)] != [dimension]):
+    if (not isinstance(headers, list) or len(headers) != len(metrics)
+            or not all(isinstance(h, dict) and isinstance(h.get("name"), str) for h in headers)
+            or {h["name"] for h in headers} != set(metrics)
+            or not isinstance(dimensions, list) or len(dimensions) != 1
+            or not isinstance(dimensions[0], dict) or not isinstance(dimensions[0].get("name"), str)
+            or [dimensions[0]["name"]] != [dimension]):
         return {"status": "source_unavailable", "error": "journey headers unavailable", "rows": []}
-    rows = payload.get("rows")
-    row_count = payload.get("rowCount", len(rows) if isinstance(rows, list) else -1)
+    has_rows = "rows" in payload
+    has_row_count = "rowCount" in payload
+    # RunReportResponse omits empty repeated fields in its JSON form.  The
+    # fixed kind identifies that documented empty response shape.
+    # https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/RunReportResponse
+    # https://protobuf.dev/programming-guides/json/
+    if not has_rows and not has_row_count:
+        if payload.get("kind") != "analyticsData#runReport":
+            return {"status": "source_unavailable", "error": "journey response kind unavailable", "rows": []}
+        rows = []
+        row_count = 0
+    else:
+        rows = payload.get("rows")
+        if rows is None and has_rows:
+            return {"status": "source_unavailable", "error": "journey rows unavailable", "rows": []}
+        if not has_row_count:
+            row_count = len(rows) if isinstance(rows, list) else -1
+        else:
+            row_count = payload.get("rowCount")
+        if rows is None and row_count == 0:
+            if payload.get("kind") != "analyticsData#runReport":
+                return {"status": "source_unavailable", "error": "journey response kind unavailable", "rows": []}
+            rows = []
     if not isinstance(rows, list) or not isinstance(row_count, int) or isinstance(row_count, bool) or row_count < 0:
+        return {"status": "source_unavailable", "error": "journey rows unavailable", "rows": []}
+    if not rows and payload.get("kind") != "analyticsData#runReport":
+        return {"status": "source_unavailable", "error": "journey response kind unavailable", "rows": []}
+    if not has_rows and row_count > 0:
         return {"status": "source_unavailable", "error": "journey rows unavailable", "rows": []}
     if row_count != len(rows) and row_count <= JOURNEY_ROW_CAP:
         return {"status": "source_unavailable", "error": "journey row count mismatch", "rows": []}
@@ -282,8 +313,11 @@ def _journey_report(result, *, dimension, metrics, row_mapper):
         try:
             if not isinstance(row, dict) or not isinstance(row.get("dimensionValues"), list) or len(row["dimensionValues"]) != 1:
                 raise ValueError("invalid dimension")
-            value = str(row["dimensionValues"][0].get("value") or "")[:500]
-            if not value or "?" in value or "#" in value:
+            dimension_value = row["dimensionValues"][0]
+            value = dimension_value.get("value") if isinstance(dimension_value, dict) else None
+            if (not isinstance(value, str) or not value or len(value) > 500
+                    or any(ord(char) < 32 or ord(char) == 127 for char in value)
+                    or "?" in value or "#" in value):
                 dropped += 1
                 continue
             metric_values = row.get("metricValues")
