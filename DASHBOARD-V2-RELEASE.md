@@ -144,3 +144,64 @@ Mobile screenshot review found excessive row wrapping. Dashboard `6061d75` fixes
 calendar table widths and compact UTC timestamps, retaining horizontal scrolling
 inside the table. Repeated live desktop/mobile checks passed after deployment.
 Final image: `sha256:3322be328850d19ddb614ba6ca70c1ce13561ad55775bbff45849e62f99d3b8a`.
+
+## Private owned-brand enquiry review, 2026-10-06 UTC
+
+Dashboard `32ea33b` and Deployden `ac6d782` are committed, pushed and deployed.
+Deployden's Lifecycle workspace links to `/brands/27/enquiries`. The private
+view reads the source-owned SQLite store through an explicit read-only mount;
+it does not copy contact data into core Postgres or model prompts. Runtime
+configuration maps brand 27 to its active core owner, project 10. The reader
+rejects ownership drift, engagements, unsafe paths, malformed source rows and
+invalid cursors. It displays fifty enquiries per page with escaped messages,
+UTC dates, bounded queries and no-store headers. Other brands are unavailable
+until an appropriate source is explicitly connected.
+
+The website rejects malformed JSON, field types, request framing, cross-origin
+browser submissions and incomplete bodies before persistence. Body reads have
+an absolute ten-second deadline, server concurrency is capped at eight, and
+internal notifications have a five-second timeout. Failed worker startup and
+overload responses release resources. Internal notifications contain only a
+lead ID; addresses and enquiry text remain in the source. A stored enquiry
+does not imply marketing consent or authorize an email. The public form and
+privacy copy state this boundary without promising a response within 24 hours.
+
+Website credentials now load from the private central core environment.
+Verification proved the existing notification credential identity and scope
+were preserved without printing it. Both build contexts exclude local
+environment files, data and Git metadata.
+
+Acceptance: 145 dashboard tests passed (one additional PostgreSQL test skipped)
+and sixteen website tests passed, including tests in both built images with
+network access disabled. Independent review accepted the final source after
+correcting truncated-body handling and bounded notification occupancy.
+Synthetic desktop/mobile review at 1440/390 pixels passed overflow and script
+checks; no real contact data was used for screenshots. Live GET-only checks
+prove the owned inbox is available with no-store headers, the TrueApply inbox
+is unavailable, and the public website/privacy/health routes return 200.
+Nine deployed source files were byte-verified against canonical source.
+
+Recovery images, previous committed source archives, a private consistent
+SQLite backup, captured tasks and runtime verification are saved under
+`/home/agency/backups/releases/dashboard-v2-enquiries-20261006T023522Z`.
+The captured queue was empty. Agency worker was not restarted and remains
+active, so this release created no worker restart orphans.
+
+Dashboard image:
+`sha256:3160d6a583e9d4c1467f433fbddecb687a7a1655137255b7396810aa0206456a`.
+Deployden image:
+`sha256:3b49d865c2b73d03d05499a3be1536a7b0be0e0bec53468454c3dc581082cf7b`.
+
+Tracked read-only email verification task 456 refreshed TrueApply's provider
+state at `2026-10-06T02:41:13.328993+00:00`: HTTP 403, authentication and sender
+verification both false. No cause is inferred and no campaign was sent.
+
+TrueApply campaign source preparation is at `ea485b7` in the isolated
+`feat/dashboard-marketing-adapter` branch and [draft PR 42](https://github.com/itsbaldeep/trueapply/pull/42).
+Shared approved contact limits now apply before native/campaign quota claims,
+with transactional priority, exact retained snapshot identity and uncertainty
+preserved. Acceptance passed 293 focused tests and 41 isolated PostgreSQL
+checks. Migrations 034 through 037, API/worker recreation and source settings
+remain undeployed. Source runtime approval and provider access remain pending;
+marketing sending still requires its own exact approval. The full enterprise
+goal remains active.
