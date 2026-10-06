@@ -259,3 +259,38 @@ Dashboard `sha256:72ab0d33d58cd35a706022e5ec6732bb89ea14a2738cb3873ce12845561c0d
 Deployden `sha256:0aeda1cb1a3a1a8ad11c1e78e123cc0c4cad60fb837ef6a939c18e0a86c80b39`.
 No new collection schedule, marketing publication, client runtime deployment
 or campaign send was enabled.
+
+## GA4 journey empty-response correction, verified 2026-10-06 UTC
+
+The audit 67 follow-up established the source shape through three bounded,
+read-only requests for the same owned property and window. Each provider
+response had the expected dimension and metric headers, fixed GA4 report kind
+and metadata, with empty rows and zero row count omitted from JSON. The parser
+had incorrectly classified that valid empty shape as unavailable.
+Google's [RunReportResponse reference](https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/RunReportResponse)
+and [ProtoJSON defaults](https://protobuf.dev/programming-guides/json/)
+support the correction. Only sanitized header/presence flags were retained.
+
+Core `62f4e11` is committed, pushed and deployed as one byte-verified
+`growth_measurement.py` update after the enquiry batch. Exact headers and
+fixed empty-response kind are required; wrong kinds, missing headers, null
+rows and malformed or inconsistent row counts remain unavailable. Dimension
+values must be bounded strings, with control characters, DEL and query/hash
+values dropped. A valid empty report means no rows were reported, not proof
+that every tracking event or tag is configured correctly.
+
+Acceptance: 360 core tests passed, two skipped. Independent review accepted
+the final parser after adding wrong-kind regressions. The worker restart
+captured an empty queue and zero active campaigns; its post-restart checkpoint
+was empty, with no orphans. The previous module and sanitized source evidence
+are retained in the same private measurement recovery directory.
+
+Tracked Deployden task 461 completed audit 68 at
+`2026-10-06T03:11:12.615027+00:00`: all six sources are available, including
+valid empty GA4 page/event/channel reports. TrueApply task 462 completed audit
+69 at `2026-10-06T03:11:31.235806+00:00`: GA4, GSC, crawl, PageSpeed and journey
+are available. Journey reports contain 34 page-path rows, eight event rows and
+five channel rows, without truncation or dropped rows. Its first-party source
+remains unavailable pending the separately requested source deployment.
+Both measurement pages returned 200 and rendered the fresh journey evidence.
+No client runtime, collection schedule, publication or campaign send changed.
