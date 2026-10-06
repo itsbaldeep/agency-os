@@ -84,6 +84,7 @@ class SeoMeasurementTests(unittest.TestCase):
             "stage_totals": {"signup": 12, "cart_started": 7, "checkout_completed": 3},
             "stage_labels": {"signup": "Account signup", "cart_started": "Cart started", "checkout_completed": "Checkout completed"},
             "aggregate_counts": {"page_views": 100, "email_eligible": 4},
+            "coverage": {"enquiries": 9, "qualified_enquiries": 2},
             "retention": {"email_sent": 4, "email_delivered": 3, "email_opened": 2, "email_status": "ready"},
             "cohorts": [{"source": "newsletter", "stage_totals": {"signup": 2}, "user_id": "private", "email": "private@example.test"}],
         }
@@ -94,21 +95,43 @@ class SeoMeasurementTests(unittest.TestCase):
         self.assertNotIn("user_id", str(result))
         self.assertNotIn("email", result["cohorts"][0])
         self.assertEqual(result["retention"]["email_status"], "unavailable")
+        self.assertEqual(result["coverage"], {"enquiries": 9, "qualified_enquiries": 2})
+        self.assertNotIn("consented_signups", result["coverage"])
+        self.assertNotIn("unattributed_signups", result["coverage"])
+
+    def test_schema2_accepts_aggregate_only_generic_measurement(self):
+        result = seo.normalize_activation({
+            "schema_version": 2,
+            "aggregate_counts": {"page_views": 100, "enquiries": 4},
+        })
+        self.assertEqual(result["status"], "available")
+        self.assertEqual(result["stage_totals"], {})
+        self.assertEqual(result["aggregate_counts"], {"page_views": 100, "enquiries": 4})
+        self.assertEqual(result["coverage"], {})
 
     def test_schema2_email_ready_requires_explicit_source_and_zeroes_survive(self):
-        payload = {"schema_version": 2, "stage_totals": {"signup": 0, "cart_started": 0}, "aggregate_counts": {"orders": 0}, "retention": {"email_eligible": 0, "email_status": "ready", "email_source_available": True}}
+        payload = {"schema_version": 2, "stage_totals": {"signup": 0, "cart_started": 0}, "aggregate_counts": {"orders": 0}, "coverage": {"enquiries": 0}, "retention": {"email_eligible": 0, "email_status": "ready", "email_source_available": True}}
         result = seo.normalize_activation(payload)
         self.assertEqual(result["stage_totals"], {"signup": 0, "cart_started": 0})
         self.assertEqual(result["aggregate_counts"], {"orders": 0})
+        self.assertEqual(result["coverage"], {"enquiries": 0})
         self.assertEqual(result["retention"]["email_status"], "ready")
 
     def test_schema2_rejects_invalid_stage_keys_counts_and_labels(self):
         base = {"schema_version": 2, "stage_totals": {"signup": 1}}
         for payload in (
+            {"schema_version": 2},
+            {"schema_version": 2, "stage_totals": {}, "aggregate_counts": {}},
             {**base, "stage_totals": {"Signup": 1}},
             {**base, "stage_totals": {"signup": True}},
             {**base, "aggregate_counts": {"orders": -1}},
+            {**base, "coverage": {"enquiries": True}},
+            {**base, "coverage": "unknown"},
+            {**base, "window": "unknown"},
+            {**base, "window": {"days": 0}},
+            {**base, "health": []},
             {**base, "stage_labels": {"signup": "line\nbreak"}},
+            {**base, "stage_labels": {"signup": "bad\x7flabel"}},
         ):
             self.assertEqual(seo.normalize_activation(payload)["status"], "source_unavailable")
         result = seo.normalize_activation({

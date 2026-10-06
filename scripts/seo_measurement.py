@@ -45,6 +45,12 @@ def _safe_text(value, limit=200):
     return value
 
 
+def _safe_text_v2(value, limit=200):
+    """Schema-2 text guard, including DEL while leaving schema 1 unchanged."""
+    safe = _safe_text(value, limit=limit)
+    return None if safe is None or any(ord(char) == 127 for char in safe) else safe
+
+
 def _safe_nonnegative_int(value, *, default=None, maximum=10**12):
     if value is None and default is not None:
         return default
@@ -117,9 +123,14 @@ def _normalize_activation_v1(payload, days=28):
 
 
 def _normalize_activation_v2(payload, days=28):
-    stage_totals = _safe_aggregate_counts(payload.get("stage_totals"), limit=30)
-    if stage_totals is None or not stage_totals:
+    stage_totals = _safe_aggregate_counts(payload.get("stage_totals", {}), limit=30)
+    if stage_totals is None:
         return {"status": "source_unavailable", "error": "invalid activation stage totals"}
+    aggregate_counts = _safe_aggregate_counts(payload.get("aggregate_counts", {}), limit=50)
+    if aggregate_counts is None:
+        return {"status": "source_unavailable", "error": "invalid activation aggregate counts"}
+    if not stage_totals and not aggregate_counts:
+        return {"status": "source_unavailable", "error": "missing activation counts"}
     labels = payload.get("stage_labels", {})
     if not isinstance(labels, dict) or len(labels) > 30:
         return {"status": "source_unavailable", "error": "invalid activation stage labels"}
@@ -127,13 +138,10 @@ def _normalize_activation_v2(payload, days=28):
     for key, value in labels.items():
         if not isinstance(key, str) or not STAGE_KEY.fullmatch(key):
             return {"status": "source_unavailable", "error": "invalid activation stage label key"}
-        safe = _safe_text(value)
+        safe = _safe_text_v2(value)
         if safe is None:
             return {"status": "source_unavailable", "error": "invalid activation stage label"}
         clean_labels[key] = safe
-    aggregate_counts = _safe_aggregate_counts(payload.get("aggregate_counts", {}), limit=50)
-    if aggregate_counts is None:
-        return {"status": "source_unavailable", "error": "invalid activation aggregate counts"}
     cohorts = []
     raw_cohorts = payload.get("cohorts", [])
     if not isinstance(raw_cohorts, list) or len(raw_cohorts) > 500:
@@ -145,7 +153,7 @@ def _normalize_activation_v2(payload, days=28):
         clean = {}
         for key in allowed_text:
             if key in row:
-                safe = _safe_text(row[key])
+                safe = _safe_text_v2(row[key])
                 if safe is None:
                     return {"status": "source_unavailable", "error": "invalid activation cohort text"}
                 clean[key] = safe
@@ -160,20 +168,25 @@ def _normalize_activation_v2(payload, days=28):
                 return {"status": "source_unavailable", "error": "invalid activation cohort counts"}
             clean["aggregate_counts"] = values
         cohorts.append(clean)
-    window = payload.get("window") if isinstance(payload.get("window"), dict) else {}
-    coverage = payload.get("coverage") if isinstance(payload.get("coverage"), dict) else {}
-    health = payload.get("health") if isinstance(payload.get("health"), dict) else {}
+    window = payload.get("window", {})
+    coverage = payload.get("coverage", {})
+    health = payload.get("health", {})
+    if not isinstance(window, dict):
+        return {"status": "source_unavailable", "error": "invalid activation window"}
+    if not isinstance(coverage, dict):
+        return {"status": "source_unavailable", "error": "invalid activation coverage"}
+    if not isinstance(health, dict):
+        return {"status": "source_unavailable", "error": "invalid activation health"}
     window_days = _safe_nonnegative_int(window.get("days"), default=days, maximum=90)
-    consented = _safe_nonnegative_int(coverage.get("consented_signups"), default=0)
-    unattributed = _safe_nonnegative_int(coverage.get("unattributed_signups"), default=0)
-    if window_days is None or consented is None or unattributed is None:
+    clean_coverage = _safe_aggregate_counts(coverage, limit=50)
+    if window_days is None or window_days < 1 or clean_coverage is None:
         return {"status": "source_unavailable", "error": "invalid activation metadata"}
-    last_event_at = _safe_text(health.get("last_event_at", ""), limit=80)
-    health_status = _safe_text(health.get("status", "unknown"), limit=40)
+    last_event_at = _safe_text_v2(health.get("last_event_at", ""), limit=80)
+    health_status = _safe_text_v2(health.get("status", "unknown"), limit=40)
     if last_event_at is None or health_status is None:
         return {"status": "source_unavailable", "error": "invalid activation health"}
-    window_start = _safe_text(window.get("start", ""), limit=40)
-    window_end = _safe_text(window.get("end", ""), limit=40)
+    window_start = _safe_text_v2(window.get("start", ""), limit=40)
+    window_end = _safe_text_v2(window.get("end", ""), limit=40)
     if window_start is None or window_end is None:
         return {"status": "source_unavailable", "error": "invalid activation window"}
     return {
@@ -183,7 +196,7 @@ def _normalize_activation_v2(payload, days=28):
         "aggregate_counts": aggregate_counts,
         "retention": normalize_retention(payload.get("retention")),
         "cohorts": cohorts,
-        "coverage": {"consented_signups": consented, "unattributed_signups": unattributed},
+        "coverage": clean_coverage,
         "health": {"last_event_at": last_event_at, "status": health_status},
     }
 
