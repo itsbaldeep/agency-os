@@ -349,3 +349,19 @@ privileged host state. This release changed no host configuration.
 The overall v2 goal remains active. External social/provider access and the
 separately requested TrueApply retention source deployment remain unproven;
 setup progress and successful kit export do not close those requirements.
+
+## Remaining-access audit, 2026-10-07 06:27 UTC
+
+Tracked read-only provider recheck task 470 completed against TrueApply's saved
+configuration. Verification again reports `source_unavailable`, `http_403`,
+`authenticated=false` and `sender_verified=false`, checked at
+`2026-10-07T06:27:12.350285+00:00`. Sending remains disabled. The existing human
+alert `atr_20261004T163643Z_3cccb453d1f6` was updated with this fresh evidence;
+it requests provider-console API/IP-access review without inferring the cause.
+
+The full objective cannot be accepted from the local test results alone. Social
+provider authorization, source-owned consent/suppression and delivery evidence,
+and the separately requested TrueApply source deployment remain required.
+Account setup drafts and launch kits are ready for the owner in each channel
+workspace. No new deployment, recipient query, publication, schedule or send was
+performed by this audit.
