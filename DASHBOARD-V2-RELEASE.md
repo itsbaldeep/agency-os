@@ -294,3 +294,58 @@ five channel rows, without truncation or dropped rows. Its first-party source
 remains unavailable pending the separately requested source deployment.
 Both measurement pages returned 200 and rendered the fresh journey evidence.
 No client runtime, collection schedule, publication or campaign send changed.
+
+## Channel identity and launch-kit bridge, verified 2026-10-07 UTC
+
+Dashboard `abebc55` is deployed. Core `ca954bd` contributes additive migration
+024 and one byte-verified runtime module, `marketing_channel_identity.py`.
+The remaining core runtime stays at its previously documented scoped release.
+There was no worker restart. Empty task/campaign queues were checked again
+immediately before deployment and after verification.
+
+Channel onboarding now applies suggested identity text to the local form only
+after an explicit operator action. Avatar and banner selections retain exact
+brand-owned work references and image hashes. Copy-only source revisions preserve
+unchanged saved selections; new selections require the current source revision.
+Reads reject symlinks, non-regular files, cross-brand references, oversized images,
+invalid MIME types and changed bytes. Owner setup remains separate from provider
+verification and publication approval.
+
+The private launch ZIP includes saved identity, selected images, setup guidance
+and complete bounded draft copy with work IDs, revisions and planned dates.
+CSV formula escaping covers leading whitespace. Stale selected images and invalid
+draft bodies fail closed instead of producing a misleading partial kit.
+
+Acceptance: core suite 369 passed, two skipped; dashboard suite 156 passed, one
+skipped, including the built image using the actual runtime script dependency.
+Eight rollback-only PostgreSQL fixtures passed, proving selection, reload,
+copy-only revision reuse, long copy export and changed-byte rejection. Independent
+review accepted the final changes. Browser checks at 1440 and 390 pixels verified
+explicit draft application and submitted asset references without overflow or
+script errors. Live read-only checks returned 200 for all eight channel setup
+pages and private Instagram launch kits for both brands 27 and 31. No actual
+brand identity selections, account creation, publication or sends were performed.
+
+Live dashboard image:
+`sha256:7a33f066e7a4ab54c669a0fed29c80baba25bea430c8bb5b86f2cd686508952d`.
+Runtime helper SHA256:
+`ed8d7950181739b9fdb2799d18557d6bbddec284f99257dacdae45d3a326e189`.
+Recovery checkpoints:
+`/home/agency/backups/releases/channel-onboarding-20261006T033549Z`.
+The prior running image was no longer taggable; rollback image
+`agency-dashboard:before-channel-onboarding-20261006` was rebuilt from committed
+dashboard source `5124dbe`, with current base/dependencies, rather than claimed
+as an identical historical image. The additive schema and unused helper can
+remain in place if reverting the dashboard.
+
+Core recovery bundles were verified on October 6 and again before the October 7
+container replacement. The latter bundle is
+`/home/agency/backups/core/core-backup-20261007T062254Z.tar.gz`, SHA256
+`f873c3d693c9c5c04d301a29641c950bff39e905edeff3a457ffb6236c8d5a4a`.
+Its database, credentials, object storage and configuration components verified;
+privileged host-state export was absent. The October 6 bundle includes verified
+privileged host state. This release changed no host configuration.
+
+The overall v2 goal remains active. External social/provider access and the
+separately requested TrueApply retention source deployment remain unproven;
+setup progress and successful kit export do not close those requirements.
