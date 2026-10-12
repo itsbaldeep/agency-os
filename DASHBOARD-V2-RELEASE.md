@@ -423,3 +423,31 @@ zero restarts. Its image is
 `sha256:aed05a5990b513a5737c21daff69df2dce1089436f50eea8e0ba2c127bd12d16`;
 rollback tag `agency-dashboard:before-report-wrap-20261012` retains the prior
 running image. Task queues were empty before and after the dashboard replacement.
+
+
+## Truthful crawl failure evidence, 2026-10-12
+
+Core commit `931dd7b` separates confirmed HTTP 4xx/5xx broken links from
+unverified fetch failures. Production fetch status is preserved; bounded safe
+error categories identify failed checks without raw exception text. New reports
+retain partial coverage and show `unverified_internal_link` findings rather than
+claiming that an unknown status proves a broken link. Historical audits remain
+immutable. Parser version is `seo-parser-3`.
+
+Focused SEO tests: 28 passed. Independent review accepted the classification and
+existing worker counter semantics; 50 worker workflow tests passed. The full
+core suite ran 373 tests successfully, with two skips. Deployment copied only
+the committed SEO collector, byte-verified it and deliberately restarted the
+worker after confirming empty task queues. Recovery is
+`/home/agency/backups/releases/crawl-evidence-20261012T082607Z`. Unrelated dirty
+core files remain excluded. Fresh tracked TrueApply measurement task 509 was
+queued through the dashboard for live acceptance.
+
+
+Live acceptance: task 509 completed as audit 79, captured at
+`2026-10-12T08:26:35.238026+00:00`, using `seo-parser-3`. Nine pages, zero
+confirmed broken links and one unverified `body_too_large` fetch are recorded.
+Findings are `missing_jsonld` and `unverified_internal_link`; crawl remains
+partial. Both brands' measurement/lifecycle browser checks at 1440 and 390 pixels
+passed again without overflow or script errors. Worker is active and task queues
+are empty; no restart orphans require requeueing. Provider access remains pending.
