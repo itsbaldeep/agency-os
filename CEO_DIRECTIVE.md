@@ -340,3 +340,13 @@ and a blocked email outbox; actual provider wiring and sends remain deferred.
 The owner authorizes configuring the owned TrueApply GA4 property once Editor
 access is granted. Questions during active work are queued follow-ups and do
 not end the authorized task unless the owner explicitly pauses or redirects it.
+
+## TrueApply dashboard marketing integration, owner approval 2026-10-12
+
+The owner approved the scoped integration prepared in TrueApply PR 42, including
+review, merge, tested deployment and brand-owned source credential wiring. This
+supersedes the earlier deferral for this integration only. Revalidate the current
+production revision and all required checks before deployment. Preserve existing
+engagement behavior and isolation; do not enable new campaign schedules or sends.
+Each campaign send still requires separate exact-action approval. Approval does
+not establish provider access or social-account ownership; verify those separately.
