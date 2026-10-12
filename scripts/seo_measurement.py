@@ -13,7 +13,7 @@ import public_fetch
 MAX_PAGES, MAX_BYTES, TIMEOUT, MIN_DELAY = 50, 1_000_000, 15, .2
 USER_AGENT = "AgencyOS SEO Measurement/1.0 (+https://deployden.tech)"
 SERVICE_ACCOUNT_FILE = "/home/agency/.config/agency/gsc-service-account.json"
-PARSER_VERSION = "seo-parser-2"
+PARSER_VERSION = "seo-parser-3"
 
 
 RETENTION_KEYS = (
@@ -24,6 +24,14 @@ RETENTION_KEYS = (
     "email_spam", "email_suppressed", "email_unsubscribed", "email_eligible",
 )
 STAGE_KEY = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+
+
+class _FetchFailure(Exception):
+    """A safe fetch failure with an optional confirmed HTTP error status."""
+
+    def __init__(self, error, *, status=None):
+        self.error = error if isinstance(error, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", error) else "fetch_failed"
+        self.status = status if isinstance(status, int) and not isinstance(status, bool) and 400 <= status <= 599 else None
 
 
 def _safe_aggregate_counts(value, *, limit=50):
@@ -344,7 +352,7 @@ def _fetch(url, max_bytes=MAX_BYTES, timeout=TIMEOUT, fetcher=None):
     result = public_fetch.fetch(url, max_bytes=max_bytes, timeout=timeout,
                                 return_final_url=True)
     if not result.get("ok"):
-        raise ValueError(result.get("error") or "public fetch failed")
+        raise _FetchFailure(result.get("error") or "fetch_failed", status=result.get("status"))
     return (result.get("status", 200), result.get("body", b""),
             result.get("final_url") or url, result.get("content_type", ""))
 
@@ -377,7 +385,7 @@ def crawl(start,max_pages=MAX_PAGES,fetcher=None,sleep=time.sleep):
                 doc=parse_sitemap_document(body,origin); sitemap_members.update(doc["urls"]); sitemap_status="available"
             else: unavailable.append(sm)
         except Exception: unavailable.append(sm)
-    queue=list(dict.fromkeys([origin]+sorted(sitemap_members))); referrers={u: ("sitemap" if u != origin else origin) for u in queue}; seen=set(); final_seen=set(); pages=[]; broken=[]; excluded=[]; last=0
+    queue=list(dict.fromkeys([origin]+sorted(sitemap_members))); referrers={u: ("sitemap" if u != origin else origin) for u in queue}; seen=set(); final_seen=set(); pages=[]; broken=[]; fetch_failures=[]; excluded=[]; last=0
     while queue and len(pages)<cap:
         url=queue.pop(0)
         if url in seen: continue
@@ -410,9 +418,14 @@ def crawl(start,max_pages=MAX_PAGES,fetcher=None,sleep=time.sleep):
                 if same_origin(link,origin) and link not in seen:
                     referrers.setdefault(link, url); queue.append(link)
                 elif not same_origin(link,origin): excluded.append({"url":link,"reason":"external"})
-        except Exception as exc: last=time.monotonic(); broken.append({"url":url,"source_url":referrers.get(url,origin),"status":None,"error":type(exc).__name__})
-    page_status = "unavailable" if not pages else ("partial" if broken or unavailable else "available")
-    result = {"status":page_status,"pages":pages,"broken_links":broken,"robots":{"status":"available" if robots_url not in unavailable else "unavailable"},"sitemap":{"status":sitemap_status,"members":sorted(sitemap_members),"unavailable":sorted(set(unavailable)-{robots_url})},"excluded":excluded,"bounded":{"max_pages":cap,"max_bytes":MAX_BYTES,"timeout":TIMEOUT,"min_delay":MIN_DELAY,"parser_version":PARSER_VERSION,"page_cap_reached":len(pages)>=cap and bool(queue),"queued_count":len(queue)}}
+        except _FetchFailure as exc:
+            last=time.monotonic()
+            item={"url":url,"source_url":referrers.get(url,origin),"status":exc.status,"error":exc.error}
+            (broken if exc.status is not None else fetch_failures).append(item)
+        except Exception as exc:
+            last=time.monotonic(); fetch_failures.append({"url":url,"source_url":referrers.get(url,origin),"status":None,"error":type(exc).__name__})
+    page_status = "unavailable" if not pages else ("partial" if broken or fetch_failures or unavailable else "available")
+    result = {"status":page_status,"pages":pages,"broken_links":broken,"fetch_failures":fetch_failures,"robots":{"status":"available" if robots_url not in unavailable else "unavailable"},"sitemap":{"status":sitemap_status,"members":sorted(sitemap_members),"unavailable":sorted(set(unavailable)-{robots_url})},"excluded":excluded,"bounded":{"max_pages":cap,"max_bytes":MAX_BYTES,"timeout":TIMEOUT,"min_delay":MIN_DELAY,"parser_version":PARSER_VERSION,"page_cap_reached":len(pages)>=cap and bool(queue),"queued_count":len(queue)}}
     # Keep the established crawl keys unchanged and append the independently
     # bounded content-link inventory.  The injected fetcher is forwarded so
     # deterministic callers do not unexpectedly access the network.
@@ -454,6 +467,10 @@ def make_findings(crawl_result):
             for u in urls: add("duplicate_description",u,value,"unique description")
     for broken in crawl_result.get("broken_links",[]):
         add("broken_internal_link",broken["url"],{"source_url":broken.get("source_url"),"status":broken.get("status"),"error":broken.get("error")},"2xx")
+    for failure in crawl_result.get("fetch_failures", []):
+        add("unverified_internal_link", failure["url"],
+            {"source_url": failure.get("source_url"), "status": failure.get("status"), "error": failure.get("error")},
+            "confirmed 2xx or 4xx/5xx response")
     for broken in (crawl_result.get("link_audit") or {}).get("external_links", []):
         if broken.get("state") == "broken":
             add("broken_external_link", broken.get("url", ""),

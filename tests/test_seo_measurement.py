@@ -191,6 +191,37 @@ class SeoMeasurementTests(unittest.TestCase):
         result = seo.crawl("https://example.test", max_pages=3, fetcher=fetch, sleep=lambda _: None)
         self.assertEqual(result["broken_links"][0]["url"], "https://example.test/missing")
         self.assertEqual(result["broken_links"][0]["source_url"], "https://example.test/")
+        self.assertEqual(result["broken_links"][0]["status"], 404)
+        self.assertEqual(result["fetch_failures"], [])
+
+    def test_failed_page_fetch_is_unverified_and_not_broken(self):
+        pages = {
+            "https://example.test/robots.txt": (200, b"User-agent: *\nAllow: /"),
+            "https://example.test/sitemap.xml": (404, b""),
+            "https://example.test/": (200, b'<title>Home</title><a href="/blocked">blocked</a>'),
+        }
+
+        def fetch(url):
+            if url == "https://example.test/blocked":
+                raise OSError("private transport detail")
+            return pages[url]
+
+        result = seo.crawl("https://example.test/", max_pages=2, fetcher=fetch, sleep=lambda _: None)
+        self.assertEqual(result["broken_links"], [])
+        self.assertEqual(result["fetch_failures"][0]["url"], "https://example.test/blocked")
+        self.assertIsNone(result["fetch_failures"][0]["status"])
+        self.assertEqual(result["status"], "partial")
+        findings = seo.make_findings(result)
+        self.assertTrue(any(item["rule"] == "unverified_internal_link" for item in findings))
+
+    def test_public_fetch_http_error_keeps_confirmed_status(self):
+        with mock.patch.object(seo.public_fetch, "fetch", return_value={
+            "ok": False, "status": 404, "error": "http_status_404",
+        }):
+            with self.assertRaises(seo._FetchFailure) as error:
+                seo._fetch("https://example.test/missing")
+        self.assertEqual(error.exception.status, 404)
+        self.assertEqual(error.exception.error, "http_status_404")
 
     def test_nested_sitemap_and_path_robots(self):
         pages = {
