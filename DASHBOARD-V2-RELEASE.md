@@ -365,3 +365,61 @@ and the separately requested TrueApply source deployment remain required.
 Account setup drafts and launch kits are ready for the owner in each channel
 workspace. No new deployment, recipient query, publication, schedule or send was
 performed by this audit.
+
+
+## Approved TrueApply source integration, 2026-10-12
+
+The owner's approval authorized review, merge and deployment of TrueApply PR42
+and scoped source credential references. Marketing sends remain separately
+approved exact actions. This supersedes the earlier source deployment deferral.
+
+PR42 merged as `028cd497d208198929e7859d5bf422bad31f6906`, with the exact reviewed
+implementation tree `bd7d29d`. GitHub CI run `38220511026` passed Engine, Web and
+container smoke checks. Local isolated PostgreSQL validation passed 581 tests
+(two optional checks skipped); Web passed 37 tests, type checking and production
+build. Dependency audit reported zero vulnerabilities. Independent review accepted
+the final source changes.
+
+The production checkout was fast-forwarded without modifying the dirty canonical
+engagement source. A verified encrypted recovery bundle is retained at
+`/home/agency/engagements/trueapply/private/backups/dashboard-marketing-20261012T075435Z`.
+It includes database recovery verification, private environment and prior source
+and image checkpoints. There were zero active workflows and zero duplicate
+normalized delivery receipt groups before deployment. Migrations 034 through 037
+are applied. API and Web passed health checks; the worker is running with zero
+restarts and has no configured health probe. The core worker was not restarted.
+
+Only scoped marketing read and campaign credential references were installed.
+Brand 31 and the validated configuration digest match the source. Campaign
+dispatch and send flags are false. Unauthorized aggregate reads return 404;
+authenticated reads return schema 1. Malformed preview requests return 400 and
+disabled dispatch returns 404. No campaign, schedule, publication or send was
+performed by this release.
+
+Tracked connection tasks 500 and 501 completed. Fresh measurement task 502,
+audit 77, captured TrueApply at `2026-10-12T08:05:16.843818+00:00`: GA4, GSC,
+PageSpeed, journey and first-party retention are available. Crawl is partial,
+with one ValueError fetch failure across nine pages; this does not establish a
+404 or a deployment regression. Deployden task 503, audit 78, captured at
+`2026-10-12T08:05:44.313192+00:00`, reports all six collected sources available.
+Both brand report and lifecycle routes, both public sites and TrueApply app
+health returned 200.
+
+Fresh tracked Brevo verification task 508 at
+`2026-10-12T08:08:33.172182+00:00` still reports HTTP 403,
+authenticated=false and sender_verified=false. Human alert
+`atr_20261004T163643Z_3cccb453d1f6` now reflects the successful source deployment
+and remaining provider-console API/IP-access check. Social provider access and
+email authentication remain external acceptance gates for the overall v2 goal.
+
+
+The live data check also exposed long technical finding URLs extending the mobile
+page. Dashboard commit `196915b` adds scoped text wrapping and a source coverage
+scroll viewport. The final built image ran 157 dashboard tests successfully
+(one skipped). Live browser checks of both brands' measurement and lifecycle
+pages at 1440 and 390 pixels found no page overflow or JavaScript errors and
+verified rendered TrueApply retention evidence. The dashboard is running with
+zero restarts. Its image is
+`sha256:aed05a5990b513a5737c21daff69df2dce1089436f50eea8e0ba2c127bd12d16`;
+rollback tag `agency-dashboard:before-report-wrap-20261012` retains the prior
+running image. Task queues were empty before and after the dashboard replacement.
