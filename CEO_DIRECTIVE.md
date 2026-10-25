@@ -318,3 +318,30 @@ integration. This authorization does not permit publishing another article,
 creating new schedules, sending campaigns or promising Google indexing. Google
 URL Inspection reads indexed-version status; manual Request indexing remains a
 Search Console action where no supported general-page API is available.
+
+## TrueApply autonomous marketing, owner direction 2026-10-25
+
+The owner grants ongoing authority to plan, research, draft, independently review,
+and publish TrueApply blog posts and product-help articles, and to schedule the
+work without returning for individual article approval. This supersedes the
+first-ten and per-article human publication gates for TrueApply only. Keep the
+tracked revision-bound approval/publication controls, source evidence, asset
+review, privacy, independent verification, idempotence and public readback. The
+agent records the standing owner authority at each publication approval.
+
+Run daily after the existing measurement and prepare a full report for the owner's
+daily “hi”: results, completed work, next actions and unavoidable input/access
+needs. Default cadence is up to two articles and one help article per rolling
+seven days, at most one new publication per run. Quality and observed need govern
+publication; the cadence is a ceiling, not a quota. The owner also permits
+scheduling the bounded marketing work. This is not authority to revive retired
+core deploy jobs, bypass sandbox/permissions, expose credentials, modify unrelated
+projects or deploy/restart code autonomously.
+
+Owned-account social publication may proceed only with verified account ownership,
+access, destination and a working integration. Prepare useful distribution drafts
+when access is missing. Paid spend, financial commitments, unsolicited outreach,
+community posting without destination permission, and email/SMS/WhatsApp sends
+remain outside this grant. Report missing access rather than repeatedly asking
+for already-granted article approval. Operational reports live on the dashboard;
+failures and human requirements remain explicit rather than silent success.

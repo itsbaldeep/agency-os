@@ -322,3 +322,19 @@ Root and blog sitemaps were accepted; all three articles are discovered but not
 indexed as of 16:36 UTC. Task 451/audit 65 resolves all four description warnings.
 Release task 448 and the latest audit hold validation/recovery evidence.
 No additional article, campaign or schedule was authorized by this release.
+
+## TrueApply autonomous marketing, authorized 2026-10-25
+
+The owner grants ongoing blog/help publication and scheduling authority. The new
+brand-configured daily operator is separate from retired core deployment jobs.
+It runs after daily measurement, reuses tracked content/approval/publication gates,
+records each UTC-day result on Operations and limits itself to one public item per
+run, up to two articles and one help article per rolling week. Its prompt prohibits
+code deployment, financial commitments and unverified-account sends. Missing
+integration access remains visible and does not stop independent owned-content work.
+
+Conversion review task551 verifies current live worktree instrumentation, GA4 key
+event definitions and isolated cohort SQL. Marketing drafts13-15 and community
+checklist16 prepare distribution of the existing guides. Live social posting needs
+verified owned account access. Browser verification and schedule installation must
+be confirmed by receipts before the daily operator is described as running.
