@@ -29,3 +29,5 @@
 * * * * * /home/agency/agency-os/scripts/run-job.sh 16 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
 # Opted-in owned growth measurement, daily 06:30 UTC. No publish/deploy actions.
 30 6 * * * /home/agency/agency-os/scripts/run-job.sh 17 scheduled >> /home/agency/agency-os/logs/jobs.log 2>&1
+# Owner-authorized TrueApply marketing operator, after measurement. Bounded daily task.
+15 7 * * * /usr/bin/env PATH=/home/agency/.nvm/versions/node/v24.19.0/bin:/usr/local/bin:/usr/bin:/bin /usr/bin/python3 /home/agency/agency-os/scripts/owned_marketing_run.py --brand-id 31 >> /home/agency/agency-os/logs/owned-marketing.log 2>&1

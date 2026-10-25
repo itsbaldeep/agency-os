@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "brands": {
+    "31": {
+      "enabled": true,
+      "project_id": 30,
+      "workdir": "/home/agency/.local/share/agency-marketing/operators/31",
+      "prompt_file": "owned-marketing/trueapply.md",
+      "timeout_seconds": 3600,
+      "schedule_utc": "15 7 * * *",
+      "authority_date": "2026-10-25"
+    }
+  }
+}
