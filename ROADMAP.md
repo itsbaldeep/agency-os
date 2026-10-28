@@ -338,3 +338,8 @@ event definitions and isolated cohort SQL. Marketing drafts13-15 and community
 checklist16 prepare distribution of the existing guides. Live social posting needs
 verified owned account access. Browser verification and schedule installation must
 be confirmed by receipts before the daily operator is described as running.
+
+TrueApply operator activation verified2026-10-28: installed daily07:15UTC cron fired
+task561 but Codex capacity caused failure before content writes. Current session
+published reviewed help24 through task563. Task551 records limitations, remaining
+attribution browser verification and social access. No runtime restart occurred.
