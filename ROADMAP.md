@@ -343,3 +343,12 @@ TrueApply operator activation verified2026-10-28: installed daily07:15UTC cron f
 task561 but Codex capacity caused failure before content writes. Current session
 published reviewed help24 through task563. Task551 records limitations, remaining
 attribution browser verification and social access. No runtime restart occurred.
+
+## Tracked editorial editing repair, 2026-11-06
+
+Owner-directed repair adds preview-bound prose/metadata and outline saves with
+snapshots. The daily operator gets the exact API contract and must resume actual
+editorial work rather than repeatedly review unsuitable outlines. Managed media
+and data visuals retain dedicated editors. Published/publishing/approved states,
+active composition/publication and saved composition checkpoints are protected.
+Task600 owns deployment and a real pending-draft publication verification.
