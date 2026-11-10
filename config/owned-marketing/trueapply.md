@@ -33,18 +33,36 @@ runner during an unattended marketing run. Never enable retired jobs8-12.
    licenses duplicate publication. Existing draft27 duplicates the published
    tailoring topic; draft28 is product-help-like and contains unsuitable vendor
    statistics. Do not publish either unchanged.
-3. Prioritize observed demand and activation friction. The ATS guide and career
+3. Use the supported tracked editor for prose, metadata and outline corrections:
+   GET http://100.64.0.1:5001/content/ID/edit-data returns the current revision,
+   status, title, blocks and editable metadata. POST /content/ID/edit/preview with
+   JSON {revision, blocks, metadata, review_note} returns preview_digest and
+   quality. POST /content/ID/edit with the identical payload plus preview_digest
+   saves a content_text_edit audit task. Send the same-origin Origin header.
+   The human UI is /content/ID/edit. Metadata supports meta_title,
+   meta_description, custom_excerpt, target_keyword and help_slug. Existing
+   source facts cannot be fabricated; remove_fact_ids may remove unused facts.
+   Media, charts, tables and callouts are preserved by the text editor. Only
+   active draft/outline items can be edited. Do not edit published content or
+   erase composition checkpoints. Read back the saved preview before approval.
+   These routes are authorized editorial work, not code deployment. A fresh
+   individual human approval is not required. If a genuinely new core defect
+   prevents an action, create one concrete tracked work item, then do independent
+   useful work. Never spend successive days reporting the same missing route.
+   If an outline is unsuitable or duplicates published content, choose a distinct
+   research-backed topic rather than repeatedly reviewing the rejected outline.
+4. Prioritize observed demand and activation friction. The ATS guide and career
    change summary have impressions; review query alignment before changing titles.
    Content should answer a distinct useful question with concrete examples rather
    than repeat the same guide. Distribution drafts13-15 and checklist16 exist in
    dashboard marketing work items. Use them and avoid duplicate drafts.
-4. Cadence: plan up to two new articles and one new help article in any rolling
+5. Cadence: plan up to two new articles and one new help article in any rolling
    seven days, with at most one new public item per run. Tuesday/Friday are preferred
    article days; Wednesday is preferred help day. A missed slot may be completed on
    the next run. Do not publish simply to fill a quota. On other days research,
    improve drafts, verify links/metrics and prepare distribution. Do not exceed this
    cadence or initiate more than one new research/outline/compose chain per day.
-5. Use the content-pipeline skill and existing tracked tasks for research/outline/
+6. Use the content-pipeline skill and existing tracked tasks for research/outline/
    compose. Main agent may perform the outline/editorial review under standing
    owner authority without another human checkpoint. Use bounded independent
    verification for controlled publication. Preserve checkpoints and token ceilings;
@@ -53,18 +71,18 @@ runner during an unattended marketing run. Never enable retired jobs8-12.
    require exact verified source evidence; clearly label hypothetical examples.
    Help articles require current product behavior verification, ideally isolated
    browser/contract checks. Do not create real customer accounts or contact users.
-6. Before publication verify content quality, meaningful complete sections, no
+7. Before publication verify content quality, meaningful complete sections, no
    placeholders, real-image rights/managed storage if used, alt/caption, canonical
    internal URLs, SEO title/description/excerpt and clear action. Select useful
    original visuals only when they improve understanding; do not add decorative
    quotas or block text-only content waiting for an image. Preserve article body
    and feature-image precedence. Publish via dashboard revision-bound /content/id/
    approve with instructions citing the 2026-10-25 standing authorization.
-7. Verify actual public200, exact title/description/canonical, Article JSON-LD,
+8. Verify actual public200, exact title/description/canonical, Article JSON-LD,
    image200 if present, sitemap inclusion and indexed-version URL inspection.
    Google indexing may lag. Do not use unsupported request-indexing APIs. Leave a
    truthful pending receipt rather than claiming success.
-8. Social distribution may be prepared freely. Actual social posting is allowed
+9. Social distribution may be prepared freely. Actual social posting is allowed
    only on a verified owned TrueApply account through an already-working approved
    integration with an unambiguous destination, under this marketing authority.
    Missing account ownership/access is a blocker, not permission to create accounts
@@ -73,11 +91,14 @@ runner during an unattended marketing run. Never enable retired jobs8-12.
    subscriptions or financial commitments. No paid-provider keys or raw application
    models outside their existing authorized pipeline. No arbitrary shell/sandbox
    bypasses or self-expansion of authority.
-9. Record completed work, artifacts, live URLs, tests and blockers in tracked
+10. Record completed work, artifacts, live URLs, tests and blockers in tracked
    dashboard tasks. Add a concise material trace only for actual results/decisions.
    Use /alerts for unavoidable human input. Do not contact the owner or other people
    by email/Discord unless the existing explicit alert workflow applies. A routine
-   report stays on the dashboard for the owner's daily check-in.
+   report stays on the dashboard for the owner's daily check-in. The operator
+   sandbox deliberately cannot write core trace/state files. Use the dashboard
+   report/task as the durable result when trace access is unavailable; this is
+   not a reason to stop editorial work or ask to widen filesystem permissions.
 
 ## Required final report
 

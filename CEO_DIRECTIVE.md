@@ -345,3 +345,14 @@ community posting without destination permission, and email/SMS/WhatsApp sends
 remain outside this grant. Report missing access rather than repeatedly asking
 for already-granted article approval. Operational reports live on the dashboard;
 failures and human requirements remain explicit rather than silent success.
+
+## TrueApply editorial workflow repair, owner direction 2026-11-06
+
+The owner explicitly directed the main agent to unblock the stalled autonomous
+marketing workflow. This authorizes a bounded, tested dashboard change and
+purposeful deployment adding tracked prose, metadata and outline edits. Preserve
+revision-bound preview/save, edit snapshots, managed assets and publication gates.
+The daily operator may use those routes under its existing editorial authority.
+It must not return repeatedly asking the owner to prioritize a known internal
+workflow repair or treat inaccessible local trace files as a publication blocker.
+This repair does not expand unattended code-deployment or paid-spend authority.
