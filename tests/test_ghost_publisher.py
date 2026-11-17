@@ -19,9 +19,10 @@ class VoidHTMLTests(unittest.TestCase):
 
 
 class FakeClient:
-    def __init__(self, existing=None):
+    def __init__(self, existing=None, published_fields=None):
         self.calls = []
         self.existing = existing
+        self.published_fields = published_fields or {}
         self.post = None
 
     def request(self, method, path, payload=None):
@@ -38,6 +39,7 @@ class FakeClient:
             return {"posts": [self.post]}
         if method == "PUT":
             self.post["status"] = "published"
+            self.post.update(self.published_fields)
             return {"posts": [{"id": "ghost-1", "status": "published"}]}
         raise AssertionError((method, path))
 
@@ -69,6 +71,49 @@ class GhostPublisherTests(unittest.TestCase):
         self.assertIn("agency-content-card", html)
         self.assertIn("pipeline-article", html)
         self.assertIn("Keep the evidence visible", html)
+
+    def test_fresh_publication_receipt_uses_verified_ghost_fields(self):
+        fake = FakeClient(published_fields={
+            "published_at": "2026-11-17T01:45:12.123+05:30",
+            "url": "https://trueapply.in/blog/a-useful-article/",
+        })
+        result = publish(item(), {"endpoint": "http://localhost:2370",
+                                  "base_url": "https://trueapply.in/blog"},
+                         content_digest(item()), client=fake)
+        self.assertEqual(result["published_at"], "2026-11-16T20:15:12.123Z")
+        self.assertEqual(result["title"], "A useful article")
+        self.assertEqual(result["url"], "https://trueapply.in/blog/a-useful-article/")
+
+    def test_idempotent_publication_receipt_reads_existing_ghost_fields(self):
+        marker = '#agency-content-23-' + content_digest(item())[:16]
+        fake = FakeClient({'id': 'ghost-1', 'tags': [{'name': marker}],
+                           **_ghost_metadata(item())})
+        fake.post = {'id': 'ghost-1', 'title': 'Verified Ghost title',
+                     'html': render_pipeline_html(item()), 'status': 'published',
+                     'published_at': '2026-11-17T01:45:12.456Z',
+                     'url': 'https://trueapply.in/blog/a-useful-article/',
+                     **_ghost_metadata(item())}
+        result = publish(item(), {'base_url': 'https://trueapply.in/blog'},
+                         content_digest(item()), client=fake)
+        self.assertEqual(result["published_at"], "2026-11-17T01:45:12.456Z")
+        self.assertEqual(result["title"], "Verified Ghost title")
+
+    def test_invalid_or_missing_ghost_time_is_not_fabricated(self):
+        fake = FakeClient(published_fields={"published_at": "not-a-time"})
+        result = publish(item(), {'base_url': 'https://trueapply.in/blog'},
+                         content_digest(item()), client=fake)
+        self.assertNotIn("published_at", result)
+        fake = FakeClient()
+        result = publish(item(), {'base_url': 'https://trueapply.in/blog'},
+                         content_digest(item()), client=fake)
+        self.assertNotIn("published_at", result)
+
+    def test_prepare_receipt_has_no_publication_time(self):
+        result = publish(item(), {'base_url': 'https://trueapply.in/blog'},
+                         content_digest(item()), publish=False, client=FakeClient())
+        self.assertEqual(result["status"], "draft")
+        self.assertNotIn("published_at", result)
+        self.assertNotIn("url", result)
 
     def test_metadata_defaults_and_reviewed_values_are_sent_and_read_back(self):
         value = dict(item(), meta_title="Reviewed title", meta_description="Reviewed description",

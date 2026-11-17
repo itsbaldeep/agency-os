@@ -8,7 +8,18 @@
       "prompt_file": "owned-marketing/trueapply.md",
       "timeout_seconds": 3600,
       "schedule_utc": "15 7 * * *",
-      "authority_date": "2026-10-25"
+      "authority_date": "2026-10-25",
+      "calendar": {
+        "timezone": "Asia/Kolkata",
+        "projection_days": 35,
+        "slots": [
+          {"kind": "article", "weekday": 1, "time_utc": "07:15"},
+          {"kind": "help", "weekday": 2, "time_utc": "07:15"},
+          {"kind": "article", "weekday": 4, "time_utc": "07:15"}
+        ],
+        "weekly_limits": {"article": 2, "help": 1},
+        "max_per_day": 1
+      }
     }
   }
 }
