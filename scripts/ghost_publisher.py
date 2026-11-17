@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import copy
+from datetime import datetime, timezone
 import hashlib
 import hmac
 import html
@@ -447,11 +448,53 @@ def _search_discovery_receipt(destination: dict, published_url: str) -> dict | N
         return {"status": "source_unavailable", "error": type(exc).__name__}
 
 
+def _normalized_published_at(value: object) -> str | None:
+    """Return an aware, canonical ISO timestamp from Ghost, when valid."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    normalized = parsed.astimezone(timezone.utc).isoformat(timespec="milliseconds")
+    return normalized.replace("+00:00", "Z")
+
+
+def _verified_public_url(destination: dict, verified_post: dict | None,
+                         fallback: str) -> str:
+    """Use Ghost's canonical URL only when it stays on the configured blog."""
+    candidate = verified_post.get("url") if isinstance(verified_post, dict) else None
+    configured = destination.get("public_url") or destination.get("base_url") or ""
+    try:
+        expected = urllib.parse.urlsplit(str(configured))
+        actual = urllib.parse.urlsplit(str(candidate))
+        prefix = expected.path.rstrip("/") or "/"
+        path_ok = actual.path == prefix or actual.path.startswith(prefix.rstrip("/") + "/")
+        if (actual.scheme == "https" and expected.scheme == "https" and
+                actual.hostname == expected.hostname and not actual.username and
+                not actual.password and path_ok):
+            return urllib.parse.urlunsplit((actual.scheme, actual.netloc,
+                                            actual.path, "", ""))
+    except (TypeError, ValueError):
+        pass
+    return fallback
+
+
 def _published_result(destination: dict, post_id: str, slug: str, digest: str,
-                      published_url: str) -> dict:
+                      published_url: str, verified_post: dict | None = None) -> dict:
     result = {"ok": True, "post_id": post_id, "slug": slug, "digest": digest,
               "status": "published", "url": published_url}
-    receipt = _search_discovery_receipt(destination, published_url)
+    if isinstance(verified_post, dict):
+        title = verified_post.get("title")
+        if isinstance(title, str) and title.strip():
+            result["title"] = title
+        published_at = _normalized_published_at(verified_post.get("published_at"))
+        if published_at is not None:
+            result["published_at"] = published_at
+        result["url"] = _verified_public_url(destination, verified_post, published_url)
+    receipt = _search_discovery_receipt(destination, result["url"])
     if receipt is not None:
         result["search_discovery"] = receipt
     return result
@@ -529,7 +572,7 @@ def publish(item: dict, destination: dict, approved_digest: str, publish: bool =
         if not str(public).startswith("https://"):
             raise GhostPublishError("published Ghost result requires an HTTPS base_url")
         return _published_result(destination, post_id, slug, digest,
-                                 str(public).rstrip("/") + "/" + slug + "/")
+                                 str(public).rstrip("/") + "/" + slug + "/", checked)
     updated_at = checked.get("updated_at") if checked else None
     payload = {"posts": [{"updated_at": updated_at, "status": "published"}]}
     client.request("PUT", "/ghost/api/admin/posts/" + urllib.parse.quote(str(post_id), safe="") + "/", payload)
@@ -543,4 +586,4 @@ def publish(item: dict, destination: dict, approved_digest: str, publish: bool =
     if not str(public).startswith("https://"):
         raise GhostPublishError("published Ghost result requires an HTTPS base_url")
     return _published_result(destination, post_id, slug, digest,
-                             str(public).rstrip("/") + "/" + slug + "/")
+                             str(public).rstrip("/") + "/" + slug + "/", final)
